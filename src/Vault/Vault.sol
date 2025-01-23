@@ -76,7 +76,7 @@ contract LobsterVault is Ownable2Step, ERC4626, OpValidator {
 
     /**
      * @notice Verify the rebase signature and update the rebase value before depositing assets
-     * 
+     *
      * @param assets - the value of the assets to be deposited
      * @param receiver - the address that will receive the minted shares
      * @param rebaseData - the rebase data to be validated
@@ -95,7 +95,7 @@ contract LobsterVault is Ownable2Step, ERC4626, OpValidator {
 
     /**
      * @notice Verify the rebase signature and update the rebase value before minting shares
-     * 
+     *
      * @param shares - the amount of shares to mint
      * @param receiver - the address that will receive the minted shares
      * @param rebaseData - the rebase data to be validated
@@ -114,7 +114,7 @@ contract LobsterVault is Ownable2Step, ERC4626, OpValidator {
 
     /**
      * @notice Verify the rebase signature and update the rebase value before withdrawing assets
-     * 
+     *
      * @param assets - the amount of assets to withdraw
      * @param receiver - the address that will receive the withdrawn assets
      * @param owner - the address of the owner of the shares to burn
@@ -135,7 +135,7 @@ contract LobsterVault is Ownable2Step, ERC4626, OpValidator {
 
     /**
      * @notice Verify the rebase signature and update the rebase value before redeeming shares
-     * 
+     *
      * @param shares - the amount of shares to redeem
      * @param receiver - the address that will receive the withdrawn assets
      * @param owner - the address of the owner of the shares to burn
@@ -202,7 +202,8 @@ contract LobsterVault is Ownable2Step, ERC4626, OpValidator {
     }
 
     /**
-     * @notice execute a withdraw without requiring a rebase but burns up to WITHDRAWAL_PENALTY/100 % of the shares to protect against value loss for the other users
+     * @notice execute a withdraw without requiring a rebase but burns up to WITHDRAWAL_PENALTY/100 % of the shares to protect against value loss for the other users.
+     * If the last rebase value was 0, there are no penalty
      */
     function _withdrawWithoutRebase(
         address caller,
@@ -211,11 +212,17 @@ contract LobsterVault is Ownable2Step, ERC4626, OpValidator {
         uint256 assets,
         uint256 shares
     ) internal virtual {
-        // compute penalty shares (ownerShares * WITHDRAWAL_PENALTY / 10000)
-        uint256 penaltyShares = Math.mulDiv(shares, WITHDRAWAL_PENALTY, 10_000);
+        // penalty shares is 0 if the last rebase value was 0
+        uint256 penaltyShares = 0;
 
-        // burn penalty shares
-        _burn(owner, penaltyShares);
+        // else compute penalty shares
+        if (valueOutsideChain > 0) {
+            // compute penalty shares (ownerShares * WITHDRAWAL_PENALTY / 10000)
+            penaltyShares = Math.mulDiv(shares, WITHDRAWAL_PENALTY, 10_000);
+
+            // burn penalty shares
+            _burn(owner, penaltyShares);
+        }
 
         revert("Not implemented");
         // todo: if needed, call a validator function to retrieve funds from third party contracts
