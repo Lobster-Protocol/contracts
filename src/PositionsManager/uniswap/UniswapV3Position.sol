@@ -9,19 +9,20 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {INonfungiblePositionManager} from "../../interfaces/uniswapV3/INonfungiblePositionManager.sol";
 import {IUniswapV3Pool} from "../../interfaces/uniswapV3/IUniswapV3Pool.sol";
 import {UniswapV3MathLib} from "./lib/UniswapV3MathLib.sol";
+import {Constants} from "../Constants.sol";
+
 
 /**
  * @title UniswapV3PositionManager
  * @author Elli610
  * @notice This contract is used to retrieve the total value (in ETH) held by a specific address in Uniswap V3. It also allows to update a user's position.
  */
-contract UniswapV3Position {
+contract UniswapV3Position is Constants {
     using Math for uint256;
 
     // uniswap v3 position manager
     INonfungiblePositionManager public immutable positionManager;
     address public immutable uniswapV3Factory;
-    address public immutable wethAddress;
 
     constructor(
         address uniswapPositionManagerAddress,

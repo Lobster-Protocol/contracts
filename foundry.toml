@@ -8,7 +8,6 @@ libs = ["lib"]
 [fmt]
 line_length = 120
 tab_width = 4
-bracket_spacing = true
 
 [profile.remapping]
 "@openzeppelin/contracts/" = "lib/openzeppelin-contracts/contracts/"

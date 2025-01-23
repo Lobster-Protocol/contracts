@@ -3,16 +3,16 @@ pragma solidity ^0.8.10;
 
 import {IAaveV3Pool} from "./lib/IAaveV3Pool.sol";
 import {IAaveOracle} from "./lib/IAaveOracle.sol";
+import {Constants} from "../Constants.sol";
 
-contract AaveV3Position {
-    IAaveV3Pool public immutable pool;
-    IAaveOracle public immutable oracle;
-    address public immutable weth;
+contract AaveV3Position is Constants {
+    IAaveV3Pool public immutable aavePool;
+    IAaveOracle public immutable aaveOracle;
 
     constructor(address _pool, address _oracle, address _weth) {
-        pool = IAaveV3Pool(_pool);
-        oracle = IAaveOracle(_oracle);
-        weth = _weth;
+        aavePool = IAaveV3Pool(_pool);
+        aaveOracle = IAaveOracle(_oracle);
+        wethAddress = _weth;
     }
 
     struct UserAssetData {
@@ -22,29 +22,39 @@ contract AaveV3Position {
         bool isCollateral;
     }
 
-    function getUserAssetData(address user, address asset) public view returns (UserAssetData memory) {
+    function getUserAssetData(
+        address user,
+        address asset
+    ) public view returns (UserAssetData memory) {
         (
             uint256 currentATokenBalance,
             uint256 currentStableDebt,
-            uint256 currentVariableDebt,
-            ,  // principalStableDebt
-            ,  // scaledVariableDebt
-            ,  // stableBorrowRate
-            ,  // liquidityRate
-            ,  // stableRateLastUpdated
+            uint256 currentVariableDebt, // principalStableDebt // scaledVariableDebt // stableBorrowRate // liquidityRate // stableRateLastUpdated
+            ,
+            ,
+            ,
+            ,
+            ,
             bool usageAsCollateralEnabled
-        ) = pool.getUserReserveData(asset, user);
+        ) = aavePool.getUserReserveData(asset, user);
 
-        return UserAssetData({
-            deposited: currentATokenBalance,
-            borrowed: currentStableDebt + currentVariableDebt,
-            collateral: usageAsCollateralEnabled ? currentATokenBalance : 0,
-            isCollateral: usageAsCollateralEnabled
-        });
+        return
+            UserAssetData({
+                deposited: currentATokenBalance,
+                borrowed: currentStableDebt + currentVariableDebt,
+                collateral: usageAsCollateralEnabled ? currentATokenBalance : 0,
+                isCollateral: usageAsCollateralEnabled
+            });
     }
 
-    function getAllUserAssets(address user) external view returns (address[] memory assets, UserAssetData[] memory data) {
-        assets = pool.getReservesList();
+    function getAllUserAssets(
+        address user
+    )
+        external
+        view
+        returns (address[] memory assets, UserAssetData[] memory data)
+    {
+        assets = aavePool.getReservesList();
         data = new UserAssetData[](assets.length);
 
         for (uint256 i = 0; i < assets.length; i++) {
@@ -52,24 +62,30 @@ contract AaveV3Position {
         }
     }
 
-    function getUserTotalCollateralAndDebt(address user) external view returns (
-        uint256 totalCollateralBase,
-        uint256 totalCollateralBaseInEth,
-        uint256 totalDebtBase,
-        uint256 healthFactor
-    ) {
+    function getUserTotalCollateralAndDebt(
+        address user
+    ) public view returns (uint256 totalCollateralBase, uint256 totalDebtBase) {
         (
-            totalCollateralBase, // 8 decimals 
-            totalDebtBase,
-            ,  // availableBorrowsBase
-            ,  // currentLiquidationThreshold
-            ,  // ltv
-            healthFactor
-        ) = pool.getUserAccountData(user);
-        
-        uint256 wethPrice = oracle.getAssetPrice(weth); // 8 decimals
-        
-        // convert the totalCollateralBase to eth
-        totalCollateralBaseInEth = (totalCollateralBase * 1e18) / wethPrice;
+            totalCollateralBase, // 8 decimals
+            totalDebtBase, // availableBorrowsBase // currentLiquidationThreshold // ltv
+            ,
+            ,
+            ,
+
+        ) = aavePool.getUserAccountData(user);
+    }
+
+    function getAaveV3NetPositionValueInETH(
+        address user
+    ) public view returns (uint256) {
+        (
+            uint256 totalCollateralBase,
+            uint256 totalDebtBase
+        ) = getUserTotalCollateralAndDebt(user);
+
+        uint256 wethPrice = aaveOracle.getAssetPrice(wethAddress); // 8 decimals
+
+        // and convert the remaining value to eth
+        return (totalCollateralBase - totalDebtBase * 1e18) / wethPrice;
     }
 }
