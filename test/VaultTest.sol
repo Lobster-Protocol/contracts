@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import "forge-std/console2.sol";
 import "../src/Vault/Vault.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {MockERC20} from "./Mocks/MockERC20.sol";
@@ -53,7 +52,6 @@ contract VaultTest is Test {
             address(positionManager),
             validTargetsAndSelectorsData
         );
-        console2.log("Vault address: ", address(vault));
 
         // Setup initial state
         asset.mint(alice, 10000 ether);
@@ -67,12 +65,9 @@ contract VaultTest is Test {
         asset.approve(address(vault), type(uint256).max);
         vm.stopPrank();
 
-        console2.log("Setup done");
         vm.startPrank(owner);
         vault.setRebaser(lobsterRebaser, true);
         vm.stopPrank();
-
-        console2.log("Rebaser set");
     }
 
     /* -------------- Helper Functions -------------- */
@@ -170,7 +165,6 @@ contract VaultTest is Test {
 
         // save the new total assets in l3
         rebaseVault(100 ether, 2);
-        console2.log("total assets: ", vault.totalAssets());
         // bob deposits 1 and 2 eth
         vm.startPrank(bob);
         vault.deposit(1 ether, bob);
@@ -298,7 +292,6 @@ contract VaultTest is Test {
 
         // save the new total assets in l3
         rebaseVault(100 ether, 2);
-        console2.log("total assets: ", vault.totalAssets());
 
         // bob mints 1 and 2 shares
         vm.startPrank(bob);
