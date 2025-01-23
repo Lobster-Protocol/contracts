@@ -75,6 +75,7 @@ contract VaultTest is Test {
         console2.log("Rebaser set");
     }
 
+    /* -------------- Helper Functions -------------- */
     function getValidRebaseData(
         address vault_,
         uint256 valueOutsideChain,
@@ -183,10 +184,302 @@ contract VaultTest is Test {
         vm.assertEq(vault.localTotalAssets(), 3.33 ether);
     }
 
-    /* -----------------------DEPOSIT WITH REBASE----------------------- */
-    /* -----------------------DEPOSIT WITH REBASE----------------------- */
+    function testDepositWithRebaseZeroAmount() public {
+        vm.startPrank(alice);
+        vault.depositWithRebase(
+            0,
+            alice,
+            getValidRebaseData(address(vault), 0, block.number + 1)
+        );
+        assertEq(vault.balanceOf(alice), 0);
+        vm.stopPrank();
+    }
 
-    /* -----------------------MINT & DEPOSIT----------------------- */
+    function testDepositWithRebaseInvalidReceiver() public {
+        vm.startPrank(alice);
+        vm.expectRevert();
+        vault.depositWithRebase(
+            1 ether,
+            address(0),
+            getValidRebaseData(address(vault), 0, block.number + 1)
+        );
+        vm.stopPrank();
+    }
+
+    function testDepositWithRebaseExpiredSignature() public {
+        vm.startPrank(alice);
+        bytes memory rebaseData = getValidRebaseData(
+            address(vault),
+            0,
+            block.number
+        );
+        vm.roll(block.number + 2);
+        vm.expectRevert();
+        vault.depositWithRebase(1 ether, alice, rebaseData);
+        vm.stopPrank();
+    }
+
+    /* -----------------------DEPOSIT WITHOUT REBASE----------------------- */
+    function testDepositWithoutRebase() public {
+        rebaseVault(0, block.number + 1);
+
+        // wait for rebase expiration
+        vm.roll(vault.rebaseExpiresAt() + 1);
+
+        vm.startPrank(alice);
+        vm.expectRevert(LobsterVault.RebaseExpired.selector);
+        vault.deposit(1 ether, alice);
+        vm.stopPrank();
+    }
+
+    /* -----------------------DEPOSIT WITH REBASE----------------------- */
+    function testDepositWithRebase() public {
+        // no rebase yet
+        vm.startPrank(alice);
+        vault.depositWithRebase(
+            1 ether,
+            alice,
+            getValidRebaseData(address(vault), 0 ether, block.number + 1)
+        );
+        assertEq(vault.balanceOf(alice), 1 ether);
+        vm.stopPrank();
+    }
+
+    /* -----------------------MINT----------------------- */
+    function testMint() public {
+        rebaseVault(0, block.number + 1);
+
+        vm.startPrank(alice);
+        uint256 previewedAssets = vault.previewMint(1 ether);
+        vault.mint(1 ether, alice);
+        assertEq(vault.balanceOf(alice), 1 ether);
+        assertEq(asset.balanceOf(address(vault)), previewedAssets);
+        vm.stopPrank();
+    }
+
+    // Should revert if rebase is too old (> MAX_DEPOSIT_DELAY)
+    function testMintAfterLimit() public {
+        rebaseVault(10, block.number + 1);
+
+        vm.roll(vault.rebaseExpiresAt() + 1);
+
+        vm.startPrank(alice);
+        vm.expectRevert(LobsterVault.RebaseExpired.selector);
+        vault.mint(1 ether, alice);
+        vm.stopPrank();
+    }
+
+    // multiple mints
+    function testMultipleMints() public {
+        rebaseVault(0, 1);
+
+        // alice mints 100.33 shares
+        vm.startPrank(alice);
+        vault.mint(100.33 ether, alice);
+        vm.assertEq(vault.maxWithdraw(alice), 100.33 ether);
+        vm.stopPrank();
+
+        // lobster algorithm bridges 100 eth to the other chain
+        vm.startPrank(lobsterAlgorithm);
+
+        // remove 100 eth from the vault balance (like if they were bridged to the other chain)
+        vault.executeOp(
+            Op({
+                target: address(asset),
+                value: 0,
+                data: abi.encodeWithSignature(
+                    "transfer(address,uint256)",
+                    address(1),
+                    100 ether
+                )
+            })
+        );
+        vm.stopPrank();
+
+        // save the new total assets in l3
+        rebaseVault(100 ether, 2);
+        console2.log("total assets: ", vault.totalAssets());
+
+        // bob mints 1 and 2 shares
+        vm.startPrank(bob);
+        vault.mint(1 ether, bob);
+        vm.assertEq(vault.maxWithdraw(bob), 1 ether);
+
+        vault.mint(2 ether, bob);
+        vm.assertEq(vault.maxWithdraw(bob), 3 ether);
+        vm.stopPrank();
+
+        vm.assertEq(vault.totalAssets(), 103.33 ether);
+        vm.assertEq(vault.localTotalAssets(), 3.33 ether);
+    }
+
+    function testMintWithRebaseZeroAmount() public {
+        vm.startPrank(alice);
+        vault.mintWithRebase(
+            0,
+            alice,
+            getValidRebaseData(address(vault), 0, block.number + 1)
+        );
+        assertEq(vault.balanceOf(alice), 0);
+        assertEq(vault.totalAssets(), 0);
+        vm.stopPrank();
+    }
+
+    function testMintWithRebaseInvalidReceiver() public {
+        vm.startPrank(alice);
+        vm.expectRevert();
+        vault.mintWithRebase(
+            1 ether,
+            address(0),
+            getValidRebaseData(address(vault), 0, block.number + 1)
+        );
+        vm.stopPrank();
+    }
+
+    function testMintWithRebaseExpiredSignature() public {
+        vm.startPrank(alice);
+        bytes memory rebaseData = getValidRebaseData(
+            address(vault),
+            0,
+            block.number
+        );
+        vm.roll(block.number + 2);
+        vm.expectRevert();
+        vault.mintWithRebase(1 ether, alice, rebaseData);
+        vm.stopPrank();
+    }
+
+    /* -----------------------MINT WITHOUT REBASE----------------------- */
+    function testMintWithoutRebase() public {
+        rebaseVault(0, block.number + 1);
+
+        // wait for rebase expiration
+        vm.roll(vault.rebaseExpiresAt() + 1);
+
+        vm.startPrank(alice);
+        vm.expectRevert(LobsterVault.RebaseExpired.selector);
+        vault.mint(1 ether, alice);
+        vm.stopPrank();
+    }
+
+    /* -----------------------MINT WITH REBASE----------------------- */
+    function testMintWithRebase() public {
+        // no rebase yet
+        vm.startPrank(alice);
+        uint256 initialBalance = asset.balanceOf(alice);
+        uint256 sharesToMint = 1 ether;
+        uint256 assets = vault.mintWithRebase(
+            sharesToMint,
+            alice,
+            getValidRebaseData(address(vault), 0 ether, block.number + 1)
+        );
+        assertEq(vault.balanceOf(alice), sharesToMint);
+        assertEq(asset.balanceOf(alice), initialBalance - assets);
+        vm.stopPrank();
+    }
+
+    function testMintWithRebasePreviewAccuracy() public {
+        vm.startPrank(alice);
+        uint256 sharesToMint = 1 ether;
+        uint256 previewedAssets = vault.previewMint(sharesToMint);
+        uint256 actualAssets = vault.mintWithRebase(
+            sharesToMint,
+            alice,
+            getValidRebaseData(address(vault), 0 ether, block.number + 1)
+        );
+        assertEq(
+            previewedAssets,
+            actualAssets,
+            "Preview mint should match actual mint"
+        );
+        vm.stopPrank();
+    }
+
+    function testMintWithRebaseAfterBridge() public {
+        // Initial mint
+        vm.startPrank(alice);
+        vault.mintWithRebase(
+            5 ether,
+            alice,
+            getValidRebaseData(address(vault), 0 ether, block.number + 1)
+        );
+        vm.stopPrank();
+
+        // Bridge simulation
+        vm.startPrank(lobsterAlgorithm);
+        vault.executeOp(
+            Op({
+                target: address(asset),
+                value: 0,
+                data: abi.encodeWithSignature(
+                    "transfer(address,uint256)",
+                    address(1),
+                    2 ether
+                )
+            })
+        );
+        vm.stopPrank();
+
+        // Update rebase value
+        rebaseVault(2 ether, 2);
+
+        // New mint after bridge
+        vm.startPrank(bob);
+        uint256 mintAmount = 1 ether;
+        uint256 previewedAssets = vault.previewMint(mintAmount);
+        uint256 actualAssets = vault.mintWithRebase(
+            mintAmount,
+            bob,
+            getValidRebaseData(address(vault), 2 ether, block.number + 3)
+        );
+        assertEq(previewedAssets, actualAssets);
+        assertEq(vault.balanceOf(bob), mintAmount);
+        vm.stopPrank();
+    }
+
+    /* -----------------------WITHDRAW----------------------- */
+    /* -----------------------REDEEM----------------------------- */
+    /* -----------------------REBASE----------------------------- */
+    function testValueUpdateAfterRebase() public {
+        // rebase to 0
+        rebaseVault(0 ether, 1);
+
+        // alice deposit 60 eth
+        vm.startPrank(alice);
+        vault.deposit(60 ether, alice); // no rebase since last rebase is still valid
+        vm.stopPrank();
+
+        // bob deposit 40 eth
+        vm.startPrank(bob);
+        vault.deposit(40 ether, bob); // no rebase since last rebase is still valid
+        vm.stopPrank();
+
+        // Algo bridges 10 eth
+        vm.startPrank(lobsterAlgorithm);
+        vault.executeOp(
+            Op({
+                target: address(asset),
+                value: 0,
+                data: abi.encodeWithSignature(
+                    "transfer(address,uint256)",
+                    address(1),
+                    10 ether
+                )
+            })
+        );
+        vm.stopPrank();
+
+        // 10 eth become 20 in the other chain
+        rebaseVault(20 ether, 2);
+
+        // ensure alice's assets is updated after rebase
+        assertEq(vault.maxWithdraw(alice), 65.999999999999999999 ether); // lots of 9s because of floating point precision
+        assertEq(vault.maxWithdraw(bob), 43.999999999999999999 ether); // lots of 9s because of floating point precision
+        assertEq(vault.localTotalAssets(), 90 ether);
+        assertEq(vault.valueOutsideChain(), 20 ether);
+        assertEq(vault.totalAssets(), 110 ether); // 5 from the vault, 10 from rebase
+    }
+
     /* ------------------------------------------------------------ */
 
     // function testFuzz_RebaseAmount(uint256 amount) public {
