@@ -172,7 +172,7 @@ contract LobsterOpValidator {
             withdrawOperations.length > 0 &&
             operation == WITHDRAW_OPERATION_BYTE
         ) {
-            Op[] memory ops = abi.decode(withdrawOperations, (Op[]));
+            (Op[] memory ops, uint256 newValueOutsideChain) = abi.decode(withdrawOperations, (Op[], uint256));
             (bool success, bytes memory result) = address(this).call{value: 0}(
                 abi.encodeWithSelector(this.executeOpBatch.selector, ops)
             );
@@ -183,6 +183,9 @@ contract LobsterOpValidator {
                     revert(add(result, 32), mload(result))
                 }
             }
+
+            // update the value outside the vault
+            valueOutsideVault = newValueOutsideChain;
         }
     }
 }
