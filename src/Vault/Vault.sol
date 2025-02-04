@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {ERC4626, ERC20} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
+import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Op} from "../interfaces/IValidator.sol";
@@ -14,12 +15,9 @@ contract LobsterVault is Ownable2Step, ERC4626, OpValidator {
     using Math for uint256;
 
     PositionsManager public immutable positionManager;
-    ERC20 public immutable _asset;
-
-    // withdrawal penalty corresponding to the maximal theoretical value of the assets outside the chain
-    uint256 public constant WITHDRAWAL_PENALTY = 1_000; // 10%
 
     error InitialDepositTooLow(uint256 minimumDeposit);
+    error NotEnoughAssets();
     error RebaseExpired();
     error ZeroAddress();
 
@@ -31,7 +29,7 @@ contract LobsterVault is Ownable2Step, ERC4626, OpValidator {
 
     constructor(
         address initialOwner,
-        ERC20 asset,
+        IERC20 asset,
         string memory underlyingTokenName,
         string memory underlyingTokenSymbol,
         address lobsterAlgorithm_,
@@ -53,7 +51,6 @@ contract LobsterVault is Ownable2Step, ERC4626, OpValidator {
 
         lobsterAlgorithm = lobsterAlgorithm_;
         positionManager = PositionsManager(positionManager_);
-        _asset = asset;
     }
 
     /* ------------------SETTERS------------------ */
@@ -69,7 +66,7 @@ contract LobsterVault is Ownable2Step, ERC4626, OpValidator {
     // value returned is the corresponding ether value
     function localTotalAssets() public view virtual returns (uint256) {
         // todo: get values from all supported protocols
-        return _asset.balanceOf(address(this));
+        return IERC20(asset()).balanceOf(address(this));
     }
 
     /* ------------------REBASE & IN/OUT------------------ */
@@ -129,6 +126,25 @@ contract LobsterVault is Ownable2Step, ERC4626, OpValidator {
         // verify signature and update rebase value
         _verifyAndRebase(rebaseData);
 
+        // the minimal amount of assets accepted to be withdrawn by the caller
+        uint256 minAmount = uint256(bytes32(rebaseData[1:33]));
+        uint256 vaultBalance = IERC20(asset()).balanceOf(address(this));
+
+        /*
+        determine how many assets will be withdrawn
+        we use a minAmount because of a possible slippage happening when withdrawing and selling assets for eth from third-party contracts
+        */
+        if (vaultBalance < minAmount) {
+            // vaultBalance < minAmount
+            revert NotEnoughAssets();
+        }
+
+        if (vaultBalance < assets) {
+            // minAmount <= vaultBalance < assets
+            assets = vaultBalance;
+        }
+        // else minAmount <= assets <= vaultBalance and do nothing
+
         // withdraw assets
         return withdraw(assets, receiver, owner);
     }
@@ -150,89 +166,30 @@ contract LobsterVault is Ownable2Step, ERC4626, OpValidator {
         // verify signature and update rebase value
         _verifyAndRebase(rebaseData);
 
+        // the minimal amount of assets accepted to be withdrawn by the caller
+        uint256 minAmount = uint256(bytes32(rebaseData[1:33]));
+        uint256 vaultBalance = IERC20(asset()).balanceOf(address(this));
+
+        // preview how many assets will be withdrawn at most
+        assets = previewRedeem(shares);
+
+        /*
+        determine how many assets will be withdrawn
+        we use a minAmount because of a possible slippage happening when withdrawing and selling assets for eth from third-party contracts
+        */
+        if (vaultBalance < minAmount) {
+            // vaultBalance < minAmount
+            revert NotEnoughAssets();
+        }
+
+        if (vaultBalance < assets) {
+            // minAmount <= vaultBalance < assets
+            assets = vaultBalance;
+        }
+        // else minAmount <= assets <= vaultBalance and do nothing
+
         // redeem shares
         return redeem(shares, receiver, owner);
-    }
-
-    /* ------------------ALLOW WITHDRAWALS WITHOUT REBASE------------------ */
-    /**
-     * @notice Withdraw assets without requiring rebase
-     * @dev This functions is not subject to rebase age validation but it is subject to a withdrawal penalty (unless last rebase value was 0) to avoid other users to losing value
-     * This function is intended to be used unless Lobster cannot provide a rebase signature
-     *
-     * @param assets Amount of assets to withdraw
-     * @param receiver Address to receive the assets
-     * @param owner Address of the owner of the shares to burn
-     */
-    function withdrawWithoutRebase(
-        uint256 assets,
-        address receiver,
-        address owner
-    ) external returns (uint256 shares) {
-        uint256 maxAssets = maxWithdraw(owner);
-        if (assets > maxAssets) {
-            revert ERC4626ExceededMaxWithdraw(owner, assets, maxAssets);
-        }
-
-        shares = previewWithdraw(assets);
-        _withdrawWithoutRebase(_msgSender(), receiver, owner, assets, shares);
-    }
-
-    /**
-     * @notice Redeem shares without requiring rebase
-     * @dev This functions is not subject to rebase age validation but it is subject to a withdrawal penalty (unless last rebase value was 0) to avoid other users to losing value
-     * This function is intended to be used unless Lobster cannot provide a rebase signature
-     *
-     * @param shares Amount of shares to redeem
-     * @param receiver Address to receive the assets
-     * @param owner Address of the owner of the shares to burn
-     */
-    function redeemWithoutRebase(
-        uint256 shares,
-        address receiver,
-        address owner
-    ) external returns (uint256 assets) {
-        uint256 maxShares = maxRedeem(owner);
-        if (shares > maxShares) {
-            revert ERC4626ExceededMaxRedeem(owner, shares, maxShares);
-        }
-
-        assets = previewRedeem(shares);
-        _withdrawWithoutRebase(_msgSender(), receiver, owner, assets, shares);
-    }
-
-    /**
-     * @notice execute a withdraw without requiring a rebase but burns up to WITHDRAWAL_PENALTY/100 % of the shares to protect against value loss for the other users.
-     * If the last rebase value was 0, there are no penalty
-     */
-    function _withdrawWithoutRebase(
-        address caller,
-        address receiver,
-        address owner,
-        uint256 assets,
-        uint256 shares
-    ) internal virtual {
-        // penalty shares is 0 if the last rebase value was 0
-        uint256 penaltyShares = 0;
-
-        // else compute penalty shares
-        if (valueOutsideChain > 0) {
-            // compute penalty shares (ownerShares * WITHDRAWAL_PENALTY / 10000)
-            penaltyShares = Math.mulDiv(shares, WITHDRAWAL_PENALTY, 10_000);
-
-            // burn penalty shares
-            _burn(owner, penaltyShares);
-        }
-
-        revert("Not implemented");
-        // todo: if needed, call a validator function to retrieve funds from third party contracts
-        super._withdraw(
-            caller,
-            receiver,
-            owner,
-            assets,
-            shares - penaltyShares
-        );
     }
 
     /* ------------------OVERRIDE IN/OUT FUNCTIONS------------------ */
@@ -261,7 +218,10 @@ contract LobsterVault is Ownable2Step, ERC4626, OpValidator {
         uint256 shares
     ) internal virtual override onlyValidRebase {
         revert("Not implemented");
-        // todo: if needed, call a validator function to retrieve funds from third party contracts
+
+        // // Retrieve the assets to withdraw from third-party contracts
+        // retrieveAssets(assets);
+
         super._withdraw(caller, receiver, owner, assets, shares);
     }
 
@@ -271,4 +231,27 @@ contract LobsterVault is Ownable2Step, ERC4626, OpValidator {
         require(newRebaser != address(0), ZeroAddress());
         rebaseOperators[newRebaser] = enabled;
     }
+
+    // /* ------------------RETRIEVE ASSETS FROM THIRD PARTY CONTRACTS------------------ */
+
+    // /**
+    //  * @notice Retrieve assets from uniswap only
+    //  * @dev Verifies if the contract has enough assets to retrieve, if not, calls uniswap v3 supported pools to retrieve the assets
+    //  * supported pools: uniV3 weth/wbtc
+    //  * the assets that are not eth or weth are swapped on 1Inch
+    //  *
+    //  * @param amount - The amount of assets to retrieve
+    //  * @return missingAssets - The amount of assets that could not be retrieved
+    //  */
+    // function retrieveAssets(
+    //     uint256 amount
+    // ) private returns (uint256 missingAssets) {
+    //     // First check if the contract has enough assets to retrieve without calling third party contracts
+    //     if (IERC20(asset()).balanceOf(address(this)) >= amount) {
+    //         return 0;
+    //     }
+
+    //     // Else call third party contracts to retrieve the assets
+    //     // Get tokens from Uniswap V3 weth/wbtc pool
+    // }
 }

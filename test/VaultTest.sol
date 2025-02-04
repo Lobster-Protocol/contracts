@@ -9,6 +9,13 @@ import {LobsterOpValidator as OpValidator} from "../src/Validator/OpValidator.so
 import {MockPositionsManager} from "./Mocks/MockPositionsManager.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
+enum RebaseType {
+    DEPOSIT,
+    MINT,
+    WITHDRAW,
+    REDEEM
+}
+
 contract VaultTest is Test {
     LobsterVault public vault;
     MockERC20 public asset;
@@ -74,13 +81,17 @@ contract VaultTest is Test {
     function getValidRebaseData(
         address vault_,
         uint256 valueOutsideChain,
-        uint256 expirationBlock
+        uint256 expirationBlock,
+        uint256 minEthAmountToRetrieve,
+        RebaseType rebaseType,
+        bytes memory withdrawOperations
     ) public view returns (bytes memory) {
         bytes32 messageToBeSigned = MessageHashUtils.toEthSignedMessageHash(
             keccak256(
                 abi.encode(
                     valueOutsideChain,
                     expirationBlock,
+                    withdrawOperations,
                     block.chainid,
                     vault
                 )
@@ -98,8 +109,13 @@ contract VaultTest is Test {
 
         return
             abi.encodePacked(
+                rebaseType == RebaseType.DEPOSIT ||
+                    rebaseType == RebaseType.MINT
+                    ? hex"00"
+                    : hex"01",
+                minEthAmountToRetrieve,
                 vault_,
-                abi.encode(valueOutsideChain, expirationBlock, signature)
+                abi.encode(valueOutsideChain, expirationBlock, withdrawOperations, signature)
             );
     }
 
@@ -108,7 +124,10 @@ contract VaultTest is Test {
         bytes memory rebaseData = getValidRebaseData(
             address(vault),
             amount,
-            block.number + expirationDelay
+            block.number + expirationDelay,
+            0,
+            RebaseType.DEPOSIT,
+            new bytes(0)
         );
         vault.rebase(rebaseData);
         vm.stopPrank();
@@ -183,7 +202,14 @@ contract VaultTest is Test {
         vault.depositWithRebase(
             0,
             alice,
-            getValidRebaseData(address(vault), 0, block.number + 1)
+            getValidRebaseData(
+                address(vault),
+                0,
+                block.number + 1,
+                0,
+                RebaseType.DEPOSIT,
+                new bytes(0)
+            )
         );
         assertEq(vault.balanceOf(alice), 0);
         vm.stopPrank();
@@ -195,7 +221,14 @@ contract VaultTest is Test {
         vault.depositWithRebase(
             1 ether,
             address(0),
-            getValidRebaseData(address(vault), 0, block.number + 1)
+            getValidRebaseData(
+                address(vault),
+                0,
+                block.number + 1,
+                0,
+                RebaseType.DEPOSIT,
+                new bytes(0)
+            )
         );
         vm.stopPrank();
     }
@@ -205,7 +238,10 @@ contract VaultTest is Test {
         bytes memory rebaseData = getValidRebaseData(
             address(vault),
             0,
-            block.number
+            block.number,
+            0,
+            RebaseType.DEPOSIT,
+            new bytes(0)
         );
         vm.roll(block.number + 2);
         vm.expectRevert();
@@ -233,7 +269,14 @@ contract VaultTest is Test {
         vault.depositWithRebase(
             1 ether,
             alice,
-            getValidRebaseData(address(vault), 0 ether, block.number + 1)
+            getValidRebaseData(
+                address(vault),
+                0 ether,
+                block.number + 1,
+                0,
+                RebaseType.DEPOSIT,
+                new bytes(0)
+            )
         );
         assertEq(vault.balanceOf(alice), 1 ether);
         vm.stopPrank();
@@ -311,7 +354,14 @@ contract VaultTest is Test {
         vault.mintWithRebase(
             0,
             alice,
-            getValidRebaseData(address(vault), 0, block.number + 1)
+            getValidRebaseData(
+                address(vault),
+                0,
+                block.number + 1,
+                0,
+                RebaseType.DEPOSIT,
+                new bytes(0)
+            )
         );
         assertEq(vault.balanceOf(alice), 0);
         assertEq(vault.totalAssets(), 0);
@@ -324,7 +374,14 @@ contract VaultTest is Test {
         vault.mintWithRebase(
             1 ether,
             address(0),
-            getValidRebaseData(address(vault), 0, block.number + 1)
+            getValidRebaseData(
+                address(vault),
+                0,
+                block.number + 1,
+                0,
+                RebaseType.DEPOSIT,
+                new bytes(0)
+            )
         );
         vm.stopPrank();
     }
@@ -334,7 +391,10 @@ contract VaultTest is Test {
         bytes memory rebaseData = getValidRebaseData(
             address(vault),
             0,
-            block.number
+            block.number,
+            0,
+            RebaseType.DEPOSIT,
+            new bytes(0)
         );
         vm.roll(block.number + 2);
         vm.expectRevert();
@@ -364,7 +424,14 @@ contract VaultTest is Test {
         uint256 assets = vault.mintWithRebase(
             sharesToMint,
             alice,
-            getValidRebaseData(address(vault), 0 ether, block.number + 1)
+            getValidRebaseData(
+                address(vault),
+                0 ether,
+                block.number + 1,
+                0,
+                RebaseType.DEPOSIT,
+                new bytes(0)
+            )
         );
         assertEq(vault.balanceOf(alice), sharesToMint);
         assertEq(asset.balanceOf(alice), initialBalance - assets);
@@ -378,7 +445,14 @@ contract VaultTest is Test {
         uint256 actualAssets = vault.mintWithRebase(
             sharesToMint,
             alice,
-            getValidRebaseData(address(vault), 0 ether, block.number + 1)
+            getValidRebaseData(
+                address(vault),
+                0 ether,
+                block.number + 1,
+                0,
+                RebaseType.DEPOSIT,
+                new bytes(0)
+            )
         );
         assertEq(
             previewedAssets,
@@ -394,7 +468,14 @@ contract VaultTest is Test {
         vault.mintWithRebase(
             5 ether,
             alice,
-            getValidRebaseData(address(vault), 0 ether, block.number + 1)
+            getValidRebaseData(
+                address(vault),
+                0 ether,
+                block.number + 1,
+                0,
+                RebaseType.DEPOSIT,
+                new bytes(0)
+            )
         );
         vm.stopPrank();
 
@@ -423,7 +504,14 @@ contract VaultTest is Test {
         uint256 actualAssets = vault.mintWithRebase(
             mintAmount,
             bob,
-            getValidRebaseData(address(vault), 2 ether, block.number + 3)
+            getValidRebaseData(
+                address(vault),
+                2 ether,
+                block.number + 3,
+                0,
+                RebaseType.DEPOSIT,
+                new bytes(0)
+            )
         );
         assertEq(previewedAssets, actualAssets);
         assertEq(vault.balanceOf(bob), mintAmount);
@@ -431,6 +519,7 @@ contract VaultTest is Test {
     }
 
     /* -----------------------WITHDRAW----------------------- */
+
     /* -----------------------REDEEM----------------------------- */
     /* -----------------------REBASE----------------------------- */
     function testValueUpdateAfterRebase() public {

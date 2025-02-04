@@ -10,7 +10,7 @@ import {INonfungiblePositionManager} from "../../interfaces/uniswapV3/INonfungib
 import {IUniswapV3Pool} from "../../interfaces/uniswapV3/IUniswapV3Pool.sol";
 import {UniswapV3MathLib} from "./lib/UniswapV3MathLib.sol";
 import {Constants} from "../Constants.sol";
-
+import {TransferHelper} from "./lib/TransferHelper.sol";
 
 /**
  * @title UniswapV3PositionManager
@@ -29,7 +29,9 @@ contract UniswapV3Position is Constants {
         address factory,
         address weth
     ) {
-        positionManager = INonfungiblePositionManager(uniswapPositionManagerAddress);
+        positionManager = INonfungiblePositionManager(
+            uniswapPositionManagerAddress
+        );
         uniswapV3Factory = factory;
         wethAddress = weth;
     }
@@ -178,5 +180,82 @@ contract UniswapV3Position is Constants {
 
         // If all quotes fail, return 0
         return 0;
+    }
+
+    /* ------------------WITHDRAW POSITION------------------ */
+
+    /// @notice Withdraws a specific amount of liquidity from a position
+    /// @param tokenId The ID of the NFT position
+    /// @param liquidityToWithdraw The amount of liquidity to withdraw
+    /// @param amount0Min The minimum amount of token0 to receive
+    /// @param amount1Min The minimum amount of token1 to receive
+    function withdrawPartialPosition(
+        uint256 tokenId,
+        uint128 liquidityToWithdraw,
+        uint256 amount0Min,
+        uint256 amount1Min
+    ) external {
+        // Get position information
+        (
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            uint128 currentLiquidity,
+            ,
+            ,
+            ,
+
+        ) = positionManager.positions(tokenId);
+
+        // Ensure we're not trying to withdraw more than available
+        require(
+            liquidityToWithdraw <= currentLiquidity,
+            "Insufficient liquidity"
+        );
+
+        // Call main withdrawal function
+        _withdrawPosition(
+            tokenId,
+            liquidityToWithdraw,
+            amount0Min,
+            amount1Min
+            // token0,
+            // token1
+        );
+    }
+
+    function _withdrawPosition(
+        uint256 tokenId,
+        uint128 liquidityToWithdraw,
+        uint256 amount0Min,
+        uint256 amount1Min
+    ) private returns (uint256 amount0, uint256 amount1) {
+        // Decrease specified amount of liquidity
+        INonfungiblePositionManager.DecreaseLiquidityParams
+            memory params = INonfungiblePositionManager
+                .DecreaseLiquidityParams({
+                    tokenId: tokenId,
+                    liquidity: liquidityToWithdraw,
+                    amount0Min: amount0Min,
+                    amount1Min: amount1Min,
+                    deadline: block.timestamp
+                });
+
+        positionManager.decreaseLiquidity(params);
+
+        // Collect the withdrawn liquidity
+        INonfungiblePositionManager.CollectParams
+            memory collectParams = INonfungiblePositionManager.CollectParams({
+                tokenId: tokenId,
+                recipient: address(this),
+                amount0Max: type(uint128).max,
+                amount1Max: type(uint128).max
+            });
+
+        (amount0, amount1) = positionManager.collect(collectParams);
     }
 }

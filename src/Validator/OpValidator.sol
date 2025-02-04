@@ -4,12 +4,14 @@ pragma solidity ^0.8.28;
 import {Op} from "../interfaces/IValidator.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import {WITHDRAW_OPERATION_BYTE} from "./Constants.sol";
 
 // Base contract that will be inherited by Vault
 contract LobsterOpValidator {
     uint256 public valueOutsideChain = 0;
     uint256 public rebaseExpiresAt = 0;
     address public lobsterAlgorithm;
+
     // addresses allowed to rebase the vault
     mapping(address => bool) public rebaseOperators;
 
@@ -19,6 +21,7 @@ contract LobsterOpValidator {
     mapping(address => mapping(bytes4 => bool)) public validSelectors;
 
     error OpNotApproved();
+    error InvalidVault();
 
     event Executed(address indexed target, uint256 value, bytes data);
 
@@ -37,21 +40,24 @@ contract LobsterOpValidator {
     }
 
     // ensure msg.sender is the algorithm
-    modifier onlyAlgorithm() {
-        require(msg.sender == lobsterAlgorithm, "Vault: only algorithm");
+    modifier onlySelfOrAlgorithm() {
+        require(
+            msg.sender == lobsterAlgorithm || msg.sender == address(this),
+            "Vault: only algorithm"
+        );
         _;
     }
 
     /* ------------------LOBSTER ALGO FUNCTIONS FOR CUSTOM CALLS------------------ */
 
-    function executeOp(Op calldata op) external onlyAlgorithm {
+    function executeOp(Op calldata op) external onlySelfOrAlgorithm {
         if (!validateOp(op)) {
             revert OpNotApproved();
         }
         _call(op);
     }
 
-    function executeOpBatch(Op[] calldata ops) external onlyAlgorithm {
+    function executeOpBatch(Op[] calldata ops) external onlySelfOrAlgorithm {
         if (!validateBatchedOp(ops)) {
             revert OpNotApproved();
         }
@@ -104,13 +110,38 @@ contract LobsterOpValidator {
         _verifyAndRebase(rebaseData);
     }
 
+    /**
+     * @notice Verify the rebase signature and update the rebase value before redeeming shares
+     *
+     * @dev This function is called before mint/deposit/withdraw/redeem shares to verify the rebase signature and update the rebase value
+     * rebaseData is expected to be:
+     * 1 byte - 0x00 if deposit/mint 0x01 if withdraw/redeem
+     * 32 bytes - the minimum assets to be withdrawn (used by redeem / withdraw functions)
+     * 20 bytes - vault address
+     * abiEncoded: _valueOutsideChain, _rebaseExpiresAt, withdrawOperations, signature
+     * _valueOutsideChain - the ETH value outside the chain
+     * _rebaseExpiresAt - the block number at which the rebase expires
+     * withdrawOperations - the operations to be executed to withdraw the assets (only for withdraw/redeem. 0x for deposit/mint)
+     * signature - the signature of the rebase data
+     *
+     * @param rebaseData - the rebase data to be validated
+     */
     function _verifyAndRebase(bytes calldata rebaseData) internal {
-        address vault = address(bytes20(rebaseData[:20]));
+        bytes1 operation = rebaseData[0];
+        address vault = address(bytes20(rebaseData[33:53]));
+        if (vault != address(this)) {
+            revert InvalidVault();
+        }
+
         (
             uint256 _valueOutsideChain,
             uint256 _rebaseExpiresAt,
+            bytes memory withdrawOperations,
             bytes memory signature
-        ) = abi.decode(rebaseData[20:], (uint256, uint256, bytes));
+        ) = abi.decode(
+                rebaseData[53:],
+                (uint256, uint256, bytes, bytes)
+            );
 
         require(
             _rebaseExpiresAt > block.number &&
@@ -122,17 +153,36 @@ contract LobsterOpValidator {
             abi.encode(
                 _valueOutsideChain,
                 _rebaseExpiresAt,
+                withdrawOperations,
                 block.chainid,
                 vault
             )
         );
+
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(
             messageHash
         );
+
         address signer = ECDSA.recover(ethSignedMessageHash, signature);
         require(rebaseOperators[signer], "Invalid signature");
 
+        // update rebase values
         valueOutsideChain = _valueOutsideChain;
         rebaseExpiresAt = _rebaseExpiresAt;
+
+        // if needed, execute withdraw operations
+        if (operation == WITHDRAW_OPERATION_BYTE) {
+            Op[] memory ops = abi.decode(withdrawOperations, (Op[]));
+            (bool success, bytes memory result) = address(this).call{value: 0}(
+                abi.encodeWithSelector(this.executeOpBatch.selector, ops)
+            );
+
+            // revert the withdraw if the operations failed
+            assembly {
+                if iszero(success) {
+                    revert(add(result, 32), mload(result))
+                }
+            }
+        }
     }
 }
