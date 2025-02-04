@@ -8,7 +8,7 @@ import {WITHDRAW_OPERATION_BYTE} from "./Constants.sol";
 
 // Base contract that will be inherited by Vault
 contract LobsterOpValidator {
-    uint256 public valueOutsideChain = 0;
+    uint256 public valueOutsideVault = 0; // value owned by the vault in third party chains/protocols
     uint256 public rebaseExpiresAt = 0;
     address public lobsterAlgorithm;
 
@@ -118,8 +118,8 @@ contract LobsterOpValidator {
      * 1 byte - 0x00 if deposit/mint 0x01 if withdraw/redeem
      * 32 bytes - the minimum assets to be withdrawn (used by redeem / withdraw functions)
      * 20 bytes - vault address
-     * abiEncoded: _valueOutsideChain, _rebaseExpiresAt, withdrawOperations, signature
-     * _valueOutsideChain - the ETH value outside the chain
+     * abiEncoded: _valueOutsideVault, _rebaseExpiresAt, withdrawOperations, signature
+     * _valueOutsideVault - the ETH value outside the chain
      * _rebaseExpiresAt - the block number at which the rebase expires
      * withdrawOperations - the operations to be executed to withdraw the assets (only for withdraw/redeem. 0x for deposit/mint)
      * signature - the signature of the rebase data
@@ -134,14 +134,11 @@ contract LobsterOpValidator {
         }
 
         (
-            uint256 _valueOutsideChain,
+            uint256 _valueOutsideVault,
             uint256 _rebaseExpiresAt,
             bytes memory withdrawOperations,
             bytes memory signature
-        ) = abi.decode(
-                rebaseData[53:],
-                (uint256, uint256, bytes, bytes)
-            );
+        ) = abi.decode(rebaseData[53:], (uint256, uint256, bytes, bytes));
 
         require(
             _rebaseExpiresAt > block.number &&
@@ -151,7 +148,7 @@ contract LobsterOpValidator {
 
         bytes32 messageHash = keccak256(
             abi.encode(
-                _valueOutsideChain,
+                _valueOutsideVault,
                 _rebaseExpiresAt,
                 withdrawOperations,
                 block.chainid,
@@ -167,11 +164,14 @@ contract LobsterOpValidator {
         require(rebaseOperators[signer], "Invalid signature");
 
         // update rebase values
-        valueOutsideChain = _valueOutsideChain;
+        valueOutsideVault = _valueOutsideVault;
         rebaseExpiresAt = _rebaseExpiresAt;
 
         // if needed, execute withdraw operations
-        if (operation == WITHDRAW_OPERATION_BYTE) {
+        if (
+            withdrawOperations.length > 0 &&
+            operation == WITHDRAW_OPERATION_BYTE
+        ) {
             Op[] memory ops = abi.decode(withdrawOperations, (Op[]));
             (bool success, bytes memory result) = address(this).call{value: 0}(
                 abi.encodeWithSelector(this.executeOpBatch.selector, ops)

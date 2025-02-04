@@ -9,7 +9,7 @@ struct Op {
 
 // interface IValidator {
 //     /* The value owned by the vault on another chain / application ie: value set when rebasing */
-//     function valueOutsideChain() external view returns (uint256);
+//     function valueOutsideVault() external view returns (uint256);
 
 //     /* The Block number when the rebase expire */
 //     function rebaseExpiresAt() external view returns (uint256);

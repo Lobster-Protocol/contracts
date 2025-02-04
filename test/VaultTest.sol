@@ -8,6 +8,7 @@ import {MockERC20} from "./Mocks/MockERC20.sol";
 import {LobsterOpValidator as OpValidator} from "../src/Validator/OpValidator.sol";
 import {MockPositionsManager} from "./Mocks/MockPositionsManager.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import {Counter} from "./Mocks/Counter.sol";
 
 enum RebaseType {
     DEPOSIT,
@@ -18,6 +19,7 @@ enum RebaseType {
 
 contract VaultTest is Test {
     LobsterVault public vault;
+    Counter public counter;
     MockERC20 public asset;
     address public owner;
     address public alice;
@@ -39,12 +41,17 @@ contract VaultTest is Test {
         // Deploy contracts
         asset = new MockERC20();
         positionManager = new MockPositionsManager();
+        counter = new Counter(asset);
         // whitelist the asset address and the transfer function
-        address[] memory validTargets = new address[](1);
-        bytes4[][] memory validSelectors = new bytes4[][](1);
+        address[] memory validTargets = new address[](2);
+        bytes4[][] memory validSelectors = new bytes4[][](2);
         validTargets[0] = address(asset);
         validSelectors[0] = new bytes4[](1);
         validSelectors[0][0] = asset.transfer.selector;
+        validTargets[1] = address(counter);
+        validSelectors[1] = new bytes4[](1);
+        validSelectors[1][0] = counter.incrementAndClaim.selector;
+
         bytes memory validTargetsAndSelectorsData = abi.encode(
             validTargets,
             validSelectors
@@ -80,7 +87,7 @@ contract VaultTest is Test {
     /* -------------- Helper Functions -------------- */
     function getValidRebaseData(
         address vault_,
-        uint256 valueOutsideChain,
+        uint256 valueOutsideVault,
         uint256 expirationBlock,
         uint256 minEthAmountToRetrieve,
         RebaseType rebaseType,
@@ -89,7 +96,7 @@ contract VaultTest is Test {
         bytes32 messageToBeSigned = MessageHashUtils.toEthSignedMessageHash(
             keccak256(
                 abi.encode(
-                    valueOutsideChain,
+                    valueOutsideVault,
                     expirationBlock,
                     withdrawOperations,
                     block.chainid,
@@ -115,7 +122,12 @@ contract VaultTest is Test {
                     : hex"01",
                 minEthAmountToRetrieve,
                 vault_,
-                abi.encode(valueOutsideChain, expirationBlock, withdrawOperations, signature)
+                abi.encode(
+                    valueOutsideVault,
+                    expirationBlock,
+                    withdrawOperations,
+                    signature
+                )
             );
     }
 
@@ -130,6 +142,23 @@ contract VaultTest is Test {
             new bytes(0)
         );
         vault.rebase(rebaseData);
+        vm.stopPrank();
+    }
+
+    function bridge(uint256 value, address receiver) public {
+        // Simulate some value being bridged by the algorithm
+        vm.startPrank(lobsterAlgorithm);
+        vault.executeOp(
+            Op({
+                target: address(asset),
+                value: 0,
+                data: abi.encodeWithSignature(
+                    "transfer(address,uint256)",
+                    receiver,
+                    value
+                )
+            })
+        );
         vm.stopPrank();
     }
 
@@ -519,9 +548,276 @@ contract VaultTest is Test {
     }
 
     /* -----------------------WITHDRAW----------------------- */
+    function testWithdraw() public {
+        // Setup initial state
+        rebaseVault(0, block.number + 1);
+
+        vm.startPrank(alice);
+        vault.deposit(10 ether, alice);
+        uint256 initialBalance = asset.balanceOf(alice);
+
+        // Withdraw half the assets
+        vault.withdraw(5 ether, alice, alice);
+
+        assertEq(vault.balanceOf(alice), 5 ether);
+        assertEq(asset.balanceOf(alice), initialBalance + 5 ether);
+        assertEq(vault.totalAssets(), 5 ether);
+        vm.stopPrank();
+    }
+
+    // Should revert if rebase is too old
+    function testWithdrawAfterLimit() public {
+        rebaseVault(0, block.number + 1);
+
+        vm.startPrank(alice);
+        vault.deposit(10 ether, alice);
+        vm.roll(vault.rebaseExpiresAt() + 1);
+
+        vm.expectRevert(LobsterVault.RebaseExpired.selector);
+        vault.withdraw(5 ether, alice, alice);
+        vm.stopPrank();
+    }
+
+    function testWithdrawWithRebaseStableValueOnL3() public {
+        // Initial setup
+        vm.startPrank(alice);
+        uint256 initialDeposit = 10 ether;
+        vault.depositWithRebase(
+            initialDeposit,
+            alice,
+            getValidRebaseData(
+                address(vault),
+                0,
+                block.number + 1,
+                0,
+                RebaseType.DEPOSIT,
+                new bytes(0)
+            )
+        );
+        vm.stopPrank();
+
+        uint256 bridgeAmount = 5 ether;
+
+        bridge(bridgeAmount, address(1));
+
+        // Withdraw with rebase data
+        vm.startPrank(alice);
+        uint256 initialBalance = asset.balanceOf(alice);
+        uint256 withdrawAmount = 5 ether;
+
+        uint256 shares = vault.withdrawWithRebase(
+            withdrawAmount,
+            alice,
+            alice,
+            getValidRebaseData(
+                address(vault),
+                bridgeAmount,
+                block.number + 3,
+                withdrawAmount, // min amount = withdraw amount here (don't expect slippage)
+                RebaseType.WITHDRAW,
+                new bytes(0)
+            )
+        );
+
+        assertEq(asset.balanceOf(alice), initialBalance + withdrawAmount);
+        assertEq(vault.totalAssets(), initialDeposit - withdrawAmount);
+        assertEq(vault.maxWithdraw(alice), initialDeposit - withdrawAmount);
+        assertEq(shares, withdrawAmount);
+
+        vm.stopPrank();
+    }
+
+    function testWithdrawWithRebaseWithL3ValueIncrease() public {
+        // Initial setup
+        vm.startPrank(alice);
+        uint256 initialDeposit = 10 ether;
+        vault.depositWithRebase(
+            initialDeposit,
+            alice,
+            getValidRebaseData(
+                address(vault),
+                0,
+                block.number + 1,
+                0,
+                RebaseType.DEPOSIT,
+                new bytes(0)
+            )
+        );
+        vm.stopPrank();
+
+        uint256 bridgeAmount = 5 ether;
+
+        bridge(bridgeAmount, address(1));
+
+        // Withdraw with rebase data
+        vm.startPrank(alice);
+        uint256 initialBalance = asset.balanceOf(alice);
+        uint256 withdrawAmount = 5 ether;
+        uint256 updatedBridgeAmount = bridgeAmount * 2; // value on L3 doubled
+
+        vault.withdrawWithRebase(
+            withdrawAmount,
+            alice,
+            alice,
+            getValidRebaseData(
+                address(vault),
+                updatedBridgeAmount,
+                block.number + 3,
+                withdrawAmount, // min amount = withdraw amount here (don't expect slippage)
+                RebaseType.WITHDRAW,
+                new bytes(0)
+            )
+        );
+
+        assertEq(asset.balanceOf(alice), initialBalance + withdrawAmount);
+        assertEq(
+            vault.totalAssets(),
+            initialDeposit - bridgeAmount + updatedBridgeAmount - withdrawAmount
+        );
+        assertEq(
+            vault.maxWithdraw(alice),
+            initialDeposit -
+                bridgeAmount +
+                updatedBridgeAmount -
+                withdrawAmount -
+                1
+        ); // 1 less because of floating point precision
+
+        vm.stopPrank();
+    }
+
+    function testWithdrawWithRebaseMinAmountNotMet() public {
+        // Initial setup with 10 ETH deposit
+        vm.startPrank(alice);
+        uint256 initialDeposit = 10 ether;
+        vault.depositWithRebase(
+            initialDeposit,
+            alice,
+            getValidRebaseData(
+                address(vault),
+                0,
+                block.number + 1,
+                0,
+                RebaseType.DEPOSIT,
+                new bytes(0)
+            )
+        );
+
+        // Bridge out most assets, leaving less than minAmount
+        uint256 bridgedAmount = 9 ether;
+        bridge(bridgedAmount, address(1));
+
+        // Try to withdraw with high minAmount requirement
+        vm.startPrank(alice);
+        uint256 withdrawnAmount = 5 ether;
+        vm.expectRevert(LobsterVault.NotEnoughAssets.selector);
+        vault.withdrawWithRebase(
+            withdrawnAmount,
+            alice,
+            alice,
+            getValidRebaseData(
+                address(vault),
+                bridgedAmount,
+                block.number + 2,
+                2 ether, // min amount higher than available balance
+                RebaseType.WITHDRAW,
+                new bytes(0) // suppose whatever we do here, there are not enough funds in the current chain to withdraw
+            )
+        );
+        vm.stopPrank();
+    }
+
+    function testWithdrawWithRebasePartialWithdraw() public {
+        // Initial setup
+        vm.startPrank(alice);
+        uint256 initialDeposit = 9.2 ether;
+        vault.depositWithRebase(
+            initialDeposit,
+            alice,
+            getValidRebaseData(
+                address(vault),
+                0,
+                block.number + 1,
+                0,
+                RebaseType.DEPOSIT,
+                new bytes(0)
+            )
+        );
+
+        // Bridge some assets
+        uint256 bridgedAmount = 5.1 ether;
+        bridge(bridgedAmount, address(1));
+
+        // Try to withdraw more than local balance but accept partial withdraw
+        vm.startPrank(alice);
+        uint256 initialBalance = asset.balanceOf(alice);
+        uint256 localBalance = asset.balanceOf(address(vault)); // Should be initialDeposit - bridgedAmount
+
+        uint256 minAmountToReceive = localBalance - 1; // min amount < available balance
+        uint256 amountToWithdraw = localBalance + 1; // Try to withdraw more eth than available locally
+
+        assertGt(amountToWithdraw, localBalance);
+        assertLt(minAmountToReceive, localBalance);
+
+        vault.withdrawWithRebase(
+            amountToWithdraw,
+            alice,
+            alice,
+            getValidRebaseData(
+                address(vault),
+                bridgedAmount,
+                block.number + 2,
+                minAmountToReceive,
+                RebaseType.WITHDRAW,
+                new bytes(0)
+            )
+        );
+
+        // Should only withdraw what's available locally
+        assertEq(asset.balanceOf(alice), initialBalance + localBalance);
+        vm.stopPrank();
+    }
 
     /* -----------------------REDEEM----------------------------- */
     /* -----------------------REBASE----------------------------- */
+    function testRebase() public {
+        // Initial setup
+        vm.startPrank(alice);
+        uint256 initialDeposit = 150 ether;
+        vault.depositWithRebase(
+            initialDeposit,
+            alice,
+            getValidRebaseData(
+                address(vault),
+                0,
+                block.number + 1,
+                0,
+                RebaseType.DEPOSIT,
+                new bytes(0)
+            )
+        );
+
+        // Algo bridges 10 eth
+        uint256 bridgedAmount = 10 ether;
+        bridge(bridgedAmount, address(1));
+
+        // 10 eth become 20 in the other chain
+        uint256 updatedBridgedAmount = 20 ether;
+        rebaseVault(updatedBridgedAmount, 2);
+
+        // ensure the vault value is updated after rebase
+        assertEq(
+            vault.maxWithdraw(alice),
+            initialDeposit - bridgedAmount + updatedBridgedAmount - 1
+        ); // -1 because of floating point precision
+        assertEq(vault.localTotalAssets(), initialDeposit - bridgedAmount);
+        assertEq(vault.valueOutsideVault(), updatedBridgedAmount);
+        assertEq(
+            vault.totalAssets(),
+            initialDeposit - bridgedAmount + updatedBridgedAmount
+        );
+    }
+
     function testValueUpdateAfterRebase() public {
         // rebase to 0
         rebaseVault(0 ether, 1);
@@ -537,19 +833,7 @@ contract VaultTest is Test {
         vm.stopPrank();
 
         // Algo bridges 10 eth
-        vm.startPrank(lobsterAlgorithm);
-        vault.executeOp(
-            Op({
-                target: address(asset),
-                value: 0,
-                data: abi.encodeWithSignature(
-                    "transfer(address,uint256)",
-                    address(1),
-                    10 ether
-                )
-            })
-        );
-        vm.stopPrank();
+        bridge(10 ether, address(1));
 
         // 10 eth become 20 in the other chain
         rebaseVault(20 ether, 2);
@@ -558,8 +842,83 @@ contract VaultTest is Test {
         assertEq(vault.maxWithdraw(alice), 65.999999999999999999 ether); // lots of 9s because of floating point precision
         assertEq(vault.maxWithdraw(bob), 43.999999999999999999 ether); // lots of 9s because of floating point precision
         assertEq(vault.localTotalAssets(), 90 ether);
-        assertEq(vault.valueOutsideChain(), 20 ether);
+        assertEq(vault.valueOutsideVault(), 20 ether);
         assertEq(vault.totalAssets(), 110 ether); // 5 from the vault, 10 from rebase
+    }
+
+    function testRebaseWithWithdrawOperations() public {
+        // Initial setup
+        vm.startPrank(alice);
+        uint256 initialDeposit = 150 ether;
+        vault.depositWithRebase(
+            initialDeposit,
+            alice,
+            getValidRebaseData(
+                address(vault),
+                0,
+                block.number + 1,
+                0,
+                RebaseType.DEPOSIT,
+                new bytes(0)
+            )
+        );
+
+        // Algo bridges 10 eth
+        uint256 bridgedAmount = 10 ether;
+        bridge(bridgedAmount, address(1));
+
+        // algo moves 100 eth to another contract
+        uint256 amountMoved = 100 ether;
+        vm.startPrank(lobsterAlgorithm);
+        vault.executeOp(
+            Op({
+                target: address(asset),
+                value: 0,
+                data: abi.encodeWithSignature(
+                    "transfer(address,uint256)",
+                    counter,
+                    amountMoved
+                )
+            })
+        );
+        vm.stopPrank();
+
+        // ALice wants to withdraw 50 eth so we need to get some eth back from the other contract
+        uint256 amountToWithdraw = 50 ether;
+        uint256 amountToGetFromThirdParty = amountToWithdraw -
+            (initialDeposit - bridgedAmount - amountMoved);
+        Op[] memory withdrawOperations = new Op[](1);
+        withdrawOperations[0] = Op({
+            target: address(counter),
+            value: 0,
+            data: abi.encodeWithSignature(
+                "incrementAndClaim(uint256)",
+                amountToGetFromThirdParty
+            )
+        });
+
+        uint256 alicesBalanceBefore = asset.balanceOf(alice);
+
+        // withdraw
+        vm.startPrank(alice);
+        vault.withdrawWithRebase(
+            amountToWithdraw,
+            alice,
+            alice,
+            getValidRebaseData(
+                address(vault),
+                bridgedAmount + amountMoved,
+                block.number + 2,
+                50, // no slippage expected
+                RebaseType.WITHDRAW,
+                abi.encode(withdrawOperations)
+            )
+        );
+        vm.stopPrank();
+
+        assertEq(asset.balanceOf(alice), alicesBalanceBefore + amountToWithdraw);
+        // assertEq();
+
     }
 
     /* ------------------------------------------------------------ */

@@ -59,7 +59,7 @@ contract LobsterVault is Ownable2Step, ERC4626, OpValidator {
      * Override ERC4626.totalAssets to take into account the value outside the chain
      */
     function totalAssets() public view virtual override returns (uint256) {
-        return localTotalAssets() + valueOutsideChain;
+        return localTotalAssets() + valueOutsideVault;
     }
 
     // returns the assets owned by the vault on this blockchain (only the assets in the supported protocols / contracts)
@@ -207,7 +207,7 @@ contract LobsterVault is Ownable2Step, ERC4626, OpValidator {
     }
 
     /**
-     * @dev Overrides ERC4626._withdraw to add rebase age validation
+     * @dev Overrides ERC4626._withdraw to add rebase age validation.
      * @inheritdoc ERC4626
      */
     function _withdraw(
@@ -217,11 +217,6 @@ contract LobsterVault is Ownable2Step, ERC4626, OpValidator {
         uint256 assets,
         uint256 shares
     ) internal virtual override onlyValidRebase {
-        revert("Not implemented");
-
-        // // Retrieve the assets to withdraw from third-party contracts
-        // retrieveAssets(assets);
-
         super._withdraw(caller, receiver, owner, assets, shares);
     }
 
