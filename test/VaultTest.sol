@@ -601,7 +601,7 @@ contract VaultTest is Test {
 
         // Withdraw with rebase data
         vm.startPrank(alice);
-        uint256 initialBalance = asset.balanceOf(alice);
+        uint256 initialAliceShares = asset.balanceOf(alice);
         uint256 withdrawAmount = 5 ether;
 
         uint256 shares = vault.withdrawWithRebase(
@@ -619,9 +619,9 @@ contract VaultTest is Test {
         );
 
         assertEq(vault.totalAssets(), initialDeposit - withdrawAmount);
-        // assertEq(asset.balanceOf(alice), initialBalance - withdrawAmount);
-        // assertEq(vault.maxWithdraw(alice), initialDeposit - withdrawAmount);
-        // assertEq(shares, withdrawAmount);
+        assertEq(asset.balanceOf(alice), initialBalance - withdrawAmount);
+        assertEq(vault.maxWithdraw(alice), initialDeposit - withdrawAmount);
+        assertEq(shares, withdrawAmount);
 
         vm.stopPrank();
     }
