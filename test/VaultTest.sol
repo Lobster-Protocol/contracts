@@ -839,8 +839,8 @@ contract VaultTest is Test {
         rebaseVault(20 ether, 2);
 
         // ensure alice's assets is updated after rebase
-        assertEq(vault.maxWithdraw(alice), 65.999999999999999999 ether); // lots of 9s because of floating point precision
-        assertEq(vault.maxWithdraw(bob), 43.999999999999999999 ether); // lots of 9s because of floating point precision
+        assertEq(vault.maxWithdraw(alice), 66 ether - 1); // -1 because of floating point precision
+        assertEq(vault.maxWithdraw(bob), 44 ether - 1); // -1 because of floating point precision
         assertEq(vault.localTotalAssets(), 90 ether);
         assertEq(vault.valueOutsideVault(), 20 ether);
         assertEq(vault.totalAssets(), 110 ether); // 5 from the vault, 10 from rebase
