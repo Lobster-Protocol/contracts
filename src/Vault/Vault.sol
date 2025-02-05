@@ -2,16 +2,16 @@
 pragma solidity ^0.8.28;
 
 import {ERC4626, ERC20} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
+import {ERC4626Fees} from "./ERC4626Fees.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
-import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Op} from "../interfaces/IValidator.sol";
-import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+// import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {LobsterOpValidator as OpValidator} from "../Validator/OpValidator.sol";
 import {LobsterPositionsManager as PositionsManager} from "../PositionsManager/PositionsManager.sol";
 
-contract LobsterVault is Ownable2Step, ERC4626, OpValidator {
+contract LobsterVault is ERC4626Fees, OpValidator {
     using Math for uint256;
 
     PositionsManager public immutable positionManager;
