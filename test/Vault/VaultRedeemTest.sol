@@ -113,7 +113,6 @@ contract VaultRedeemTest is VaultTestSetup {
 
         // redeem with rebase data
         vm.startPrank(alice);
-        uint256 initialSharesBalance = vault.balanceOf(alice);
         uint256 initialAssetBalance = asset.balanceOf(alice);
 
         uint256 updatedBridgeAmount = bridgeAmount * 2; // value on L3 doubled
