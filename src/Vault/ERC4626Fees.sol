@@ -195,6 +195,14 @@ abstract contract ERC4626Fees is ERC4626, Ownable2Step {
         return true;
     }
 
+    function setEntryFeeCollector(address collector) external onlyOwner {
+        entryFeeCollector = collector;
+    }
+
+    function setExitFeeCollector(address collector) external onlyOwner {
+        exitFeeCollector = collector;
+    }
+
     // === Fee operations ===
 
     /// @dev Calculates the fees that should be added to an amount `assets` that does not already include fees.
