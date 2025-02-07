@@ -20,7 +20,8 @@ struct PendingFeeUpdate {
 /// redeemed. This is an opinionated design decision that should be taken into account when integrating this contract.
 abstract contract ERC4626Fees is ERC4626, Ownable2Step {
     using Math for uint256;
-
+    // todo: add a function to know the maximal value to input in previewWithdraw to unlock all the assets (with the fee). 
+    // This value should be the one used in redeem/withdraw to unlock all the assets.
     uint256 private constant _BASIS_POINT_SCALE = 1e4;
 
     uint256 public constant FEE_UPDATE_DELAY = 2 weeks;
@@ -99,12 +100,12 @@ abstract contract ERC4626Fees is ERC4626, Ownable2Step {
         uint256 shares
     ) internal virtual override {
         uint256 fee = _feeOnTotal(assets, entryFeeBasisPoints);
-        address recipient = entryFeeCollector;
+        address feeRecipient = entryFeeCollector;
 
         super._deposit(caller, receiver, assets, shares);
 
-        if (fee > 0 && recipient != address(this)) {
-            SafeERC20.safeTransfer(IERC20(asset()), recipient, fee);
+        if (fee > 0 && feeRecipient != address(this)) {
+            SafeERC20.safeTransfer(IERC20(asset()), feeRecipient, fee);
         }
     }
 
@@ -117,12 +118,12 @@ abstract contract ERC4626Fees is ERC4626, Ownable2Step {
         uint256 shares
     ) internal virtual override {
         uint256 fee = _feeOnRaw(assets, exitFeeBasisPoints);
-        address recipient = exitFeeCollector;
+        address feeRecipient = exitFeeCollector;
 
         super._withdraw(caller, receiver, owner, assets, shares);
 
-        if (fee > 0 && recipient != address(this)) {
-            SafeERC20.safeTransfer(IERC20(asset()), recipient, fee);
+        if (fee > 0 && feeRecipient != address(this)) {
+            SafeERC20.safeTransfer(IERC20(asset()), feeRecipient, fee);
         }
     }
 
@@ -178,6 +179,8 @@ abstract contract ERC4626Fees is ERC4626, Ownable2Step {
 
         entryFeeBasisPoints = pendingEntryFeeUpdate.value;
 
+        delete pendingEntryFeeUpdate;
+
         emit EntryFeeEnforced(entryFeeBasisPoints);
         return true;
     }
@@ -195,6 +198,8 @@ abstract contract ERC4626Fees is ERC4626, Ownable2Step {
         }
 
         exitFeeBasisPoints = pendingExitFeeUpdate.value;
+
+        delete pendingExitFeeUpdate;
 
         emit ExitFeeEnforced(exitFeeBasisPoints);
         return true;
