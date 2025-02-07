@@ -34,11 +34,14 @@ contract LobsterVault is ERC4626Fees, OpValidator {
         string memory underlyingTokenSymbol,
         address lobsterAlgorithm_,
         address positionManager_,
-        bytes memory validTargetsAndSelectorsData
+        bytes memory validTargetsAndSelectorsData,
+        address initialEntryFeeCollector,
+        address initialExitFeeCollector
     )
         Ownable(initialOwner)
         ERC20(underlyingTokenName, underlyingTokenSymbol)
         ERC4626(asset)
+        ERC4626Fees(initialEntryFeeCollector, initialExitFeeCollector)
         OpValidator(validTargetsAndSelectorsData)
     {
         if (

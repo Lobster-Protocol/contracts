@@ -26,8 +26,8 @@ abstract contract ERC4626Fees is ERC4626, Ownable2Step {
     uint256 public constant FEE_UPDATE_DELAY = 2 weeks;
     uint256 public constant MAX_FEE = 200; // 2%
 
-    uint256 public entryFeeBasisPoints;
-    uint256 public exitFeeBasisPoints;
+    uint256 public entryFeeBasisPoints = 0;
+    uint256 public exitFeeBasisPoints = 0;
     PendingFeeUpdate public pendingEntryFeeUpdate;
     PendingFeeUpdate public pendingExitFeeUpdate;
 
@@ -51,6 +51,11 @@ abstract contract ERC4626Fees is ERC4626, Ownable2Step {
     );
     error NoPendingFeeUpdate();
     error InvalidFee();
+
+    constructor(address entryFeeCollector_, address exitFeeCollector_) {
+        entryFeeCollector = entryFeeCollector_;
+        exitFeeCollector = exitFeeCollector_;
+    }
 
     // === Overrides ===
 

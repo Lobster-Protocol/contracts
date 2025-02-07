@@ -17,22 +17,31 @@ enum RebaseType {
 
 // Vault base setup & utils function to be used in other test files
 contract VaultTestSetup is Test {
+    MockPositionsManager public positionManager;
     LobsterVault public vault;
-    Counter public counter;
     MockERC20 public asset;
+    Counter public counter;
     address public owner;
     address public alice;
     address public bob;
     address public lobsterAlgorithm;
-    uint256 public lobsterRebaserPrivateKey;
     address public lobsterRebaser;
-    MockPositionsManager public positionManager;
+    uint256 public lobsterRebaserPrivateKey;
+
+    // fees
+    address public entryFeeCollector;
+    address public exitFeeCollector;
+    uint256 public entryFeeBasisPoints = 0;
+    uint256 public exitFeeBasisPoints = 0;
+    //
 
     function setUp() public {
         owner = makeAddr("owner");
         alice = makeAddr("alice");
         bob = makeAddr("bob");
         lobsterAlgorithm = makeAddr("lobsterAlgorithm");
+        entryFeeCollector = makeAddr("entryFeeCollector");
+        exitFeeCollector = makeAddr("exitFeeCollector");
         lobsterRebaserPrivateKey = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
         lobsterRebaser = vm.addr(lobsterRebaserPrivateKey);
 
@@ -62,7 +71,9 @@ contract VaultTestSetup is Test {
             "vTKN",
             lobsterAlgorithm,
             address(positionManager),
-            validTargetsAndSelectorsData
+            validTargetsAndSelectorsData,
+            entryFeeCollector,
+            exitFeeCollector
         );
 
         // Setup initial state
