@@ -245,4 +245,53 @@ contract VaultRedeemTest is VaultTestSetup {
         assertEq(vault.totalAssets(), mintedAssets - redeemedAssets);
         assertEq(vault.maxRedeem(alice), initialMint - tooMuchSharesToRedeem);
     }
+
+    function testRedeemWithoutDeposit() public {
+        // Setup initial state
+        rebaseVault(0, block.number + 1);
+        // random user deposit
+        vm.startPrank(alice);
+        vault.mint(10 ether, alice);
+        vm.stopPrank();
+
+        // bob tries to redeem without deposit
+        vm.startPrank(bob);
+        uint256 redeemedAmount = 5 ether;
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ERC4626.ERC4626ExceededMaxRedeem.selector,
+                address(0x1D96F2f6BeF1202E4Ce1Ff6Dad0c2CB002861d3e),
+                redeemedAmount,
+                vault.maxRedeem(bob)
+            )
+        );
+        vault.redeem(redeemedAmount, bob, bob);
+        vm.stopPrank();
+    }
+
+    function testRedeemWithSmallerDeposit() public {
+        // Setup initial state
+        rebaseVault(0, block.number + 1);
+        // random user deposit
+        vm.startPrank(alice);
+        vault.mint(10 ether, alice);
+        vm.stopPrank();
+
+        // bob tries to redeem without deposit
+        vm.startPrank(bob);
+        uint256 mintAmount = 2 ether;
+        vault.mint(mintAmount, bob);
+        uint256 redeemedAmount = 5 ether;
+        assertGt(redeemedAmount, mintAmount);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ERC4626.ERC4626ExceededMaxRedeem.selector,
+                address(0x1D96F2f6BeF1202E4Ce1Ff6Dad0c2CB002861d3e),
+                redeemedAmount,
+                vault.maxRedeem(bob)
+            )
+        );
+        vault.redeem(redeemedAmount, bob, bob);
+        vm.stopPrank();
+    }
 }

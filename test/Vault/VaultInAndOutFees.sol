@@ -402,6 +402,3 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
         );
     }
 }
-
-// todo: test withdraw, mint, redeem with fees
-// todo: test preview / max functions with fees

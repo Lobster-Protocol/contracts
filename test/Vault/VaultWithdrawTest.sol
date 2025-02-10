@@ -257,4 +257,54 @@ contract VaultMintTest is VaultTestSetup {
             initialDeposit - tooMuchAssetsToRedeem
         );
     }
+
+    function testWithdrawWithoutDeposit() public {
+        // Setup initial state
+        rebaseVault(0, block.number + 1);
+        // random user deposit
+        vm.startPrank(alice);
+        vault.mint(10 ether, alice);
+        vm.stopPrank();
+
+        // bob tries to redeem without deposit
+        vm.startPrank(bob);
+        uint256 withdrawnAmount = 5 ether;
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ERC4626.ERC4626ExceededMaxWithdraw.selector,
+                address(0x1D96F2f6BeF1202E4Ce1Ff6Dad0c2CB002861d3e),
+                withdrawnAmount,
+                vault.maxWithdraw(bob)
+            )
+        );
+        vault.withdraw(withdrawnAmount, bob, bob);
+        vm.stopPrank();
+    }
+
+    function testWithdrawWithSmallerDeposit() public {
+        // Setup initial state
+        rebaseVault(0, block.number + 1);
+        // random user deposit
+        vm.startPrank(alice);
+        vault.mint(10 ether, alice);
+        vm.stopPrank();
+
+        // bob tries to redeem without deposit
+        vm.startPrank(bob);
+        uint256 depositAmount = 2 ether;
+        vault.deposit(depositAmount, bob);
+        uint256 withdrawnAmount = 5 ether;
+        assertGt(withdrawnAmount, depositAmount);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ERC4626.ERC4626ExceededMaxWithdraw.selector,
+                address(0x1D96F2f6BeF1202E4Ce1Ff6Dad0c2CB002861d3e),
+                withdrawnAmount,
+                vault.maxWithdraw(bob)
+            )
+        );
+        vault.withdraw(withdrawnAmount, bob, bob);
+        vm.stopPrank();
+    }
 }
+
