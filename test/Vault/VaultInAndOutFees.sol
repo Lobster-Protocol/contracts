@@ -136,6 +136,7 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
     }
 
     // idk why this test is failing
+    // todo: fix this
     // function testSetEntryFeeGtMaxFee() public {
     //     // set fees to MAX_FEE + 1
     //     vm.startPrank(owner);
@@ -145,6 +146,7 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
     // }
 
     // idk why this test is failing
+    // todo: fix this
     // function testSetExitFeeGtMaxFee() public {
     //     // set fees to MAX_FEE + 1
     //     vm.startPrank(owner);
