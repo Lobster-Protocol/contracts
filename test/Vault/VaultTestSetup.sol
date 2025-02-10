@@ -31,6 +31,7 @@ contract VaultTestSetup is Test {
     // fees
     address public entryFeeCollector;
     address public exitFeeCollector;
+    address public managementFeeCollector;
     uint256 public entryFeeBasisPoints = 0;
     uint256 public exitFeeBasisPoints = 0;
     //
@@ -42,6 +43,7 @@ contract VaultTestSetup is Test {
         lobsterAlgorithm = makeAddr("lobsterAlgorithm");
         entryFeeCollector = makeAddr("entryFeeCollector");
         exitFeeCollector = makeAddr("exitFeeCollector");
+        managementFeeCollector = makeAddr("managementFeeCollector");
         lobsterRebaserPrivateKey = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
         lobsterRebaser = vm.addr(lobsterRebaserPrivateKey);
 
@@ -73,7 +75,8 @@ contract VaultTestSetup is Test {
             address(positionManager),
             validTargetsAndSelectorsData,
             entryFeeCollector,
-            exitFeeCollector
+            exitFeeCollector,
+            managementFeeCollector
         );
 
         // Setup initial state

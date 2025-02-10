@@ -8,7 +8,7 @@ import {ERC4626Fees, IERC4626FeesEvents} from "../../src/Vault/ERC4626Fees.sol";
 
 // test deposit / withdraw / mint / redeem fee
 contract VaultInAndOutFeesTest is VaultTestSetup {
-    // the default fess are set to 0
+    // the default fee is set to 0
 
     /* -----------------------HELPER FUNCTIONS TO SET VAULT FEES----------------------- */
     function setEntryFeeBasisPoint(uint256 fee) public returns (bool) {
