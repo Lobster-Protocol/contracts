@@ -198,7 +198,6 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
         vault.withdraw(vault.maxWithdraw(alice) - exitFee, alice, alice);
         vm.stopPrank();
 
-
         // ensure the collector has received the fees
         assertEq(
             asset.balanceOf(vault.exitFeeCollector()),
@@ -206,7 +205,7 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
         );
     }
 
-    /* -----------------------TEST DEPOSIT WITH FEES----------------------- */
+    /* -----------------------TEST ENTRY/EXIT FUNCTIONS WITH FEES----------------------- */
     function testDepositFee() public {
         rebaseVault(0, block.number + 1);
 
@@ -228,6 +227,7 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
         vm.startPrank(bob);
         uint256 bobDeposit = 1000;
         vault.deposit(bobDeposit, bob);
+        vm.stopPrank();
 
         assertEq(
             vault.maxWithdraw(bob),
@@ -241,8 +241,167 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
             vault.balanceOf(bob),
             bobDeposit - computeFees(bobDeposit, 150)
         );
+
+        // ensure fee collector received the fees
+        assertEq(
+            asset.balanceOf(vault.entryFeeCollector()),
+            computeFees(bobDeposit, 150)
+        );
+    }
+
+    function testMintFee() public {
+        rebaseVault(0, block.number + 1);
+
+        // alice mints 750 with a fee of 0
+        vm.startPrank(alice);
+        vault.mint(750, alice);
+
+        assertEq(vault.maxWithdraw(alice), 750);
         vm.stopPrank();
+
+        // set fees to 150 (1.5%)
+        setEntryFeeBasisPoint(150);
+        // wait for a block with timestamp >= FEE_UPDATE_DELAY + block.timestamp
+        vm.warp(block.timestamp + vault.FEE_UPDATE_DELAY());
+        // enforce the fee update
+        vault.enforceNewEntryFee();
+
+        // bob mints 1000 with a fee of 150
+        vm.startPrank(bob);
+        uint256 bobInitialAssetBalance = asset.balanceOf(bob);
+        uint256 expectedMintedAssetValue = vault.previewMint(1000); // 1000 + fee
+
+        uint256 bobMint = 1000;
+        uint256 depositedAssets = vault.mint(bobMint, bob);
+
+        // ensure bob sent the asset to the vault + fees
+        assertEq(
+            asset.balanceOf(bob),
+            bobInitialAssetBalance - expectedMintedAssetValue
+        );
+
+        // ensure the vault received the asset sent by bob - fees
+        assertEq(
+            vault.totalAssets(),
+            750 + expectedMintedAssetValue - computeFees(bobMint, 150)
+        );
+
+        // ensure bob received the minted tokens
+        assertEq(vault.balanceOf(bob), bobMint);
+
+        // ensure fee collector received the fees
+        assertEq(
+            asset.balanceOf(vault.entryFeeCollector()),
+            computeFees(depositedAssets, 150)
+        );
+    }
+
+    function testWithdrawFee() public {
+        rebaseVault(0, block.number + 1);
+
+        // alice deposits 1000 with a fee of 0
+        vm.startPrank(alice);
+        vault.deposit(1000, alice);
+
+        assertEq(vault.maxWithdraw(alice), 1000);
+        vm.stopPrank();
+
+        // bob deposits 1000 with a fee of 0
+        vm.startPrank(bob);
+        uint256 bobDeposit = 1000;
+        vault.deposit(bobDeposit, bob);
+        vm.stopPrank();
+
+        // set fees to 150 (1.5%)
+        setExitFeeBasisPoint(150);
+        // wait for a block with timestamp >= FEE_UPDATE_DELAY + block.timestamp
+        vm.warp(block.timestamp + vault.FEE_UPDATE_DELAY());
+        // enforce the fee update
+        vault.enforceNewExitFee();
+
+        // bob withdraws 1000 with a fee of 150
+        vm.startPrank(bob);
+        uint256 bobInitialAssetBalance = asset.balanceOf(bob);
+        uint256 maxWithdraw = vault.maxWithdraw(bob);
+        uint256 expectedWithdrawnAssetValue = maxWithdraw -
+            computeFees(maxWithdraw, 150);
+        uint256 exitFeeCollectorInitialBalance = asset.balanceOf(
+            vault.exitFeeCollector()
+        );
+
+        vault.withdraw(expectedWithdrawnAssetValue, bob, bob);
+
+        // ensure bob received the asset - fees
+        assertEq(
+            asset.balanceOf(bob),
+            bobInitialAssetBalance + expectedWithdrawnAssetValue
+        );
+
+        // ensure the vault sent the asset to bob - fees
+        assertEq(vault.totalAssets(), 1000); // only alice's deposit remains
+
+        // ensure bob's shares have been burned
+        assertEq(vault.balanceOf(bob), 0);
+
+        // ensure the exit fee collector received the fees
+        assertEq(
+            asset.balanceOf(vault.exitFeeCollector()),
+            exitFeeCollectorInitialBalance + computeFees(maxWithdraw, 150)
+        );
+    }
+
+    function testRedeemFee() public {
+        rebaseVault(0, block.number + 1);
+
+        // alice deposits 1000 with a fee of 0
+        vm.startPrank(alice);
+        vault.deposit(1000, alice);
+
+        assertEq(vault.maxWithdraw(alice), 1000);
+        vm.stopPrank();
+
+        // bob deposits 799 with a fee of 0
+        vm.startPrank(bob);
+        uint256 bobDeposit = 799;
+        vault.deposit(bobDeposit, bob);
+        vm.stopPrank();
+
+        // set fees to 33 (0.33%)
+        setExitFeeBasisPoint(33);
+        // wait for a block with timestamp >= FEE_UPDATE_DELAY + block.timestamp
+        vm.warp(block.timestamp + vault.FEE_UPDATE_DELAY());
+        // enforce the fee update
+        vault.enforceNewExitFee();
+
+        // bob redeems all his shares with a fee of 33
+        vm.startPrank(bob);
+        uint256 bobInitialAssetBalance = asset.balanceOf(bob);
+        uint256 expectedRedeemedAssetValue = vault.previewRedeem(
+            vault.balanceOf(bob)
+        ); // 799 - fee
+
+        vault.redeem(vault.balanceOf(bob), bob, bob);
+
+        // ensure bob received the asset - fees
+        assertEq(
+            asset.balanceOf(bob),
+            bobInitialAssetBalance + expectedRedeemedAssetValue
+        );
+
+        // ensure the vault sent the asset to bob - fees
+        assertEq(vault.totalAssets(), 1000); // only alice's deposit remains
+
+        // ensure bob's shares have been burned
+        assertEq(vault.balanceOf(bob), 0);
+
+        console2.log("bob deposit", bobDeposit);
+        // ensure the exit fee collector received the fees
+        assertEq(
+            asset.balanceOf(vault.exitFeeCollector()),
+            computeFees(bobDeposit, 33) + 1 // 1 is the rounding error
+        );
     }
 }
 
 // todo: test withdraw, mint, redeem with fees
+// todo: test preview / max functions with fees
