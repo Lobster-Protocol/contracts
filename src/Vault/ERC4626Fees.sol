@@ -165,7 +165,7 @@ abstract contract ERC4626Fees is ERC4626, Ownable2Step {
         return true;
     }
 
-    function enforceNewEntryFee() external returns (bool) {
+    function enforceNewEntryFee() external onlyOwner returns (bool) {
         if (pendingEntryFeeUpdate.activationTimestamp == 0)
             revert NoPendingFeeUpdate();
 
@@ -185,7 +185,7 @@ abstract contract ERC4626Fees is ERC4626, Ownable2Step {
         return true;
     }
 
-    function enforceNewExitFee() external returns (bool) {
+    function enforceNewExitFee() external onlyOwner returns (bool) {
         if (pendingExitFeeUpdate.activationTimestamp == 0)
             revert NoPendingFeeUpdate();
 
