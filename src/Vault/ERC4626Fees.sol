@@ -35,9 +35,10 @@ abstract contract ERC4626Fees is IERC4626FeesEvents, ERC4626, Ownable2Step {
     address public exitFeeCollector;
     address public managementFeeCollector;
 
-    constructor(address entryFeeCollector_, address exitFeeCollector_) {
+    constructor(address entryFeeCollector_, address exitFeeCollector_, address managementFeeCollector_) {
         entryFeeCollector = entryFeeCollector_;
         exitFeeCollector = exitFeeCollector_;
+        managementFeeCollector = managementFeeCollector_;
     }
 
     // === Overrides ===
@@ -239,6 +240,10 @@ abstract contract ERC4626Fees is IERC4626FeesEvents, ERC4626, Ownable2Step {
 
     function setManagementFeeCollector(address collector) external onlyOwner {
         managementFeeCollector = collector;
+    }
+
+    function collectManagementFees() external onlyOwner returns (uint256) {
+        return _collectManagementFees();
     }
 
     // === Fee operations ===

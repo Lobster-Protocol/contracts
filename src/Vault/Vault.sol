@@ -6,7 +6,6 @@ import {ERC4626Fees} from "./ERC4626Fees.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Op} from "../interfaces/IValidator.sol";
-// import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {LobsterOpValidator as OpValidator} from "../Validator/OpValidator.sol";
 import {LobsterPositionsManager as PositionsManager} from "../PositionsManager/PositionsManager.sol";
@@ -27,6 +26,7 @@ contract LobsterVault is ERC4626Fees, OpValidator {
         _;
     }
 
+    // todo: add initial fees
     constructor(
         address initialOwner,
         IERC20 asset,
@@ -36,12 +36,13 @@ contract LobsterVault is ERC4626Fees, OpValidator {
         address positionManager_,
         bytes memory validTargetsAndSelectorsData,
         address initialEntryFeeCollector,
-        address initialExitFeeCollector
+        address initialExitFeeCollector,
+        address initialManagementFeeCollector
     )
         Ownable(initialOwner)
         ERC20(underlyingTokenName, underlyingTokenSymbol)
         ERC4626(asset)
-        ERC4626Fees(initialEntryFeeCollector, initialExitFeeCollector)
+        ERC4626Fees(initialEntryFeeCollector, initialExitFeeCollector, initialManagementFeeCollector)
         OpValidator(validTargetsAndSelectorsData)
     {
         if (
