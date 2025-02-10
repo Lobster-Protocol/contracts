@@ -272,7 +272,7 @@ contract VaultMintTest is VaultTestSetup {
         vm.expectRevert(
             abi.encodeWithSelector(
                 ERC4626.ERC4626ExceededMaxWithdraw.selector,
-                address(0x1D96F2f6BeF1202E4Ce1Ff6Dad0c2CB002861d3e),
+                bob,
                 withdrawnAmount,
                 vault.maxWithdraw(bob)
             )
@@ -298,7 +298,7 @@ contract VaultMintTest is VaultTestSetup {
         vm.expectRevert(
             abi.encodeWithSelector(
                 ERC4626.ERC4626ExceededMaxWithdraw.selector,
-                address(0x1D96F2f6BeF1202E4Ce1Ff6Dad0c2CB002861d3e),
+                bob,
                 withdrawnAmount,
                 vault.maxWithdraw(bob)
             )

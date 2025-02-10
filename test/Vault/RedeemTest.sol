@@ -260,7 +260,7 @@ contract VaultRedeemTest is VaultTestSetup {
         vm.expectRevert(
             abi.encodeWithSelector(
                 ERC4626.ERC4626ExceededMaxRedeem.selector,
-                address(0x1D96F2f6BeF1202E4Ce1Ff6Dad0c2CB002861d3e),
+                bob,
                 redeemedAmount,
                 vault.maxRedeem(bob)
             )
@@ -286,7 +286,7 @@ contract VaultRedeemTest is VaultTestSetup {
         vm.expectRevert(
             abi.encodeWithSelector(
                 ERC4626.ERC4626ExceededMaxRedeem.selector,
-                address(0x1D96F2f6BeF1202E4Ce1Ff6Dad0c2CB002861d3e),
+                bob,
                 redeemedAmount,
                 vault.maxRedeem(bob)
             )
