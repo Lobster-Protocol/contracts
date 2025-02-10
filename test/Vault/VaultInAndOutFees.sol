@@ -53,15 +53,15 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
         vm.warp(block.timestamp + vault.FEE_UPDATE_DELAY());
 
         // enforce the fee update
+        vm.startPrank(owner);
         vault.enforceNewEntryFee();
-
+        vm.stopPrank();
         // ensure pending fee has been updated
         (uint256 fee, uint256 enforcementTimestamp) = vault
             .pendingEntryFeeUpdate();
         assertEq(fee, 0);
         assertEq(enforcementTimestamp, 0);
         assertEq(vault.entryFeeBasisPoints(), 200);
-        vm.stopPrank();
     }
 
     function testEnforceEntryPendingFeesThatDontExist() public {
@@ -102,6 +102,9 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
             )
         );
 
+        vm.stopPrank();
+
+        vm.startPrank(owner);
         vault.enforceNewEntryFee();
         vm.stopPrank();
     }
@@ -161,7 +164,9 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
         // wait for a block with timestamp >= FEE_UPDATE_DELAY + block.timestamp
         vm.warp(block.timestamp + vault.FEE_UPDATE_DELAY());
         // enforce the fee update
+        vm.startPrank(owner);
         vault.enforceNewEntryFee();
+        vm.stopPrank();
 
         rebaseVault(0, block.number + 1);
         uint256 depositAmount = 1000;
@@ -187,7 +192,9 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
         // wait for a block with timestamp >= FEE_UPDATE_DELAY + block.timestamp
         vm.warp(block.timestamp + vault.FEE_UPDATE_DELAY());
         // enforce the fee update
+        vm.startPrank(owner);
         vault.enforceNewExitFee();
+        vm.stopPrank();
 
         rebaseVault(0, block.number + 1);
         uint256 depositAmount = 1000;
@@ -221,7 +228,9 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
         // wait for a block with timestamp >= FEE_UPDATE_DELAY + block.timestamp
         vm.warp(block.timestamp + vault.FEE_UPDATE_DELAY());
         // enforce the fee update
+        vm.startPrank(owner);
         vault.enforceNewEntryFee();
+        vm.stopPrank();
 
         // bob deposits 1000 with a fee of 150
         vm.startPrank(bob);
@@ -264,7 +273,9 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
         // wait for a block with timestamp >= FEE_UPDATE_DELAY + block.timestamp
         vm.warp(block.timestamp + vault.FEE_UPDATE_DELAY());
         // enforce the fee update
+        vm.startPrank(owner);
         vault.enforceNewEntryFee();
+        vm.stopPrank();
 
         // bob mints 1000 with a fee of 150
         vm.startPrank(bob);
@@ -317,7 +328,9 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
         // wait for a block with timestamp >= FEE_UPDATE_DELAY + block.timestamp
         vm.warp(block.timestamp + vault.FEE_UPDATE_DELAY());
         // enforce the fee update
+        vm.startPrank(owner);
         vault.enforceNewExitFee();
+        vm.stopPrank();
 
         // bob withdraws 1000 with a fee of 150
         vm.startPrank(bob);
@@ -371,7 +384,9 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
         // wait for a block with timestamp >= FEE_UPDATE_DELAY + block.timestamp
         vm.warp(block.timestamp + vault.FEE_UPDATE_DELAY());
         // enforce the fee update
+        vm.startPrank(owner);
         vault.enforceNewExitFee();
+        vm.stopPrank();
 
         // bob redeems all his shares with a fee of 33
         vm.startPrank(bob);
