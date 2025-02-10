@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 import "forge-std/Test.sol";
 import {PendingFeeUpdate} from "../../src/Vault/ERC4626Fees.sol";
 import {VaultTestSetup} from "./VaultTestSetup.sol";
-import {ERC4626Fees} from "../../src/Vault/ERC4626Fees.sol";
+import {ERC4626Fees, IERC4626FeesEvents} from "../../src/Vault/ERC4626Fees.sol";
 
 // test deposit / withdraw / mint / redeem fee
 contract VaultInAndOutFeesTest is VaultTestSetup {
@@ -67,7 +67,7 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
     function testEnforceEntryPendingFeesThatDontExist() public {
         // try to enforce fees when there is no pending fee update
         vm.startPrank(owner);
-        vm.expectRevert(ERC4626Fees.NoPendingFeeUpdate.selector);
+        vm.expectRevert(IERC4626FeesEvents.NoPendingFeeUpdate.selector);
         vault.enforceNewEntryFee();
         vm.stopPrank();
     }
@@ -75,7 +75,7 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
     function testEnforceExitPendingFeesThatDontExist() public {
         // try to enforce fees when there is no pending fee update
         vm.startPrank(owner);
-        vm.expectRevert(ERC4626Fees.NoPendingFeeUpdate.selector);
+        vm.expectRevert(IERC4626FeesEvents.NoPendingFeeUpdate.selector);
         vault.enforceNewExitFee();
         vm.stopPrank();
     }
@@ -96,7 +96,7 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
         // containing the current timestamp and activation timestamp
         vm.expectRevert(
             abi.encodeWithSelector(
-                ERC4626Fees.ActivationTimestampNotReached.selector,
+                IERC4626FeesEvents.ActivationTimestampNotReached.selector,
                 currentTimestamp,
                 activationTimestamp
             )
@@ -122,7 +122,7 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
         // containing the current timestamp and activation timestamp
         vm.expectRevert(
             abi.encodeWithSelector(
-                ERC4626Fees.ActivationTimestampNotReached.selector,
+                IERC4626FeesEvents.ActivationTimestampNotReached.selector,
                 currentTimestamp,
                 activationTimestamp
             )

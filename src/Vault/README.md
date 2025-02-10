@@ -59,4 +59,4 @@ A part (which needs to be determined) of the fees collected by the vault will be
 All fee parameters are maintained as protocol constants but can be modified by Lobster governance through update. Fee collection is automated and integrated into the rebasing process to ensure consistent protocol revenue management.
 
 
-> Note: When users request a withdrawal, the offchain script which creates the operation to execute to unlock the assets MUST first use the assets from the vault first and only retrieve the missing funds if needed
+> Note: When users request a withdrawal, the offchain script which creates the operation to execute to unlock the assets MUST first use the assets from the vault first and only retrieve the missing funds from third party protocols (if needed)
