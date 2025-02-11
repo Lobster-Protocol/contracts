@@ -364,7 +364,7 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
         // alice deposit
         uint256 aliceDeposit = 1000;
         vm.startPrank(alice);
-        uint256 aliceShares = vault.deposit(aliceDeposit, alice);
+        vault.deposit(aliceDeposit, alice);
         vm.stopPrank();
 
         uint256 feeEnforcementTimestamp = block.timestamp;
@@ -403,8 +403,7 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
             aliceDeposit - aliceWithdraw - expectedManagementFee
         );
 
-        
-        assertEq(vault.totalSupply(), vault.balanceOf(alice));
+        assertEq(vault.totalSupply(), vault.balanceOf(alice)); // todo: compute alice shares manually
 
         // ensure fee collector's share remained the same
         assertEq(
@@ -418,6 +417,71 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
             aliceDeposit - aliceWithdraw - expectedManagementFee
         );
     }
-}
 
-// todo: test automatic management fee collection at redeem
+    function testManagementFeeCollectionAtRedeem() public {
+        rebaseVault(0, block.number + 1);
+
+        uint256 initialFeeCollectorBalance = asset.balanceOf(
+            vault.managementFeeCollector()
+        );
+        uint256 initialFeeCollectorShares = vault.balanceOf(
+            vault.managementFeeCollector()
+        );
+
+        // alice mint
+        uint256 aliceMint = 1000;
+        vm.startPrank(alice);
+        uint256 aliceAssets = vault.mint(aliceMint, alice);
+        vm.stopPrank();
+
+        uint256 feeEnforcementTimestamp = block.timestamp;
+        // set management fee to 100 basis points (1%)
+        uint256 managementFee = 100;
+        setManagementFeeBasisPoint(managementFee);
+
+        // with the vm.wrap fct called, only timestamp is increased, no need to rebase since block number did not change
+
+        // wait for some time
+        vm.warp(block.timestamp + 365 days);
+
+        // management fee has been collected at alice's redeem
+        uint256 aliceRedeem = 500;
+        vm.startPrank(alice);
+        uint256 aliceRedeemedAssets = vault.redeem(aliceRedeem, alice, alice);
+        vm.stopPrank();
+
+        uint256 timeElapsedFromFeeEnforcement = block.timestamp -
+            feeEnforcementTimestamp;
+        uint256 expectedManagementFee = computeManagementFee(
+            aliceMint,
+            timeElapsedFromFeeEnforcement,
+            managementFee
+        );
+
+        // ensure fee collector received the expected fee
+        assertEq(
+            asset.balanceOf(vault.managementFeeCollector()),
+            initialFeeCollectorBalance + expectedManagementFee
+        );
+
+        // ensure vault assets where updated correctly
+        assertEq(
+            asset.balanceOf(address(vault)),
+            aliceAssets - aliceRedeemedAssets - expectedManagementFee
+        );
+
+        assertEq(vault.totalSupply(), vault.balanceOf(alice));
+
+        // ensure fee collector's share remained the same
+        assertEq(
+            vault.balanceOf(vault.managementFeeCollector()),
+            initialFeeCollectorShares
+        );
+
+        // ensure max withdrawals values
+        assertEq(
+            vault.maxWithdraw(alice),
+            aliceAssets - aliceRedeemedAssets - expectedManagementFee
+        );
+    }
+}
