@@ -35,7 +35,11 @@ abstract contract ERC4626Fees is IERC4626FeesEvents, ERC4626, Ownable2Step {
     address public exitFeeCollector;
     address public managementFeeCollector;
 
-    constructor(address entryFeeCollector_, address exitFeeCollector_, address managementFeeCollector_) {
+    constructor(
+        address entryFeeCollector_,
+        address exitFeeCollector_,
+        address managementFeeCollector_
+    ) {
         entryFeeCollector = entryFeeCollector_;
         exitFeeCollector = exitFeeCollector_;
         managementFeeCollector = managementFeeCollector_;
@@ -75,6 +79,48 @@ abstract contract ERC4626Fees is IERC4626FeesEvents, ERC4626, Ownable2Step {
         return assets - _feeOnTotal(assets, exitFeeBasisPoints);
     }
 
+    function deposit(
+        uint256 assets,
+        address receiver
+    ) public virtual override returns (uint256) {
+        // first collect management fee
+        _collectManagementFees();
+
+        return super.deposit(assets, receiver);
+    }
+
+    function mint(
+        uint256 shares,
+        address receiver
+    ) public virtual override returns (uint256) {
+        // first collect management fee
+        _collectManagementFees();
+
+        return super.mint(shares, receiver);
+    }
+
+    function withdraw(
+        uint256 assets,
+        address receiver,
+        address owner
+    ) public virtual override returns (uint256) {
+        // first collect management fee
+        _collectManagementFees();
+
+        return super.withdraw(assets, receiver, owner);
+    }
+
+    function redeem(
+        uint256 shares,
+        address receiver,
+        address owner
+    ) public virtual override returns (uint256) {
+        // first collect management fee
+        _collectManagementFees();
+
+        return super.redeem(shares, receiver, owner);
+    }
+
     /// @dev Send entry fee to {entryFeeCollector}. See {IERC4626-_deposit}.
     function _deposit(
         address caller,
@@ -82,9 +128,6 @@ abstract contract ERC4626Fees is IERC4626FeesEvents, ERC4626, Ownable2Step {
         uint256 assets,
         uint256 shares
     ) internal virtual override {
-        // first collect management fee
-        _collectManagementFees();
-
         uint256 fee = _feeOnTotal(assets, entryFeeBasisPoints);
         address feeRecipient = entryFeeCollector;
 
@@ -154,7 +197,9 @@ abstract contract ERC4626Fees is IERC4626FeesEvents, ERC4626, Ownable2Step {
         return true;
     }
 
-    function setManagementFee(uint256 feeBasisPoints) external onlyOwner returns (bool) {
+    function setManagementFee(
+        uint256 feeBasisPoints
+    ) external onlyOwner returns (bool) {
         if (feeBasisPoints > MAX_FEE) revert InvalidFee();
 
         pendingManagementFeeUpdate = PendingFeeUpdate({
@@ -222,11 +267,15 @@ abstract contract ERC4626Fees is IERC4626FeesEvents, ERC4626, Ownable2Step {
             );
         }
 
+        // collect management fee
+        _collectManagementFees();
+
         managementFeeBasisPoints = pendingManagementFeeUpdate.value;
 
         delete pendingManagementFeeUpdate;
 
         emit ManagementFeeEnforced(managementFeeBasisPoints);
+
         return true;
     }
 
@@ -279,19 +328,22 @@ abstract contract ERC4626Fees is IERC4626FeesEvents, ERC4626, Ownable2Step {
     // === Fee collection ===
 
     function _collectManagementFees() internal virtual returns (uint256) {
-        if (managementFeeBasisPoints == 0) return 0;
+        if (managementFeeBasisPoints == 0) {
+            lastManagementFeeCollection = block.timestamp;
+            return 0;
+        }
 
         uint256 timePassed = block.timestamp - lastManagementFeeCollection;
-        uint256 totalAssets = super.totalAssets();
 
-        // Calculate annual fee pro-rated by time passed
-        uint256 fee = totalAssets.mulDiv(
+        // Calculate annual fee pro-rated by time passed, this fee is in assets
+        uint256 fee = super.totalAssets().mulDiv(
             managementFeeBasisPoints * timePassed,
             _BASIS_POINT_SCALE * 365 days,
             Math.Rounding.Ceil
         );
 
         if (fee > 0 && managementFeeCollector != address(this)) {
+            // transfer assets to management fee collector
             SafeERC20.safeTransfer(
                 IERC20(asset()),
                 managementFeeCollector,
