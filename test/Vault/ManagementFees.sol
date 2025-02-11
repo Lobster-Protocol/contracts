@@ -345,14 +345,79 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
         );
 
         // ensure max withdrawals values
-        assertEq(
-            vault.maxWithdraw(alice),
-            aliceAssets - expectedManagementFee
-        );
+        assertEq(vault.maxWithdraw(alice), aliceAssets - expectedManagementFee);
 
         // bob should no be impacted by management fees
         assertEq(vault.maxWithdraw(bob), bobAssets - 1); // -1 because of rounding errors
     }
+
+    function testManagementFeeCollectionAtWithdraw() public {
+        rebaseVault(0, block.number + 1);
+
+        uint256 initialFeeCollectorBalance = asset.balanceOf(
+            vault.managementFeeCollector()
+        );
+        uint256 initialFeeCollectorShares = vault.balanceOf(
+            vault.managementFeeCollector()
+        );
+
+        // alice deposit
+        uint256 aliceDeposit = 1000;
+        vm.startPrank(alice);
+        uint256 aliceShares = vault.deposit(aliceDeposit, alice);
+        vm.stopPrank();
+
+        uint256 feeEnforcementTimestamp = block.timestamp;
+        // set management fee to 100 basis points (1%)
+        uint256 managementFee = 100;
+        setManagementFeeBasisPoint(managementFee);
+
+        // with the vm.wrap fct called, only timestamp is increased, no need to rebase since block number did not change
+
+        // wait for some time
+        vm.warp(block.timestamp + 365 days);
+
+        // management fee has been collected at alice's withdraw
+        uint256 aliceWithdraw = 500;
+        vm.startPrank(alice);
+        vault.withdraw(aliceWithdraw, alice, alice);
+        vm.stopPrank();
+
+        uint256 timeElapsedFromFeeEnforcement = block.timestamp -
+            feeEnforcementTimestamp;
+        uint256 expectedManagementFee = computeManagementFee(
+            aliceDeposit,
+            timeElapsedFromFeeEnforcement,
+            managementFee
+        );
+
+        // ensure fee collector received the expected fee
+        assertEq(
+            asset.balanceOf(vault.managementFeeCollector()),
+            initialFeeCollectorBalance + expectedManagementFee
+        );
+
+        // ensure vault assets where updated correctly
+        assertEq(
+            asset.balanceOf(address(vault)),
+            aliceDeposit - aliceWithdraw - expectedManagementFee
+        );
+
+        
+        assertEq(vault.totalSupply(), vault.balanceOf(alice));
+
+        // ensure fee collector's share remained the same
+        assertEq(
+            vault.balanceOf(vault.managementFeeCollector()),
+            initialFeeCollectorShares
+        );
+
+        // ensure max withdrawals values
+        assertEq(
+            vault.maxWithdraw(alice),
+            aliceDeposit - aliceWithdraw - expectedManagementFee
+        );
+    }
 }
 
-// todo: test automatic management fee collection at mint / withdrawal / redeem
+// todo: test automatic management fee collection at redeem
