@@ -545,15 +545,4 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
 
         return (assetsLeft, managementFeeShares, performanceFeeShares);
     }
-
-    // function _estimateFeesBeforeDeposit() internal view returns (uint256) {
-    //     return _feeOnRaw(totalAssets(), entryFeeBasisPoints);
-    // }
-
-    // function _estimateFeesBeforeWithdraw() internal view returns (uint256) {
-    //     return
-    //         _calculateManagementFee() +
-    //         _calculatePerformanceFee() +
-    //         _feeOnRaw(totalAssets(), exitFeeBasisPoints);
-    // }
 }
