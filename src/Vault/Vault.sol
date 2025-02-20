@@ -9,11 +9,18 @@ import {Op} from "../interfaces/IValidator.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {LobsterOpValidator as OpValidator} from "../Validator/OpValidator.sol";
 import {LobsterPositionsManager as PositionsManager} from "../PositionsManager/PositionsManager.sol";
+import {BASIS_POINT_SCALE} from "./Constants.sol";
 
-contract LobsterVault is ERC4626Fees, OpValidator {
+contract LobsterVault is OpValidator, ERC4626Fees {
     using Math for uint256;
 
     PositionsManager public immutable positionManager;
+    event FeesCollected(
+        uint256 total,
+        uint256 managementFees,
+        uint256 performanceFees,
+        uint256 timestamp
+    );
 
     error InitialDepositTooLow(uint256 minimumDeposit);
     error NotEnoughAssets();
@@ -35,14 +42,12 @@ contract LobsterVault is ERC4626Fees, OpValidator {
         address lobsterAlgorithm_,
         address positionManager_,
         bytes memory validTargetsAndSelectorsData,
-        address initialEntryFeeCollector,
-        address initialExitFeeCollector,
-        address initialManagementFeeCollector
+        address initialFeeCollector
     )
         Ownable(initialOwner)
         ERC20(underlyingTokenName, underlyingTokenSymbol)
         ERC4626(asset)
-        ERC4626Fees(initialEntryFeeCollector, initialExitFeeCollector, initialManagementFeeCollector)
+        ERC4626Fees(initialFeeCollector)
         OpValidator(validTargetsAndSelectorsData)
     {
         if (
@@ -266,33 +271,13 @@ contract LobsterVault is ERC4626Fees, OpValidator {
         super._withdraw(caller, receiver, owner, assets, shares);
     }
 
-    /* ------------------UPDATE REBASE OPERATOR------------------ */
+    /* ------------------ REBASE ------------------ */
 
-    function setRebaser(address newRebaser, bool enabled) external onlyOwner {
+    function setRebaser(
+        address newRebaser,
+        bool enabled
+    ) external onlyOwner {
         require(newRebaser != address(0), ZeroAddress());
         rebaseOperators[newRebaser] = enabled;
     }
-
-    // /* ------------------RETRIEVE ASSETS FROM THIRD PARTY CONTRACTS------------------ */
-
-    // /**
-    //  * @notice Retrieve assets from uniswap only
-    //  * @dev Verifies if the contract has enough assets to retrieve, if not, calls uniswap v3 supported pools to retrieve the assets
-    //  * supported pools: uniV3 weth/wbtc
-    //  * the assets that are not eth or weth are swapped on 1Inch
-    //  *
-    //  * @param amount - The amount of assets to retrieve
-    //  * @return missingAssets - The amount of assets that could not be retrieved
-    //  */
-    // function retrieveAssets(
-    //     uint256 amount
-    // ) private returns (uint256 missingAssets) {
-    //     // First check if the contract has enough assets to retrieve without calling third party contracts
-    //     if (IERC20(asset()).balanceOf(address(this)) >= amount) {
-    //         return 0;
-    //     }
-
-    //     // Else call third party contracts to retrieve the assets
-    //     // Get tokens from Uniswap V3 weth/wbtc pool
-    // }
 }

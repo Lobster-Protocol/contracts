@@ -7,6 +7,8 @@ import {Counter} from "../Mocks/Counter.sol";
 import {MockERC20} from "../Mocks/MockERC20.sol";
 import {MockPositionsManager} from "../Mocks/MockPositionsManager.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {BASIS_POINT_SCALE, SECONDS_PER_YEAR} from "../../src/Vault/Constants.sol";
 
 enum RebaseType {
     DEPOSIT,
@@ -17,6 +19,8 @@ enum RebaseType {
 
 // Vault base setup & utils function to be used in other test files
 contract VaultTestSetup is Test {
+    using Math for uint256;
+
     MockPositionsManager public positionManager;
     LobsterVault public vault;
     MockERC20 public asset;
@@ -29,11 +33,10 @@ contract VaultTestSetup is Test {
     uint256 public lobsterRebaserPrivateKey;
 
     // fees
-    address public entryFeeCollector;
-    address public exitFeeCollector;
-    address public managementFeeCollector;
+    address public feeCollector;
     uint256 public entryFeeBasisPoints = 0;
     uint256 public exitFeeBasisPoints = 0;
+
     //
 
     function setUp() public {
@@ -41,9 +44,7 @@ contract VaultTestSetup is Test {
         alice = makeAddr("alice");
         bob = makeAddr("bob");
         lobsterAlgorithm = makeAddr("lobsterAlgorithm");
-        entryFeeCollector = makeAddr("entryFeeCollector");
-        exitFeeCollector = makeAddr("exitFeeCollector");
-        managementFeeCollector = makeAddr("managementFeeCollector");
+        feeCollector = makeAddr("feeCollector");
         lobsterRebaserPrivateKey = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
         lobsterRebaser = vm.addr(lobsterRebaserPrivateKey);
 
@@ -74,9 +75,7 @@ contract VaultTestSetup is Test {
             lobsterAlgorithm,
             address(positionManager),
             validTargetsAndSelectorsData,
-            entryFeeCollector,
-            exitFeeCollector,
-            managementFeeCollector
+            feeCollector
         );
 
         // Setup initial state
@@ -173,5 +172,61 @@ contract VaultTestSetup is Test {
             })
         );
         vm.stopPrank();
+    }
+
+    function setEntryFeeBasisPoint(uint256 fee) public returns (bool) {
+        vm.startPrank(owner);
+        vault.setEntryFee(fee);
+        // wait for the fee to be activated
+        vm.warp(block.timestamp + vault.FEE_UPDATE_DELAY());
+        // enforce the fee
+        vault.enforceNewEntryFee();
+        vm.stopPrank();
+
+        return true;
+    }
+
+    function setExitFeeBasisPoint(uint256 fee) public returns (bool) {
+        vm.startPrank(owner);
+        vault.setExitFee(fee);
+        // wait for the fee to be activated
+        vm.warp(block.timestamp + vault.FEE_UPDATE_DELAY());
+        // enforce the fee
+        vault.enforceNewExitFee();
+        vm.stopPrank();
+
+        return true;
+    }
+
+    function setManagementFeeBasisPoint(uint256 fee) public returns (bool) {
+        vm.startPrank(owner);
+        vault.setManagementFee(fee);
+        // wait for the fee to be activated
+        vm.warp(block.timestamp + vault.FEE_UPDATE_DELAY());
+        // enforce the fee
+        vault.enforceNewManagementFee();
+        vm.stopPrank();
+
+        return true;
+    }
+
+    function computeFees(
+        uint256 amount,
+        uint256 fee
+    ) public pure returns (uint256) {
+        return amount.mulDiv(fee, BASIS_POINT_SCALE, Math.Rounding.Ceil);
+    }
+
+    function computeManagementFees(
+        uint256 vaultShares,
+        uint256 fee, // basis point
+        uint256 duration
+    ) public pure returns (uint256) {
+        return
+            (vaultShares * fee).mulDiv(
+                duration,
+                (BASIS_POINT_SCALE * SECONDS_PER_YEAR),
+                Math.Rounding.Ceil
+            );
     }
 }

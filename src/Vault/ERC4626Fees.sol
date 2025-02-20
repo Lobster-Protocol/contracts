@@ -1,65 +1,142 @@
 // SPDX-License-Identifier: MIT
-// derived from https://docs.openzeppelin.com/contracts/5.x/erc4626
 pragma solidity ^0.8.20;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {BASIS_POINT_SCALE, SECONDS_PER_YEAR} from "./Constants.sol";
 import {IERC4626FeesEvents, PendingFeeUpdate} from "./ERC4626FeesEvents.sol";
+/////
+import "forge-std/Test.sol";
 
-/// @dev ERC-4626 vault with entry/exit fees expressed in https://en.wikipedia.org/wiki/Basis_point[basis point (bp)].
-///
-/// NOTE: The contract charges fees in terms of assets, not shares. This means that the fees are calculated based on the
-/// amount of assets that are being deposited or withdrawn, and not based on the amount of shares that are being minted or
-/// redeemed. This is an opinionated design decision that should be taken into account when integrating this contract.
-abstract contract ERC4626Fees is IERC4626FeesEvents, ERC4626, Ownable2Step {
+/////
+
+/**
+ * @title ERC4626Fees
+ * @dev ERC4626 vault with entry/exit fees, management fees, and performance fees
+ */
+abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
     using Math for uint256;
-    // todo: add a function to know the maximal value to input in previewWithdraw to unlock all the assets (with the fee).
-    // This value should be the one used in redeem/withdraw to unlock all the assets.
-    uint256 private constant _BASIS_POINT_SCALE = 1e4;
+    using SafeERC20 for IERC20;
 
+    // Constants
     uint256 public constant FEE_UPDATE_DELAY = 2 weeks;
-    uint256 public constant MAX_FEE = 200; // 2%
+    uint256 public constant MAX_FEE_BASIS_POINTS = 3000; // 30%
 
-    uint256 public lastManagementFeeCollection;
+    // Fee configuration
     uint256 public entryFeeBasisPoints = 0;
     uint256 public exitFeeBasisPoints = 0;
-    uint256 public managementFeeBasisPoints = 0; // annualized fee
+    uint256 public managementFeeBasisPoints = 0;
+    uint256 public performanceFeeBasisPoints = 0;
+
+    // Fee pending update
     PendingFeeUpdate public pendingEntryFeeUpdate;
     PendingFeeUpdate public pendingExitFeeUpdate;
     PendingFeeUpdate public pendingManagementFeeUpdate;
 
-    address public entryFeeCollector;
-    address public exitFeeCollector;
-    address public managementFeeCollector;
+    // Fee recipients
+    address public feeCollector;
 
-    constructor(
-        address entryFeeCollector_,
-        address exitFeeCollector_,
-        address managementFeeCollector_
-    ) {
-        entryFeeCollector = entryFeeCollector_;
-        exitFeeCollector = exitFeeCollector_;
-        managementFeeCollector = managementFeeCollector_;
+    // Performance fee tracking
+    uint256 public highWaterMark;
+
+    // Management fee tracking
+    uint256 public lastManagementFeeTimestamp;
+
+    /**
+     * @dev Constructor
+     * @param feeCollector_ The address that will receive fees
+     */
+    constructor(address feeCollector_) {
+        require(
+            feeCollector_ != address(0),
+            "FeeVault: Fee collector cannot be zero address"
+        );
+        feeCollector = feeCollector_;
+        lastManagementFeeTimestamp = block.timestamp;
     }
 
-    // === Overrides ===
+    /* ================== OVERRIDES ================== */
 
-    /// @dev Preview taking an entry fee on deposit. See {IERC4626-previewDeposit}.
+    // /**
+    //  * @dev Override deposit function to collect fees before deposit
+    //  */
+    // function deposit(
+    //     uint256 assets,
+    //     address receiver
+    // ) public override returns (uint256) {
+    //     uint256 depositFee = _feeOnRaw(assets, entryFeeBasisPoints);
+    //     // (uint256 assetsLeftInVault, uint256 managementFee, uint256 performanceFee) = _simulateAssetInVaultAfterManagementAndPerformanceFeesCollected();
+
+    //     uint256 maxAssets = maxDeposit(receiver);
+    //     if (assets > maxAssets) {
+    //         revert ERC4626ExceededMaxDeposit(receiver, assets, maxAssets);
+    //     }
+
+    //     uint256 shares = previewDeposit(assets);
+    //     _deposit(_msgSender(), receiver, assets, shares);
+
+    //     return shares;
+    // }
+
+    // /**
+    //  * @dev Override mint function to collect fees before mint
+    //  */
+    // function mint(
+    //     uint256 shares,
+    //     address receiver
+    // ) public override returns (uint256) {
+    //     _collectFees();
+    //     return super.mint(shares, receiver);
+    // }
+
+    // /**
+    //  * @dev Override withdraw function to collect fees before withdraw
+    //  */
+    // function withdraw(
+    //     uint256 assets,
+    //     address receiver,
+    //     address owner
+    // ) public override returns (uint256) {
+    //     _collectFees();
+    //     return super.withdraw(assets, receiver, owner);
+    // }
+
+    // /**
+    //  * @dev Override redeem function to collect fees before redeem
+    //  */
+    // function redeem(
+    //     uint256 shares,
+    //     address receiver,
+    //     address owner
+    // ) public override returns (uint256) {
+    //     collectFees();
+    //     return super.redeem(shares, receiver, owner);
+    // }
+
+    /**
+     * @dev Override previewDeposit to account for entry fee
+     */
     function previewDeposit(
         uint256 assets
-    ) public view virtual override returns (uint256) {
+    ) public view override returns (uint256) {
+        // Calculate entry fee
         uint256 fee = _feeOnTotal(assets, entryFeeBasisPoints);
+        // Apply fee
         return super.previewDeposit(assets - fee);
     }
 
-    /// @dev Preview adding an entry fee on mint. See {IERC4626-previewMint}.
+    /**
+     * @dev Override previewMint to account for entry fee
+     */
     function previewMint(
         uint256 shares
-    ) public view virtual override returns (uint256) {
+    ) public view override returns (uint256) {
+        // Determine how many assets are needed to mint `shares`
         uint256 assets = super.previewMint(shares);
+        // add entry fee
         return assets + _feeOnRaw(assets, entryFeeBasisPoints);
     }
 
@@ -67,78 +144,101 @@ abstract contract ERC4626Fees is IERC4626FeesEvents, ERC4626, Ownable2Step {
     function previewWithdraw(
         uint256 assets
     ) public view virtual override returns (uint256) {
-        uint256 fee = _feeOnRaw(assets, exitFeeBasisPoints);
-        return super.previewWithdraw(assets + fee);
+        // simulate the removal of management and performance fees from the vault
+        (
+            uint256 assetsLeftInVault,
+            ,
+
+        ) = _simulateAssetInVaultAfterManagementAndPerformanceFeesCollected();
+
+        uint256 exitFee = _feeOnRaw(assets, exitFeeBasisPoints);
+
+        // compute the amount of shares that will be burnt to withdraw `assets`
+        // this calculation is based ERC4626._convertToShares(assets,rounding)
+        return
+            (assets + exitFee).mulDiv(
+                totalSupply() + 10 ** _decimalsOffset(),
+                assetsLeftInVault + 1,
+                Math.Rounding.Ceil
+            );
     }
 
     /// @dev Preview taking an exit fee on redeem. See {IERC4626-previewRedeem}.
     function previewRedeem(
         uint256 shares
     ) public view virtual override returns (uint256) {
-        uint256 assets = super.previewRedeem(shares);
+        // simulate the removal of management and performance fees from the vault
+        (
+            uint256 assetsLeftInVault,
+            ,
+
+        ) = _simulateAssetInVaultAfterManagementAndPerformanceFeesCollected();
+
+        // compute the amount of shares that will be burnt to withdraw `assets` without the exit fee
+        // this calculation is based ERC4626._convertToAssets(shares,rounding)
+        uint256 assets = shares.mulDiv(
+            assetsLeftInVault + 1,
+            totalSupply() + 10 ** _decimalsOffset(),
+            Math.Rounding.Floor
+        );
+
+        // compute the amount of assets that will be withdrawn to redeem `shares`
         return assets - _feeOnTotal(assets, exitFeeBasisPoints);
     }
 
-    function deposit(
-        uint256 assets,
-        address receiver
-    ) public virtual override returns (uint256) {
-        // first collect management fee
-        _collectManagementFees();
-
-        return super.deposit(assets, receiver);
-    }
-
-    function mint(
-        uint256 shares,
-        address receiver
-    ) public virtual override returns (uint256) {
-        // first collect management fee
-        _collectManagementFees();
-
-        return super.mint(shares, receiver);
-    }
-
-    function withdraw(
-        uint256 assets,
-        address receiver,
+    /** @dev See {IERC4626-maxWithdraw}. */
+    function maxWithdraw(
         address owner
-    ) public virtual override returns (uint256) {
-        // first collect management fee
-        _collectManagementFees();
-
-        return super.withdraw(assets, receiver, owner);
+    ) public view virtual override returns (uint256) {
+        uint256 ownerBalance = balanceOf(owner);
+        return
+            _convertToAssets(
+                ownerBalance - _feeOnRaw(ownerBalance, exitFeeBasisPoints),
+                Math.Rounding.Floor
+            );
     }
 
-    function redeem(
-        uint256 shares,
-        address receiver,
-        address owner
-    ) public virtual override returns (uint256) {
-        // first collect management fee
-        _collectManagementFees();
-
-        return super.redeem(shares, receiver, owner);
-    }
-
-    /// @dev Send entry fee to {entryFeeCollector}. See {IERC4626-_deposit}.
+    /**
+     * @dev Override _deposit to handle entry fee
+     */
     function _deposit(
         address caller,
         address receiver,
         uint256 assets,
         uint256 shares
     ) internal virtual override {
-        uint256 fee = _feeOnTotal(assets, entryFeeBasisPoints);
-        address feeRecipient = entryFeeCollector;
+        (
+            ,
+            uint256 managementFeeShares,
+            uint256 performanceFeeShares
+        ) = _simulateAssetInVaultAfterManagementAndPerformanceFeesCollected();
 
+        uint256 depositFeeShares = _feeOnTotal(shares, entryFeeBasisPoints);
+
+        // don't update assets and shares since deposit() already did that by calling previewDeposit
         super._deposit(caller, receiver, assets, shares);
 
-        if (fee > 0 && feeRecipient != address(this)) {
-            SafeERC20.safeTransfer(IERC20(asset()), feeRecipient, fee);
+        uint256 totalFeesShares = depositFeeShares +
+            managementFeeShares +
+            performanceFeeShares;
+
+        if (totalFeesShares > 0 && feeCollector != address(this)) {
+            _mint(feeCollector, totalFeesShares);
+
+            emit FeeCollected(
+                totalFeesShares,
+                managementFeeShares,
+                performanceFeeShares,
+                depositFeeShares,
+                0,
+                block.timestamp
+            );
         }
     }
 
-    /// @dev Send exit fee to {exitFeeCollector}. See {IERC4626-_deposit}.
+    /**
+     * @dev Override _withdraw to handle exit fee
+     */
     function _withdraw(
         address caller,
         address receiver,
@@ -146,25 +246,180 @@ abstract contract ERC4626Fees is IERC4626FeesEvents, ERC4626, Ownable2Step {
         uint256 assets,
         uint256 shares
     ) internal virtual override {
-        // first collect management fee
-        _collectManagementFees();
+        (
+            ,
+            uint256 managementFee,
+            uint256 performanceFee
+        ) = _simulateAssetInVaultAfterManagementAndPerformanceFeesCollected();
 
-        uint256 fee = _feeOnRaw(assets, exitFeeBasisPoints);
-        address feeRecipient = exitFeeCollector;
+        uint256 exitFee = _feeOnRaw(assets, exitFeeBasisPoints);
 
         super._withdraw(caller, receiver, owner, assets, shares);
 
-        if (fee > 0 && feeRecipient != address(this)) {
-            SafeERC20.safeTransfer(IERC20(asset()), feeRecipient, fee);
+        uint256 totalFeesShares = exitFee + managementFee + performanceFee;
+
+        if (totalFeesShares > 0 && feeCollector != address(this)) {
+            _mint(feeCollector, totalFeesShares);
+
+            emit FeeCollected(
+                totalFeesShares,
+                managementFee,
+                performanceFee,
+                0,
+                exitFee,
+                block.timestamp
+            );
         }
     }
 
-    // === Fee configuration ===
+    /* ================== FEE COLLECTION ================== */
+
+    /**
+     * @dev Collect management and performance fees
+     * @return totalFees The total fees collected
+     */
+    function collectFees() public onlyOwner returns (uint256 totalFees) {
+        return _collectFees();
+    }
+
+    /**
+     * @dev Collect management and performance fees
+     * @return totalFeesShares The total fees collected
+     */
+    function _collectFees() internal returns (uint256 totalFeesShares) {
+        uint256 managementFeeShares = _calculateManagementFee();
+
+        uint256 performanceFeeShares = _calculatePerformanceFee();
+
+        totalFeesShares = managementFeeShares + performanceFeeShares;
+
+        if (totalFeesShares > 0 && totalAssets() > totalFeesShares) {
+            // Transfer fees to fee collector
+            _mint(feeCollector, totalFeesShares);
+
+            // Update state
+            lastManagementFeeTimestamp = block.timestamp;
+
+            if (performanceFeeShares > 0) {
+                // Update high water mark to current share price after fee collection
+                highWaterMark = _calculateShareValue();
+            }
+
+            emit FeesCollected(
+                managementFeeShares,
+                performanceFeeShares,
+                block.timestamp
+            );
+        }
+
+        return totalFeesShares;
+    }
+
+    /* ==================  ================== */
+
+    /**
+     * @dev Calculate current share value
+     * @return The value of one share in terms of the underlying asset
+     */
+    function _calculateShareValue() internal view returns (uint256) {
+        uint256 supply = totalSupply();
+        if (supply == 0) return 0;
+        return
+            totalAssets().mulDiv(10 ** decimals(), supply, Math.Rounding.Floor);
+    }
+
+    /// @dev Calculates the fees that should be added to an amount `assets` that does not already include fees.
+    /// Used in {IERC4626-mint} and {IERC4626-withdraw} operations.
+    function _feeOnRaw(
+        uint256 assets,
+        uint256 feeBasisPoints
+    ) private pure returns (uint256) {
+        return
+            assets.mulDiv(
+                feeBasisPoints,
+                BASIS_POINT_SCALE,
+                Math.Rounding.Ceil
+            );
+    }
+
+    /// @dev Calculates the fee part of an amount `assets` that already includes fees.
+    /// Used in {IERC4626-deposit} and {IERC4626-redeem} operations.
+    function _feeOnTotal(
+        uint256 assets,
+        uint256 feeBasisPoints
+    ) private pure returns (uint256) {
+        return
+            assets.mulDiv(
+                feeBasisPoints,
+                feeBasisPoints + BASIS_POINT_SCALE,
+                Math.Rounding.Ceil
+            );
+    }
+
+    /**
+     * @dev Calculate management fee
+     * @return The management fee amount in shares
+     */
+    function _calculateManagementFee() internal view returns (uint256) {
+        if (
+            managementFeeBasisPoints == 0 ||
+            lastManagementFeeTimestamp == block.timestamp
+        ) {
+            return 0;
+        }
+
+        uint256 timeElapsed = block.timestamp - lastManagementFeeTimestamp;
+
+        // Calculate pro-rated management fee: (assets * fee_bp * timeElapsed) / (YEAR * BPS)
+        return
+            (totalSupply() * managementFeeBasisPoints).mulDiv(
+                timeElapsed,
+                BASIS_POINT_SCALE * SECONDS_PER_YEAR,
+                Math.Rounding.Ceil
+            );
+    }
+
+    /**
+     * @dev Calculate performance fee
+     * @return The performance fee amount in shares
+     */
+    function _calculatePerformanceFee() internal view returns (uint256) {
+        // todo: might be simplified
+        if (performanceFeeBasisPoints == 0 || totalSupply() == 0) {
+            return 0;
+        }
+
+        uint256 currentShareValue = _calculateShareValue();
+
+        // Only charge performance fee if current value exceeds high water mark
+        if (currentShareValue <= highWaterMark) {
+            return 0;
+        }
+
+        uint256 profit = currentShareValue - highWaterMark;
+        uint256 totalProfit = profit.mulDiv(
+            totalSupply(),
+            10 ** decimals(),
+            Math.Rounding.Floor
+        );
+
+        return
+            _convertToShares(
+                totalProfit.mulDiv(
+                    performanceFeeBasisPoints,
+                    BASIS_POINT_SCALE,
+                    Math.Rounding.Floor
+                ),
+                Math.Rounding.Ceil
+            );
+    }
+
+    /* ================== FEE CONFIGURATION ================== */
 
     function setEntryFee(
         uint256 feeBasisPoints
     ) external onlyOwner returns (bool) {
-        if (feeBasisPoints > MAX_FEE) revert InvalidFee();
+        if (feeBasisPoints > MAX_FEE_BASIS_POINTS) revert InvalidFee();
 
         pendingEntryFeeUpdate = PendingFeeUpdate({
             value: feeBasisPoints,
@@ -182,7 +437,7 @@ abstract contract ERC4626Fees is IERC4626FeesEvents, ERC4626, Ownable2Step {
     function setExitFee(
         uint256 feeBasisPoints
     ) external onlyOwner returns (bool) {
-        if (feeBasisPoints > MAX_FEE) revert InvalidFee();
+        if (feeBasisPoints > MAX_FEE_BASIS_POINTS) revert InvalidFee();
 
         pendingExitFeeUpdate = PendingFeeUpdate({
             value: feeBasisPoints,
@@ -200,7 +455,7 @@ abstract contract ERC4626Fees is IERC4626FeesEvents, ERC4626, Ownable2Step {
     function setManagementFee(
         uint256 feeBasisPoints
     ) external onlyOwner returns (bool) {
-        if (feeBasisPoints > MAX_FEE) revert InvalidFee();
+        if (feeBasisPoints > MAX_FEE_BASIS_POINTS) revert InvalidFee();
 
         pendingManagementFeeUpdate = PendingFeeUpdate({
             value: feeBasisPoints,
@@ -267,8 +522,8 @@ abstract contract ERC4626Fees is IERC4626FeesEvents, ERC4626, Ownable2Step {
             );
         }
 
-        // collect management fee
-        _collectManagementFees();
+        // collect fees
+        _collectFees();
 
         managementFeeBasisPoints = pendingManagementFeeUpdate.value;
 
@@ -279,81 +534,68 @@ abstract contract ERC4626Fees is IERC4626FeesEvents, ERC4626, Ownable2Step {
         return true;
     }
 
-    function setEntryFeeCollector(address collector) external onlyOwner {
-        entryFeeCollector = collector;
-    }
-
-    function setExitFeeCollector(address collector) external onlyOwner {
-        exitFeeCollector = collector;
-    }
-
-    function setManagementFeeCollector(address collector) external onlyOwner {
-        managementFeeCollector = collector;
-    }
-
-    function collectManagementFees() external onlyOwner returns (uint256) {
-        return _collectManagementFees();
-    }
-
-    // === Fee operations ===
-
-    /// @dev Calculates the fees that should be added to an amount `assets` that does not already include fees.
-    /// Used in {IERC4626-mint} and {IERC4626-withdraw} operations.
-    function _feeOnRaw(
-        uint256 assets,
-        uint256 feeBasisPoints
-    ) private pure returns (uint256) {
-        return
-            assets.mulDiv(
-                feeBasisPoints,
-                _BASIS_POINT_SCALE,
-                Math.Rounding.Ceil
-            );
-    }
-
-    /// @dev Calculates the fee part of an amount `assets` that already includes fees.
-    /// Used in {IERC4626-deposit} and {IERC4626-redeem} operations.
-    function _feeOnTotal(
-        uint256 assets,
-        uint256 feeBasisPoints
-    ) private pure returns (uint256) {
-        return
-            assets.mulDiv(
-                feeBasisPoints,
-                feeBasisPoints + _BASIS_POINT_SCALE,
-                Math.Rounding.Ceil
-            );
-    }
-
-    // === Fee collection ===
-
-    function _collectManagementFees() internal virtual returns (uint256) {
-        if (managementFeeBasisPoints == 0) {
-            lastManagementFeeCollection = block.timestamp;
-            return 0;
-        }
-
-        uint256 timePassed = block.timestamp - lastManagementFeeCollection;
-
-        // Calculate annual fee pro-rated by time passed, this fee is in assets
-        uint256 fee = super.totalAssets().mulDiv(
-            managementFeeBasisPoints * timePassed,
-            _BASIS_POINT_SCALE * 365 days,
-            Math.Rounding.Ceil
+    /**
+     * @dev Update fee collector address
+     * @notice Only owner can call this function
+     */
+    function setFeeCollector(address newFeeCollector) external onlyOwner {
+        require(
+            newFeeCollector != address(0),
+            "FeeVault: Fee collector cannot be zero address"
         );
+        feeCollector = newFeeCollector;
+        emit FeeCollectorUpdated(feeCollector);
+    }
 
-        if (fee > 0 && managementFeeCollector != address(this)) {
-            // transfer assets to management fee collector
-            SafeERC20.safeTransfer(
-                IERC20(asset()),
-                managementFeeCollector,
-                fee
-            );
+    // /**
+    //  * @dev Reset high water mark
+    //  * @notice Only owner can call this function
+    //  */
+    // function resetHighWaterMark() external onlyOwner {
+    //     // Collect any pending fees before resetting high water mark
+    //     collectFees();
+    //     highWaterMark = _calculateShareValue();
+    // }
+
+    /* ================== SIMULATION ================== */
+
+    function _simulateAssetInVaultAfterManagementAndPerformanceFeesCollected()
+        internal
+        view
+        returns (
+            uint256 assetsLeft,
+            uint256 managementFeeShares,
+            uint256 performanceFeeShares
+        )
+    {
+        uint256 totalAssets = totalAssets();
+
+        managementFeeShares = _calculateManagementFee();
+        performanceFeeShares = _calculatePerformanceFee();
+
+        uint256 totalFees = managementFeeShares + performanceFeeShares;
+
+        if (totalFees > totalAssets) {
+            // Not enough assets to cover fees
+            // Should not happen in practice
+            revert("FeeVault: Insufficient assets to cover fees");
         }
 
-        lastManagementFeeCollection = block.timestamp;
+        assetsLeft =
+            totalAssets -
+            _convertToShares(totalFees, Math.Rounding.Ceil);
 
-        emit ManagementFeeCollected(fee);
-        return fee;
+        return (assetsLeft, managementFeeShares, performanceFeeShares);
     }
+
+    // function _estimateFeesBeforeDeposit() internal view returns (uint256) {
+    //     return _feeOnRaw(totalAssets(), entryFeeBasisPoints);
+    // }
+
+    // function _estimateFeesBeforeWithdraw() internal view returns (uint256) {
+    //     return
+    //         _calculateManagementFee() +
+    //         _calculatePerformanceFee() +
+    //         _feeOnRaw(totalAssets(), exitFeeBasisPoints);
+    // }
 }

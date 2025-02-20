@@ -19,11 +19,23 @@ interface IERC4626FeesEvents {
         uint256 newFeeBasisPoints,
         uint256 activationTimestamp
     );
+    event NewPendingPerformanceFeeUpdate(
+        uint256 newFeeBasisPoints,
+        uint256 activationTimestamp
+    );
     event EntryFeeEnforced(uint256 newFeeBasisPoints);
     event ExitFeeEnforced(uint256 newFeeBasisPoints);
     event ManagementFeeEnforced(uint256 newFeeBasisPoints);
+    event PerformanceFeeEnforced(uint256 newFeeBasisPoints);
 
-    event ManagementFeeCollected(uint256 collectedFee);
+    event FeeCollected(
+        uint256 totalFees,
+        uint256 managementFee,
+        uint256 performanceFee,
+        uint256 entryFee,
+        uint256 exitFee,
+        uint256 timestamp
+    );
 
     error ActivationTimestampNotReached(
         uint256 currentTimestamp,
@@ -31,4 +43,30 @@ interface IERC4626FeesEvents {
     );
     error NoPendingFeeUpdate();
     error InvalidFee();
+
+
+
+    /**
+     * @dev Emitted when fees are collected
+     */
+    event FeesCollected(
+        uint256 managementFee,
+        uint256 performanceFee,
+        uint256 timestamp
+    );
+    
+    /**
+     * @dev Emitted when fee parameters are updated
+     */
+    event FeeParametersUpdated(
+        uint256 entryFeeBasisPoints,
+        uint256 exitFeeBasisPoints,
+        uint256 managementFeeBasisPoints,
+        uint256 performanceFeeBasisPoints
+    );
+    
+    /**
+     * @dev Emitted when fee collector is updated
+     */
+    event FeeCollectorUpdated(address feeCollector);
 }

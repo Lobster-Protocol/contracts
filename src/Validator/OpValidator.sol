@@ -2,12 +2,17 @@
 pragma solidity ^0.8.28;
 
 import {Op} from "../interfaces/IValidator.sol";
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import {WITHDRAW_OPERATION_BYTE} from "./Constants.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+
+bytes1 constant DEPOSIT_OPERATION_BYTE = 0x00;
+bytes1 constant WITHDRAW_OPERATION_BYTE = 0x01;
 
 // Base contract that will be inherited by Vault
-contract LobsterOpValidator {
+abstract contract LobsterOpValidator {
+    using Math for uint256;
+
     uint256 public valueOutsideVault = 0; // value owned by the vault in third party chains/protocols
     uint256 public rebaseExpiresAt = 0;
     address public lobsterAlgorithm;
@@ -172,7 +177,10 @@ contract LobsterOpValidator {
             withdrawOperations.length > 0 &&
             operation == WITHDRAW_OPERATION_BYTE
         ) {
-            (Op[] memory ops, uint256 newValueOutsideChain) = abi.decode(withdrawOperations, (Op[], uint256));
+            (Op[] memory ops, uint256 newValueOutsideChain) = abi.decode(
+                withdrawOperations,
+                (Op[], uint256)
+            );
             (bool success, bytes memory result) = address(this).call{value: 0}(
                 abi.encodeWithSelector(this.executeOpBatch.selector, ops)
             );
