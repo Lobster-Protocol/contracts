@@ -8,14 +8,10 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {BASIS_POINT_SCALE, SECONDS_PER_YEAR} from "./Constants.sol";
 import {IERC4626FeesEvents, PendingFeeUpdate} from "./ERC4626FeesEvents.sol";
-/////
-import "forge-std/Test.sol";
-
-/////
 
 /**
  * @title ERC4626Fees
- * @dev ERC4626 vault with entry/exit fees, management fees, and performance fees
+ * @dev ERC4626 vault with entry/exit, management, and performance fees
  */
 abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
     using Math for uint256;
@@ -35,6 +31,7 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
     PendingFeeUpdate public pendingEntryFeeUpdate;
     PendingFeeUpdate public pendingExitFeeUpdate;
     PendingFeeUpdate public pendingManagementFeeUpdate;
+    PendingFeeUpdate public pendingPerformanceFeeUpdate;
 
     // Fee recipients
     address public feeCollector;
@@ -59,62 +56,6 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
     }
 
     /* ================== OVERRIDES ================== */
-
-    // /**
-    //  * @dev Override deposit function to collect fees before deposit
-    //  */
-    // function deposit(
-    //     uint256 assets,
-    //     address receiver
-    // ) public override returns (uint256) {
-    //     uint256 depositFee = _feeOnRaw(assets, entryFeeBasisPoints);
-    //     // (uint256 assetsLeftInVault, uint256 managementFee, uint256 performanceFee) = _simulateAssetInVaultAfterManagementAndPerformanceFeesCollected();
-
-    //     uint256 maxAssets = maxDeposit(receiver);
-    //     if (assets > maxAssets) {
-    //         revert ERC4626ExceededMaxDeposit(receiver, assets, maxAssets);
-    //     }
-
-    //     uint256 shares = previewDeposit(assets);
-    //     _deposit(_msgSender(), receiver, assets, shares);
-
-    //     return shares;
-    // }
-
-    // /**
-    //  * @dev Override mint function to collect fees before mint
-    //  */
-    // function mint(
-    //     uint256 shares,
-    //     address receiver
-    // ) public override returns (uint256) {
-    //     _collectFees();
-    //     return super.mint(shares, receiver);
-    // }
-
-    // /**
-    //  * @dev Override withdraw function to collect fees before withdraw
-    //  */
-    // function withdraw(
-    //     uint256 assets,
-    //     address receiver,
-    //     address owner
-    // ) public override returns (uint256) {
-    //     _collectFees();
-    //     return super.withdraw(assets, receiver, owner);
-    // }
-
-    // /**
-    //  * @dev Override redeem function to collect fees before redeem
-    //  */
-    // function redeem(
-    //     uint256 shares,
-    //     address receiver,
-    //     address owner
-    // ) public override returns (uint256) {
-    //     collectFees();
-    //     return super.redeem(shares, receiver, owner);
-    // }
 
     /**
      * @dev Override previewDeposit to account for entry fee
@@ -305,9 +246,12 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
                 highWaterMark = _calculateShareValue();
             }
 
-            emit FeesCollected(
+            emit FeeCollected(
+                totalFeesShares,
                 managementFeeShares,
                 performanceFeeShares,
+                0,
+                0,
                 block.timestamp
             );
         }
@@ -534,6 +478,30 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
         return true;
     }
 
+    function enforceNewPerformanceFee() external onlyOwner returns (bool) {
+        if (pendingPerformanceFeeUpdate.activationTimestamp == 0)
+            revert NoPendingFeeUpdate();
+
+        // should revert if the activation timestamp is in the future
+        if (block.timestamp < pendingPerformanceFeeUpdate.activationTimestamp) {
+            revert ActivationTimestampNotReached(
+                block.timestamp,
+                pendingPerformanceFeeUpdate.activationTimestamp
+            );
+        }
+
+        // collect fees
+        _collectFees();
+
+        performanceFeeBasisPoints = pendingPerformanceFeeUpdate.value;
+
+        delete pendingPerformanceFeeUpdate;
+
+        emit PerformanceFeeEnforced(performanceFeeBasisPoints);
+
+        return true;
+    }
+
     /**
      * @dev Update fee collector address
      * @notice Only owner can call this function
@@ -546,16 +514,6 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
         feeCollector = newFeeCollector;
         emit FeeCollectorUpdated(feeCollector);
     }
-
-    // /**
-    //  * @dev Reset high water mark
-    //  * @notice Only owner can call this function
-    //  */
-    // function resetHighWaterMark() external onlyOwner {
-    //     // Collect any pending fees before resetting high water mark
-    //     collectFees();
-    //     highWaterMark = _calculateShareValue();
-    // }
 
     /* ================== SIMULATION ================== */
 
