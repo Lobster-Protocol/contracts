@@ -112,14 +112,14 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
 
         // alice withdraw all her assets
         uint256 withdrawnAssets = vault.maxWithdraw(alice);
-        uint256 sharesBurnt = vault.withdraw(withdrawnAssets, alice, alice); // actually a part of these is not burnt but send to fee collector
+        uint256 sharesBurnt = vault.withdraw(withdrawnAssets, alice, alice);
         vm.stopPrank();
 
         // check alice asset balance
-        assertEq(asset.balanceOf(alice), initialAliceBalance - expectedFee);
+        assertEq(asset.balanceOf(alice), initialAliceBalance - 10); // 10 is the expected fee for 1% management fee with a 1000 assets deposit for 1 block 1 year
 
         // check vault balance
-        assertEq(asset.balanceOf(address(vault)), expectedFee); // (vault has been emptied, there is only the collected fees)
+        assertEq(asset.balanceOf(address(vault)), vault.convertToAssets(expectedFee)); // (vault has been emptied, there is only the collected fees)
 
         // ensure `shares`is the amount of shares burnt by alice
         assertEq(sharesBurnt, shares);

@@ -28,13 +28,6 @@ interface IERC4626FeesEvents {
     event ManagementFeeEnforced(uint256 newFeeBasisPoints);
     event PerformanceFeeEnforced(uint256 newFeeBasisPoints);
 
-    error ActivationTimestampNotReached(
-        uint256 currentTimestamp,
-        uint256 activationTimestamp
-    );
-    error NoPendingFeeUpdate();
-    error InvalidFee();
-
     /**
      * @dev Emitted when fees are collected
      */
@@ -51,4 +44,13 @@ interface IERC4626FeesEvents {
      * @dev Emitted when fee collector is updated
      */
     event FeeCollectorUpdated(address feeCollector);
+
+        // Error definitions
+    error ActivationTimestampNotReached(
+        uint256 currentTimestamp,
+        uint256 activationTimestamp
+    );
+    error NoPendingFeeUpdate();
+    error InvalidFee();
+    error InsufficientAssetsForFees();
 }
