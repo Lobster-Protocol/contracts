@@ -157,13 +157,14 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
 
         // alice withdraw all her assets
         uint256 withdrawnAssets = vault.maxRedeem(alice);
+        uint256 expectedFeeAsset = vault.convertToAssets(expectedFee);
         uint256 assetsRedeemed = vault.redeem(withdrawnAssets, alice, alice); // assetsRedeemed = alice assets in vault before redeem
         vm.stopPrank();
-
+        console2.log(assetsRedeemed);
         // check alice asset balance
         assertEq(
             asset.balanceOf(alice),
-            initialAliceBalance - vault.convertToAssets(expectedFee)
+            initialAliceBalance - expectedFeeAsset
         );
 
         // check vault balance
@@ -173,13 +174,15 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
         assertEq(vault.balanceOf(alice), 0);
 
         // ensure `assetsRedeemed` is actually the amount of assets redeemed by alice
-        assertEq(assetsRedeemed, assets - vault.convertToAssets(expectedFee));
+        assertEq(assetsRedeemed, assets - expectedFeeAsset);
 
         // check fee collector asset balance did not change
         assertEq(
             asset.balanceOf(vault.feeCollector()),
             initialFeeCollectorBalance
         );
+
+        console2.log(vault.totalSupply());
 
         // check fee collector shares balance
         assertEq(vault.balanceOf(vault.feeCollector()), expectedFee);

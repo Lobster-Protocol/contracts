@@ -306,14 +306,13 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
             totalAssets(),
             newShareSupply
         );
-        console.log("shares: ", shares);
-
-        _withdraw(_msgSender(), receiver, owner, assets, shares);
 
         uint256 exitFeeShares = _convertToShares(
             exitFeeAssets,
             Math.Rounding.Floor
         );
+
+        _withdraw(_msgSender(), receiver, owner, assets, shares);
 
         uint256 totalFeesShares = exitFeeShares +
             managementFeeShares +
