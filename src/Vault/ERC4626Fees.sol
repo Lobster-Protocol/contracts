@@ -540,6 +540,24 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
         return true;
     }
 
+    function setPerformanceFee(
+        uint256 feeBasisPoints
+    ) external onlyOwner returns (bool) {
+        if (feeBasisPoints > MAX_FEE_BASIS_POINTS) revert InvalidFee();
+
+        pendingPerformanceFeeUpdate = PendingFeeUpdate({
+            value: feeBasisPoints,
+            activationTimestamp: block.timestamp + FEE_UPDATE_DELAY
+        });
+
+        emit NewPendingPerformanceFeeUpdate(
+            feeBasisPoints,
+            pendingPerformanceFeeUpdate.activationTimestamp
+        );
+
+        return true;
+    }
+
     function enforceNewEntryFee() external onlyOwner returns (bool) {
         if (pendingEntryFeeUpdate.activationTimestamp == 0)
             revert NoPendingFeeUpdate();

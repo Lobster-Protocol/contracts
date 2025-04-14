@@ -159,6 +159,18 @@ contract VaultTestSetup is Test {
         return true;
     }
 
+    function setPerformanceFeeBasisPoint(uint256 fee) public returns (bool) {
+        vm.startPrank(owner);
+        vault.setPerformanceFee(fee);
+        // wait for the fee to be activated
+        vm.warp(block.timestamp + vault.FEE_UPDATE_DELAY());
+        // enforce the fee
+        vault.enforceNewPerformanceFee();
+        vm.stopPrank();
+
+        return true;
+    }
+
     function computeFees(
         uint256 amount,
         uint256 fee
@@ -177,5 +189,14 @@ contract VaultTestSetup is Test {
                 (BASIS_POINT_SCALE * SECONDS_PER_YEAR),
                 Math.Rounding.Ceil
             );
+    }
+
+    function computePerformanceFees(
+        uint256 vaultShares,
+        uint256 fee, // basis point
+        uint256 duration
+    ) public pure returns (uint256) {
+        // todo
+        revert("Not implemented");
     }
 }
