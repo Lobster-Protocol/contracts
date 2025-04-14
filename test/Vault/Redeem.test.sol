@@ -21,8 +21,29 @@ contract VaultRedeemTest is VaultTestSetup {
         assertEq(vault.totalSupply(), 5 ether);
         vm.stopPrank();
     }
+
     /* -----------------------MAX REDEEM----------------------- */
     // todo
     /* -----------------------PREVIEW REDEEM----------------------- */
-    // todo
+    function testPreviewRedeemNoFee() public view {
+        // deposit 1000
+        uint256 sharesToRedeem = 1000;
+        uint256 assets = vault.previewRedeem(sharesToRedeem);
+
+        // at first, 1 share = 1 asset
+        assertEq(assets, sharesToRedeem);
+    }
+
+    function testPreviewRedeemFee() public {
+        uint256 exitFeeBasisPoints = 100; // 1%
+        setExitFeeBasisPoint(exitFeeBasisPoints);
+
+        // deposit 1000
+        uint256 sharesToRedeem = 1000;
+        uint256 expectedFee = computeFees(sharesToRedeem, exitFeeBasisPoints);
+        uint256 assets = vault.previewRedeem(sharesToRedeem);
+
+        // at first, 1 share = 1 asset
+        assertEq(assets, sharesToRedeem - expectedFee);
+    }
 }
