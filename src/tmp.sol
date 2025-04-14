@@ -1,219 +1,202 @@
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+ /* ------------------REBASE & IN/OUT------------------ */
 
-// Interface for parameter validators
-interface IParameterValidator {
-    function validateParameters(
-        bytes calldata parameters
-    ) external view returns (bool);
-}
+    // /**
+    //  * @notice Verify the rebase signature and update the rebase value before depositing assets
+    //  *
+    //  * @param assets - the value of the assets to be deposited
+    //  * @param receiver - the address that will receive the minted shares
+    //  * @param rebaseData - the rebase data to be validated
+    //  */
+    // function depositWithRebase(
+    //     uint256 assets,
+    //     address receiver,
+    //     bytes calldata rebaseData
+    // ) external returns (uint256 shares) {
+    //     // verify signature and update rebase value
+    //     _verifyAndRebase(rebaseData);
 
-/**
- * @title WhitelistedProxy
- * @notice A contract that can execute transactions to whitelisted target contracts
- * with function selector and parameter validation
- */
-contract WhitelistedProxy {
-    address public owner;
+    //     // deposit assets
+    //     return deposit(assets, receiver);
+    // }
 
-    // Mapping to store whitelisted target addresses
-    mapping(address => bool) public whitelistedTargets;
+    // /**
+    //  * @notice Verify the rebase signature and update the rebase value before minting shares
+    //  *
+    //  * @param shares - the amount of shares to mint
+    //  * @param receiver - the address that will receive the minted shares
+    //  * @param rebaseData - the rebase data to be validated
+    //  */
+    // function mintWithRebase(
+    //     uint256 shares,
+    //     address receiver,
+    //     bytes calldata rebaseData
+    // ) external returns (uint256 assets) {
+    //     // verify signature and update rebase value
+    //     _verifyAndRebase(rebaseData);
 
-    // Mapping to store max ETH allowance per target
-    mapping(address => uint256) public maxAllowance;
+    //     // mint shares
+    //     return mint(shares, receiver);
+    // }
 
-    // Mapping to store whitelisted function selectors per target
-    mapping(address => mapping(bytes4 => bool)) public whitelistedSelectors;
+    // /**
+    //  * @notice Verify the rebase signature and update the rebase value before withdrawing assets
+    //  *
+    //  * @param assets - the amount of assets to withdraw
+    //  * @param receiver - the address that will receive the withdrawn assets
+    //  * @param owner - the address of the owner of the shares to burn
+    //  * @param rebaseData - the rebase data to be validated
+    //  */
+    // function withdrawWithRebase(
+    //     uint256 assets,
+    //     address receiver,
+    //     address owner,
+    //     bytes calldata rebaseData
+    // ) external returns (uint256 shares) {
+    //     // verify signature and update rebase value
+    //     _verifyAndRebase(rebaseData);
 
-    // Mapping to store custom parameter validators per target and function selector
-    mapping(address => mapping(bytes4 => address)) public parameterValidators;
+    //     // the minimal amount of assets accepted to be withdrawn by the caller
+    //     uint256 minAmount = uint256(bytes32(rebaseData[1:33]));
+    //     uint256 vaultBalance = IERC20(asset()).balanceOf(address(this));
 
-    // Events
-    event TargetWhitelisted(address indexed target, uint256 allowance);
-    event TargetRemoved(address indexed target);
-    event SelectorWhitelisted(address indexed target, bytes4 indexed selector);
-    event SelectorRemoved(address indexed target, bytes4 indexed selector);
-    event ValidatorSet(
-        address indexed target,
-        bytes4 indexed selector,
-        address validator
-    );
-    event TransactionExecuted(
-        address indexed target,
-        bytes4 indexed selector,
-        uint256 value,
-        bool success
-    );
+    //     // shares owned by the owner before withdrawing. All those shares will be burnt
+    //     uint256 initialShares = previewWithdraw(assets);
 
-    // Errors
-    error NotOwner();
-    error TargetNotWhitelisted();
-    error FunctionSelectorNotWhitelisted();
-    error ExceedsAllowance();
-    error ParameterValidationFailed();
-    error ExecutionFailed();
+    //     /*
+    //     determine how many assets will be withdrawn
+    //     we use a minAmount because of a possible slippage happening when withdrawing and selling tokens for assets in third-party contracts
+    //     */
+    //     if (vaultBalance < minAmount) {
+    //         // vaultBalance < minAmount
+    //         revert NotEnoughAssets();
+    //     }
 
-    constructor() {
-        owner = msg.sender;
-    }
+    //     if (vaultBalance < assets) {
+    //         // minAmount <= vaultBalance < assets
+    //         assets = vaultBalance;
+    //     }
+    //     // else minAmount <= assets <= vaultBalance and do nothing
 
-    modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
-        _;
-    }
+    //     // withdraw assets
+    //     shares = withdraw(assets, receiver, owner);
 
-    /**
-     * @notice Change the owner of the contract
-     * @param newOwner Address of the new owner
-     */
-    function transferOwnership(address newOwner) external onlyOwner {
-        owner = newOwner;
-    }
+    //     // Ensure all the shares were burnt and there are no leftovers
+    //     /*
+    //     When withdrawing, the withdrawOperations from _verifyAndRebase can swap some tokens back to the asset. By doing so, there might be a slippage.
+    //     By calling withdraw, the shares are burnt depending on the asset balance that can be affected by the slippage.
+    //     For instance, if the withdrawer wants to withdraw 10 assets and during withdrawOperations, we exit a UniV3 position (let's say WBTC/asset) and swap
+    //     the WBTC back to asset, we would get 5 assets and x WBTC converted to 4.9 assets. The withdrawer would get 9.9 assets instead of 10 assets. when
+    //     calling withdraw, we can only burn shares equivalent to 9.9 assets but the withdrawer would still have shares equivalent to 0.1 assets left in the
+    //     contract. This would dilute everyone else's shares. To avoid this, we burn the leftOvers shares here.
+    //     */
+    //     uint256 leftOvers = initialShares - shares;
+    //     if (leftOvers > 0) {
+    //         _burn(owner, leftOvers);
+    //     }
 
-    /**
-     * @notice Add a target address to the whitelist with a max ETH allowance
-     * @param target Address of the target contract
-     * @param allowance Maximum ETH amount that can be sent to this target
-     */
-    function whitelistTarget(
-        address target,
-        uint256 allowance
-    ) external onlyOwner {
-        whitelistedTargets[target] = true;
-        maxAllowance[target] = allowance;
-        emit TargetWhitelisted(target, allowance);
-    }
+    //     return shares;
+    // }
 
-    /**
-     * @notice Remove a target address from the whitelist
-     * @param target Address of the target contract to remove
-     */
-    function removeTarget(address target) external onlyOwner {
-        whitelistedTargets[target] = false;
-        emit TargetRemoved(target);
-    }
+    // /**
+    //  * @notice Verify the rebase signature and update the rebase value before redeeming shares
+    //  *
+    //  * @param shares - the amount of shares to redeem
+    //  * @param receiver - the address that will receive the withdrawn assets
+    //  * @param owner - the address of the owner of the shares to burn
+    //  * @param rebaseData - the rebase data to be validated
+    //  */
+    // function redeemWithRebase(
+    //     uint256 shares,
+    //     address receiver,
+    //     address owner,
+    //     bytes calldata rebaseData // todo: move the minAmount somewhere else
+    // ) external returns (uint256 assets) {
+    //     // verify signature and update rebase value
+    //     _verifyAndRebase(rebaseData);
 
-    /**
-     * @notice Add a function selector to the whitelist for a specific target
-     * @param target Address of the target contract
-     * @param selector Function selector (first 4 bytes of the function signature)
-     */
-    function whitelistSelector(
-        address target,
-        bytes4 selector
-    ) external onlyOwner {
-        whitelistedSelectors[target][selector] = true;
-        emit SelectorWhitelisted(target, selector);
-    }
+    //     // the minimal amount of assets accepted to be withdrawn by the caller
+    //     uint256 minAmount = uint256(bytes32(rebaseData[1:33]));
+    //     uint256 vaultBalance = IERC20(asset()).balanceOf(address(this));
+    //     // the initial shares the user want to redeem
+    //     uint256 initialShares = shares;
 
-    /**
-     * @notice Remove a function selector from the whitelist for a specific target
-     * @param target Address of the target contract
-     * @param selector Function selector to remove
-     */
-    function removeSelector(
-        address target,
-        bytes4 selector
-    ) external onlyOwner {
-        whitelistedSelectors[target][selector] = false;
-        emit SelectorRemoved(target, selector);
-    }
+    //     // preview how many assets will be withdrawn at most
+    //     assets = previewRedeem(shares);
 
-    /**
-     * @notice Set a custom parameter validator for a specific target and function selector
-     * @param target Address of the target contract
-     * @param selector Function selector
-     * @param validator Address of the validator contract implementing IParameterValidator
-     */
-    function setParameterValidator(
-        address target,
-        bytes4 selector,
-        address validator
-    ) external onlyOwner {
-        parameterValidators[target][selector] = validator;
-        emit ValidatorSet(target, selector, validator);
-    }
+    //     /*
+    //     determine how many assets will be withdrawn
+    //     we use a minAmount because of a possible slippage happening when withdrawing and selling assets for eth from third-party contracts
+    //     */
+    //     if (vaultBalance < minAmount) {
+    //         // vaultBalance < minAmount
+    //         revert NotEnoughAssets();
+    //     }
 
-    /**
-     * @notice Execute a transaction to a whitelisted target with a whitelisted function
-     * @param target Address of the target contract
-     * @param value ETH amount to send with the transaction
-     * @param data Function call data (including selector and parameters)
-     * @return success Whether the execution was successful
-     * @return returnData Data returned by the executed function
-     */
-    function execute(
-        address target,
-        uint256 value,
-        bytes calldata data
-    ) external onlyOwner returns (bool success, bytes memory returnData) {
-        // Check if target is whitelisted
-        if (!whitelistedTargets[target]) revert TargetNotWhitelisted();
+    //     if (vaultBalance < assets) {
+    //         // minAmount <= vaultBalance < assets
+    //         assets = vaultBalance;
+    //         shares = convertToShares(assets);
+    //     }
+    //     // else minAmount <= assets <= vaultBalance and do nothing
 
-        // Check if value is within allowance
-        if (value > maxAllowance[target]) revert ExceedsAllowance();
+    //     // the shares that will be used to redeem (will withdraw some assets between minAmount and assets)
+    //     uint256 initialOwnerShares = balanceOf(owner);
 
-        // Extract function selector from data
-        bytes4 selector;
-        assembly {
-            selector := calldataload(data.offset)
-        }
+    //     // redeem shares
+    //     assets = redeem(shares, receiver, owner);
 
-        // Check if function selector is whitelisted
-        if (!whitelistedSelectors[target][selector])
-            revert FunctionSelectorNotWhitelisted();
+    //     // Ensure all the shares were burnt and there are no leftovers
+    //     /*
+    //     When redeeming, the withdrawOperations from _verifyAndRebase can swap some tokens back to the asset. By doing so, there might be a slippage.
+    //     By calling redeem, the shares are burnt depending on the asset balance that can be affected by the slippage.
+    //     For instance, if the redeemer wants to redeem 10 eth and during withdrawOperations, we exit a UniV3 position (let's say WBTC/asset) and swap
+    //     the WBTC back to asset, we would get 5 assets and x WBTC converted to 4.9 assets. The redeemer would get 9.9 assets instead of 10 assets.
+    //     when calling redeem, we can only burn shares equivalent to 9.9 assets but the redeemer would still have shares equivalent to 0.1 assets left
+    //     in the contract. This would dilute everyone else's shares. To avoid this, we burn the leftOvers shares here.
+    //     */
+    //     uint256 leftOvers = initialShares -
+    //         (initialOwnerShares - balanceOf(owner));
+    //     if (leftOvers > 0) {
+    //         _burn(owner, leftOvers);
+    //     }
 
-        // Check parameter validation if a validator is set
-        address validator = parameterValidators[target][selector];
-        if (validator != address(0)) {
-            // Extract parameters (skip the first 4 bytes which is the selector)
-            bytes calldata parameters = data[4:];
+    //     return assets;
+    // }
 
-            // Call the validator to check parameters
-            bool isValid = IParameterValidator(validator).validateParameters(
-                parameters
-            );
-            if (!isValid) revert ParameterValidationFailed();
-        }
+    // /* ------------------OVERRIDE IN/OUT FUNCTIONS------------------ */
+    // /**
+    //  * @dev Overrides ERC4626._deposit to add rebase age validation
+    //  * @inheritdoc ERC4626
+    //  */
+    // function _deposit(
+    //     address caller,
+    //     address receiver,
+    //     uint256 assets,
+    //     uint256 shares
+    // ) internal virtual override /* onlyValidRebase */ {
+    //     super._deposit(caller, receiver, assets, shares);
+    // }
 
-        // Execute the transaction
-        (success, returnData) = target.call{value: value}(data);
-        if (!success) revert ExecutionFailed();
+    // /**
+    //  * @dev Overrides ERC4626._withdraw to add rebase age validation.
+    //  * @inheritdoc ERC4626
+    //  */
+    // function _withdraw(
+    //     address caller,
+    //     address receiver,
+    //     address owner,
+    //     uint256 assets,
+    //     uint256 shares
+    // ) internal virtual override onlyValidRebase {
+    //     super._withdraw(caller, receiver, owner, assets, shares);
+    // }
 
-        emit TransactionExecuted(target, selector, value, success);
+    /* ------------------ REBASE ------------------ */
 
-        return (success, returnData);
-    }
-
-    // Allow the contract to receive ETH
-    receive() external payable {}
-}
-
-/**
- * @title Example Parameter Validator
- * @notice Example of a parameter validator contract
- */
-contract ExampleValidator is IParameterValidator {
-    /**
-     * @notice Validate parameters for a specific function
-     * @param parameters The encoded parameters (without the function selector)
-     * @return Whether the parameters are valid
-     */
-    function validateParameters(
-        bytes calldata parameters
-    ) external pure override returns (bool) {
-        // Example: Check if a uint256 parameter is within a certain range
-        if (parameters.length == 32) {
-            // uint256 is 32 bytes
-            uint256 param;
-            assembly {
-                param := calldataload(parameters.offset)
-            }
-
-            // Example validation: check if param is less than 1000
-            return param < 1000;
-        }
-
-        return false;
-    }
-}
+    // function setRebaser(
+    //     address newRebaser,
+    //     bool enabled
+    // ) external onlyOwner {
+    //     require(newRebaser != address(0), ZeroAddress());
+    //     rebaseOperators[newRebaser] = enabled;
+    // }
