@@ -63,13 +63,13 @@ contract LobsterVault is Modular, ERC4626Fees {
 
     /* ------------------SETTERS------------------ */
 
-    /**
-     * Override ERC4626.totalAssets to take into account the value outside the chain
-     */
-    function totalAssets() public view virtual override returns (uint256) {
-        // todo: use module for this
-        // return localTotalAssets() + valueOutsideVault;
-    }
+    // /**
+    //  * Override ERC4626.totalAssets to take into account the value outside the chain
+    //  */
+    // function totalAssets() public view virtual override returns (uint256) {
+    //     // todo: use module for this
+    //     // return localTotalAssets() + valueOutsideVault;
+    // }
 
     // returns the assets owned by the vault on this blockchain (only the assets in the supported protocols / contracts)
     // value returned is the corresponding ether value

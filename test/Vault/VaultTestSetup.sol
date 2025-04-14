@@ -51,21 +51,7 @@ contract VaultTestSetup is Test {
         // Deploy contracts
         asset = new MockERC20();
         positionManager = new MockPositionsManager();
-        counter = new Counter(asset);
-
-        address[] memory validTargets = new address[](2);
-        bytes4[][] memory validSelectors = new bytes4[][](2);
-        validTargets[0] = address(asset);
-        validSelectors[0] = new bytes4[](1);
-        validSelectors[0][0] = asset.transfer.selector;
-        validTargets[1] = address(counter);
-        validSelectors[1] = new bytes4[](1);
-        validSelectors[1][0] = counter.incrementAndClaim.selector;
-
-        bytes memory validTargetsAndSelectorsData = abi.encode(
-            validTargets,
-            validSelectors
-        );
+        counter = new Counter();
 
         vault = new LobsterVault(
             owner,
@@ -74,7 +60,6 @@ contract VaultTestSetup is Test {
             "vTKN",
             lobsterAlgorithm,
             address(positionManager),
-            validTargetsAndSelectorsData,
             feeCollector
         );
 
@@ -88,10 +73,6 @@ contract VaultTestSetup is Test {
 
         vm.startPrank(bob);
         asset.approve(address(vault), type(uint256).max);
-        vm.stopPrank();
-
-        vm.startPrank(owner);
-        vault.setRebaser(lobsterRebaser, true);
         vm.stopPrank();
     }
 
@@ -140,38 +121,6 @@ contract VaultTestSetup is Test {
                     signature
                 )
             );
-    }
-
-    // Simulate a rebase operation
-    function rebaseVault(uint256 amount, uint256 expirationDelay) public {
-        vm.startPrank(lobsterRebaser);
-        bytes memory rebaseData = getValidRebaseData(
-            address(vault),
-            amount,
-            block.number + expirationDelay,
-            0,
-            RebaseType.DEPOSIT,
-            new bytes(0)
-        );
-        vault.rebase(rebaseData);
-        vm.stopPrank();
-    }
-
-    // Simulate some value being bridged / sent to another protocol by the algorithm
-    function bridge(uint256 value, address receiver) public {
-        vm.startPrank(lobsterAlgorithm);
-        vault.executeOp(
-            Op({
-                target: address(asset),
-                value: 0,
-                data: abi.encodeWithSignature(
-                    "transfer(address,uint256)",
-                    receiver,
-                    value
-                )
-            })
-        );
-        vm.stopPrank();
     }
 
     function setEntryFeeBasisPoint(uint256 fee) public returns (bool) {
