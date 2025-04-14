@@ -2,11 +2,7 @@
 pragma solidity 0.8.28;
 
 import "forge-std/Test.sol";
-import {PendingFeeUpdate} from "../../src/Vault/ERC4626Fees.sol";
 import {VaultTestSetup} from "./VaultTestSetup.sol";
-import {ERC4626Fees, IERC4626FeesEvents} from "../../src/Vault/ERC4626Fees.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {BASIS_POINT_SCALE} from "../../src/Vault/Constants.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 // test deposit / withdraw / mint / redeem functions with management fee
@@ -18,9 +14,6 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
     // todo
     /* -----------------------TEST MANUAL COLLECTION----------------------- */
     function testCollectFeesAsOwner() public {
-        // rebase to 0
-        rebaseVault(0, block.number + 1);
-
         uint256 fee = 100;
         setManagementFeeBasisPoint(fee); // 1%
 
@@ -90,9 +83,6 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
 
     /* -----------------------TEST DEPOSIT / MINT / WITHDRAW / REDEEM----------------------- */
     function testDeposit() public {
-        // rebase to 0
-        rebaseVault(0, block.number + 1);
-
         uint256 initialFeeCollectorBalance = asset.balanceOf(
             vault.feeCollector()
         );
@@ -138,10 +128,8 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
         // ensure alice shares did not change
         assertEq(vault.balanceOf(alice), shares);
     }
-    function testMint() public {
-        // rebase to 0
-        rebaseVault(0, block.number + 1);
 
+    function testMint() public {
         uint256 initialFeeCollectorBalance = asset.balanceOf(
             vault.feeCollector()
         );
@@ -179,7 +167,10 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
         assertEq(asset.balanceOf(address(vault)), assets + bobAssets);
 
         // ensure alice can redeem her shares - fee
-        assertEq(vault.maxWithdraw(alice), assets - vault.convertToShares(expectedFee));
+        assertEq(
+            vault.maxWithdraw(alice),
+            assets - vault.convertToShares(expectedFee)
+        );
 
         // ensure bob can redeem his shares
         assertEq(vault.maxRedeem(bob), vault.convertToShares(bobAssets));
@@ -187,7 +178,6 @@ contract VaultInAndOutFeesTest is VaultTestSetup {
         // // ensure alice shares did not change
         assertEq(vault.balanceOf(alice), mintAmount);
     }
-
 
     // todo
 }
