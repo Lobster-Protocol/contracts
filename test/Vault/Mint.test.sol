@@ -5,6 +5,8 @@ import "forge-std/Test.sol";
 import {VaultTestSetup} from "./VaultTestSetup.sol";
 
 contract VaultMintTest is VaultTestSetup {
+    /* -----------------------MINT----------------------- */
+
     function testMint() public {
         vm.startPrank(alice);
         uint256 previewedAssets = vault.previewMint(1 ether);
@@ -35,6 +37,14 @@ contract VaultMintTest is VaultTestSetup {
         vm.assertEq(vault.maxRedeem(bob), bobMint + bobSecondDeposit);
         vm.stopPrank();
 
-        vm.assertEq(vault.totalAssets(), aliceMint + bobMint+ bobSecondDeposit);
+        vm.assertEq(
+            vault.totalAssets(),
+            aliceMint + bobMint + bobSecondDeposit
+        );
     }
+
+    /* -----------------------MAX MINT----------------------- */
+    // todo
+    /* -----------------------PREVIEW MINT----------------------- */
+    // todo
 }

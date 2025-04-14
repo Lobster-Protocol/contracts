@@ -5,6 +5,8 @@ import "forge-std/Test.sol";
 import {VaultTestSetup} from "./VaultTestSetup.sol";
 
 contract VaultRedeemTest is VaultTestSetup {
+    /* -----------------------REDEEM----------------------- */
+
     function testRedeem() public {
         // Setup initial state
         vm.startPrank(alice);
@@ -19,4 +21,8 @@ contract VaultRedeemTest is VaultTestSetup {
         assertEq(vault.totalSupply(), 5 ether);
         vm.stopPrank();
     }
+    /* -----------------------MAX REDEEM----------------------- */
+    // todo
+    /* -----------------------PREVIEW REDEEM----------------------- */
+    // todo
 }

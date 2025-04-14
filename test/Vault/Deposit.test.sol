@@ -4,9 +4,7 @@ pragma solidity ^0.8.28;
 import "forge-std/Test.sol";
 import {VaultTestSetup} from "./VaultTestSetup.sol";
 
-
 contract VaultDepositTest is VaultTestSetup {
-    
     /* -----------------------DEPOSIT----------------------- */
     function testDeposit() public {
         vm.startPrank(alice);
@@ -36,6 +34,14 @@ contract VaultDepositTest is VaultTestSetup {
         vm.assertEq(vault.maxWithdraw(bob), bobDeposit + bobSecondDeposit);
         vm.stopPrank();
 
-        vm.assertEq(vault.totalAssets(), aliceDeposit + bobDeposit+ bobSecondDeposit);
+        vm.assertEq(
+            vault.totalAssets(),
+            aliceDeposit + bobDeposit + bobSecondDeposit
+        );
     }
+
+    /* -----------------------MAX DEPOSIT----------------------- */
+    // todo
+    /* -----------------------PREVIEW DEPOSIT----------------------- */
+    // todo
 }

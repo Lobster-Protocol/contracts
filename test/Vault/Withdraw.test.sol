@@ -5,6 +5,7 @@ import "forge-std/Test.sol";
 import {VaultTestSetup} from "./VaultTestSetup.sol";
 
 contract VaultMintTest is VaultTestSetup {
+    /* -----------------------WITHDRAW---------------------- */
     function testWithdraw() public {
         // Setup initial state
         vm.startPrank(alice);
@@ -19,4 +20,9 @@ contract VaultMintTest is VaultTestSetup {
         assertEq(vault.totalAssets(), 5 ether);
         vm.stopPrank();
     }
+
+    /* -----------------------MAX WITHDRAW----------------------- */
+    // todo
+    /* -----------------------PREVIEW WITHDRAW----------------------- */
+    // todo
 }
