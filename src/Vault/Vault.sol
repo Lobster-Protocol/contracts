@@ -10,26 +10,23 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {LobsterPositionsManager as PositionsManager} from "../PositionsManager/PositionsManager.sol";
 import {BASIS_POINT_SCALE} from "./Constants.sol";
 import {Modular} from "../Modules/Modular.sol";
-import {IHook} from "../interfaces/IHook.sol";
+import {IHook} from "../interfaces/modules/IHook.sol";
+import {INav} from "../interfaces/modules/INav.sol";
 import {IOpValidatorModule} from "../interfaces/modules/IOpValidatorModule.sol";
 
 contract LobsterVault is Modular, ERC4626Fees {
     using Math for uint256;
 
-    // PositionsManager public immutable positionManager;
-
-    event FeesCollected(uint256 total, uint256 managementFees, uint256 performanceFees, uint256 timestamp);
+    event FeesCollected(
+        uint256 total,
+        uint256 managementFees,
+        uint256 performanceFees,
+        uint256 timestamp
+    );
 
     error InitialDepositTooLow(uint256 minimumDeposit);
     error NotEnoughAssets();
-    // error RebaseExpired();
     error ZeroAddress();
-
-    // // ensure rebase did not expire
-    // modifier onlyValidRebase() {
-    //     require(rebaseExpiresAt > block.number, RebaseExpired());
-    //     _;
-    // }
 
     // todo: add initial fees
     constructor(
@@ -39,7 +36,8 @@ contract LobsterVault is Modular, ERC4626Fees {
         string memory underlyingTokenSymbol,
         address initialFeeCollector,
         IOpValidatorModule opValidator_,
-        IHook hook_
+        IHook hook_,
+        INav navModule_
     )
         Ownable(initialOwner)
         ERC20(underlyingTokenName, underlyingTokenSymbol)
@@ -53,30 +51,31 @@ contract LobsterVault is Modular, ERC4626Fees {
 
         hook = hook_;
         emit HookSet(hook_);
+
+        navModule = navModule_;
+        emit NavModuleSet(navModule_);
     }
 
     /* ------------------SETTERS------------------ */
 
-    // /**
-    //  * Override ERC4626.totalAssets to take into account the value outside the chain
-    //  */
-    // function totalAssets() public view virtual override returns (uint256) {
-    //     // todo: use module for this
-    //     // return localTotalAssets() + valueOutsideVault;
-    // }
-
-    // returns the assets owned by the vault on this blockchain (only the assets in the supported protocols / contracts)
-    // value returned is the corresponding ether value
-    function localTotalAssets() public view virtual returns (uint256) {
-        // todo: use module for this
-        // todo: get values from all supported protocols
+    /**
+     * Override ERC4626.totalAssets
+     * Returns the total assets managed by the Vault
+     */
+    function totalAssets() public view virtual override returns (uint256) {
+        if (address(navModule) != address(0)) {
+            return navModule.totalAssets();
+        }
         return IERC20(asset()).balanceOf(address(this));
     }
 
     /* ------------------FUNCTIONS FOR CUSTOM CALLS------------------ */
 
     function executeOp(Op calldata op) external {
-        if (opValidator == IOpValidatorModule(address(0)) || !opValidator.validateOp(op)) {
+        if (
+            opValidator == IOpValidatorModule(address(0)) ||
+            !opValidator.validateOp(op)
+        ) {
             revert OpNotApproved();
         }
         bytes memory ctx = _preCallHook(op, msg.sender);
@@ -85,12 +84,15 @@ contract LobsterVault is Modular, ERC4626Fees {
     }
 
     function executeOpBatch(BatchOp calldata batch) external {
-        if (opValidator == IOpValidatorModule(address(0)) || !opValidator.validateBatchedOp(batch)) {
+        if (
+            opValidator == IOpValidatorModule(address(0)) ||
+            !opValidator.validateBatchedOp(batch)
+        ) {
             revert OpNotApproved();
         }
 
         uint256 length = batch.ops.length;
-        for (uint256 i = 0; i < length;) {
+        for (uint256 i = 0; i < length; ) {
             bytes memory ctx = _preCallHook(batch.ops[i], msg.sender);
             _call(batch.ops[i]);
             _postCallHook(ctx);
@@ -101,10 +103,14 @@ contract LobsterVault is Modular, ERC4626Fees {
     }
 
     function _call(Op calldata op) private {
-        (bool success, bytes memory result) = op.target.call{value: op.value}(op.data);
+        (bool success, bytes memory result) = op.target.call{value: op.value}(
+            op.data
+        );
 
         assembly {
-            if iszero(success) { revert(add(result, 32), mload(result)) }
+            if iszero(success) {
+                revert(add(result, 32), mload(result))
+            }
         }
 
         bytes4 selector;
@@ -121,11 +127,15 @@ contract LobsterVault is Modular, ERC4626Fees {
      * @param op - the op to execute
      * @param caller - the address of the caller
      */
-    function _preCallHook(Op memory op, address caller) private returns (bytes memory context) {
+    function _preCallHook(
+        Op memory op,
+        address caller
+    ) private returns (bytes memory context) {
         if (address(hook) != address(0)) {
             // delegatecall to the hook contract
-            (bool success, bytes memory ctx) =
-                address(hook).delegatecall(abi.encodeWithSelector(hook.preCheck.selector, op, caller));
+            (bool success, bytes memory ctx) = address(hook).delegatecall(
+                abi.encodeWithSelector(hook.preCheck.selector, op, caller)
+            );
 
             if (!success) revert PreHookFailed();
 
@@ -141,7 +151,9 @@ contract LobsterVault is Modular, ERC4626Fees {
      */
     function _postCallHook(bytes memory ctx) private returns (bool success) {
         if (address(hook) != address(0)) {
-            (success,) = address(hook).delegatecall(abi.encodeWithSelector(hook.postCheck.selector, ctx));
+            (success, ) = address(hook).delegatecall(
+                abi.encodeWithSelector(hook.postCheck.selector, ctx)
+            );
 
             if (!success) revert PostHookFailed();
         }

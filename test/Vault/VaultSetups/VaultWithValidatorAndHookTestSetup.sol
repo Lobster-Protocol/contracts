@@ -5,7 +5,8 @@ import "forge-std/Test.sol";
 import {LobsterVault} from "../../../src/Vault/Vault.sol";
 import {Counter} from "../../Mocks/Counter.sol";
 import {MockERC20} from "../../Mocks/MockERC20.sol";
-import {IHook} from "../../../src/interfaces/IHook.sol";
+import {IHook} from "../../../src/interfaces/modules/IHook.sol";
+import {INav}from "../../../src/interfaces/modules/INav.sol";
 import {IOpValidatorModule} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
 import {VaultTestUtils} from "./VaultTestUtils.sol";
 import {DummyHook} from "../../Mocks/modules/DummyHook.sol";
@@ -25,12 +26,22 @@ contract VaultWithValidatorAndHookTestSetup is VaultTestUtils {
 
         IHook hook = new DummyHook();
         IOpValidatorModule opValidator = new DummyValidator();
+        INav navModule = INav(address(0));
 
         // Deploy contracts
         asset = new MockERC20();
         counter = new Counter();
 
-        vault = new LobsterVault(owner, asset, "Vault Token", "vTKN", lobsterAlgorithm, opValidator, hook);
+        vault = new LobsterVault(
+            owner,
+            asset,
+            "Vault Token",
+            "vTKN",
+            lobsterAlgorithm,
+            opValidator,
+            hook,
+            navModule
+        );
 
         // Setup initial state
         asset.mint(alice, 10000 ether);

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
-import {Op} from "./modules/IOpValidatorModule.sol";
+import {Op} from "./IOpValidatorModule.sol";
 
 interface IHook {
     /**

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import {IHook} from "../../../src/interfaces/IHook.sol";
+import {IHook} from "../../../src/interfaces/modules/IHook.sol";
 import {Op} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
 
 bytes4 constant UNAUTHORIZED_PREHOOK = bytes4(0x12345678);

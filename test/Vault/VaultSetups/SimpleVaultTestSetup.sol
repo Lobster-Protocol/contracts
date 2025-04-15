@@ -4,7 +4,8 @@ pragma solidity ^0.8.28;
 import {LobsterVault} from "../../../src/Vault/Vault.sol";
 import {Counter} from "../../Mocks/Counter.sol";
 import {MockERC20} from "../../Mocks/MockERC20.sol";
-import {IHook} from "../../../src/interfaces/IHook.sol";
+import {IHook} from "../../../src/interfaces/modules/IHook.sol";
+import {INav} from "../../../src/interfaces/modules/INav.sol";
 import {IOpValidatorModule} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
 import {VaultTestUtils} from "./VaultTestUtils.sol";
 
@@ -24,7 +25,14 @@ contract SimpleVaultTestSetup is VaultTestUtils {
         counter = new Counter();
 
         vault = new LobsterVault(
-            owner, asset, "Vault Token", "vTKN", lobsterAlgorithm, IOpValidatorModule(address(0)), IHook(address(0))
+            owner,
+            asset,
+            "Vault Token",
+            "vTKN",
+            lobsterAlgorithm,
+            IOpValidatorModule(address(0)),
+            IHook(address(0)),
+            INav(address(0))
         );
 
         // Setup initial state

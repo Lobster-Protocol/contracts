@@ -8,7 +8,7 @@ import {MockERC20} from "../../Mocks/MockERC20.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {BASIS_POINT_SCALE, SECONDS_PER_YEAR} from "../../../src/Vault/Constants.sol";
-import {IHook} from "../../../src/interfaces/IHook.sol";
+import {IHook} from "../../../src/interfaces/modules/IHook.sol";
 import {IOpValidatorModule} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
 
 enum RebaseType {
