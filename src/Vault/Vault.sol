@@ -10,11 +10,14 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {LobsterPositionsManager as PositionsManager} from "../PositionsManager/PositionsManager.sol";
 import {BASIS_POINT_SCALE} from "./Constants.sol";
 import {Modular} from "../Modules/Modular.sol";
+import {IHook} from "../interfaces/IHook.sol";
+import {IOpValidatorModule} from "../interfaces/modules/IOpValidatorModule.sol";
 
 contract LobsterVault is Modular, ERC4626Fees {
     using Math for uint256;
 
-    PositionsManager public immutable positionManager;
+    // PositionsManager public immutable positionManager;
+
     event FeesCollected(
         uint256 total,
         uint256 managementFees,
@@ -39,26 +42,22 @@ contract LobsterVault is Modular, ERC4626Fees {
         IERC20 asset,
         string memory underlyingTokenName,
         string memory underlyingTokenSymbol,
-        address lobsterAlgorithm_,
-        address positionManager_,
-        // bytes memory validTargetsAndSelectorsData,
-        address initialFeeCollector
+        address initialFeeCollector,
+        IOpValidatorModule opValidator_,
+        IHook hook_
     )
         Ownable(initialOwner)
         ERC20(underlyingTokenName, underlyingTokenSymbol)
         ERC4626(asset)
         ERC4626Fees(initialFeeCollector)
     {
-        if (
-            initialOwner == address(0) ||
-            lobsterAlgorithm_ == address(0) ||
-            positionManager_ == address(0)
-        ) {
-            revert ZeroAddress();
-        }
+        if (initialOwner == address(0)) revert ZeroAddress();
 
-        // lobsterAlgorithm = lobsterAlgorithm_;
-        positionManager = PositionsManager(positionManager_);
+        opValidator = opValidator_;
+        emit OpValidatorSet(opValidator_);
+        
+        hook = hook_;
+        emit HookSet(hook_);
     }
 
     /* ------------------SETTERS------------------ */
@@ -82,14 +81,22 @@ contract LobsterVault is Modular, ERC4626Fees {
     /* ------------------FUNCTIONS FOR CUSTOM CALLS------------------ */
 
     function executeOp(Op calldata op) external {
-        if (!opValidator.validateOp(op)) {
+        if (
+            opValidator == IOpValidatorModule(address(0)) ||
+            !opValidator.validateOp(op)
+        ) {
             revert OpNotApproved();
         }
+        bytes memory ctx = _preCallHook(op, msg.sender);
         _call(op);
+        _postCallHook(ctx);
     }
 
     function executeOpBatch(BatchOp calldata batch) external {
-        if (!opValidator.validateBatchedOp(batch)) {
+        if (
+            opValidator == IOpValidatorModule(address(0)) ||
+            !opValidator.validateBatchedOp(batch)
+        ) {
             revert OpNotApproved();
         }
 
@@ -119,5 +126,41 @@ contract LobsterVault is Modular, ERC4626Fees {
         }
 
         emit Executed(op.target, op.value, selector);
+    }
+
+    /* ------------------HOOKS------------------- */
+    /**
+     * Delegate call to the preCheck function from the Hook contract (if set)
+     * @param op - the op to execute
+     * @param caller - the address of the caller
+     */
+    function _preCallHook(
+        Op memory op,
+        address caller
+    ) private returns (bytes memory context) {
+        if (address(hook) != address(0)) {
+            // delegatecall to the hook contract
+            (bool success, bytes memory ctx) = address(hook).delegatecall(
+                abi.encodeWithSelector(hook.preCheck.selector, caller, op)
+            );
+
+            if (!success) revert PreHookFailed();
+
+            return ctx;
+        }
+    }
+
+    /**
+     * Delegate call to the postCheck function from the Hook contract (if set)
+     * @param ctx - the context returned by _preCallHook
+     */
+    function _postCallHook(bytes memory ctx) private returns (bool success) {
+        if (address(hook) != address(0)) {
+            (success, ) = address(hook).delegatecall(
+                abi.encodeWithSelector(hook.postCheck.selector, ctx)
+            );
+
+            if (!success) revert PostHookFailed();
+        }
     }
 }

@@ -9,6 +9,8 @@ import {MockPositionsManager} from "../Mocks/MockPositionsManager.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {BASIS_POINT_SCALE, SECONDS_PER_YEAR} from "../../src/Vault/Constants.sol";
+import {IHook} from "../../src/interfaces/IHook.sol";
+import {IOpValidatorModule} from "../../src/interfaces/modules/IOpValidatorModule.sol";
 
 enum RebaseType {
     DEPOSIT,
@@ -59,8 +61,8 @@ contract VaultTestSetup is Test {
             "Vault Token",
             "vTKN",
             lobsterAlgorithm,
-            address(positionManager),
-            feeCollector
+            IOpValidatorModule(address(0)),
+            IHook(address(0))
         );
 
         // Setup initial state

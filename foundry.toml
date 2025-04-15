@@ -2,8 +2,14 @@
 src = "src"
 out = "out"
 libs = ["lib"]
+optimizer = false
+via_ir = true
+
+[profile.prod]
 via_ir = true
 optimizer = true
+
+# FOUNDRY_PROFILE=prod forge build
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
 
@@ -14,3 +20,4 @@ tab_width = 4
 [profile.remapping]
 "@openzeppelin/contracts/" = "lib/openzeppelin-contracts/contracts/"
 "forge-std" = "lib/forge-std/src/"
+
