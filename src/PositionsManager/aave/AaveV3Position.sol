@@ -22,10 +22,7 @@ contract AaveV3Position is Constants {
         bool isCollateral;
     }
 
-    function getUserAssetData(
-        address user,
-        address asset
-    ) public view returns (UserAssetData memory) {
+    function getUserAssetData(address user, address asset) public view returns (UserAssetData memory) {
         (
             uint256 currentATokenBalance,
             uint256 currentStableDebt,
@@ -38,18 +35,15 @@ contract AaveV3Position is Constants {
             bool usageAsCollateralEnabled
         ) = aavePool.getUserReserveData(asset, user);
 
-        return
-            UserAssetData({
-                deposited: currentATokenBalance,
-                borrowed: currentStableDebt + currentVariableDebt,
-                collateral: usageAsCollateralEnabled ? currentATokenBalance : 0,
-                isCollateral: usageAsCollateralEnabled
-            });
+        return UserAssetData({
+            deposited: currentATokenBalance,
+            borrowed: currentStableDebt + currentVariableDebt,
+            collateral: usageAsCollateralEnabled ? currentATokenBalance : 0,
+            isCollateral: usageAsCollateralEnabled
+        });
     }
 
-    function getAllUserAssets(
-        address user
-    )
+    function getAllUserAssets(address user)
         external
         view
         returns (address[] memory assets, UserAssetData[] memory data)
@@ -62,26 +56,22 @@ contract AaveV3Position is Constants {
         }
     }
 
-    function getUserTotalCollateralAndDebt(
-        address user
-    ) public view returns (uint256 totalCollateralBase, uint256 totalDebtBase) {
+    function getUserTotalCollateralAndDebt(address user)
+        public
+        view
+        returns (uint256 totalCollateralBase, uint256 totalDebtBase)
+    {
         (
             totalCollateralBase, // 8 decimals
             totalDebtBase, // availableBorrowsBase // currentLiquidationThreshold // ltv
             ,
             ,
             ,
-
         ) = aavePool.getUserAccountData(user);
     }
 
-    function getAaveV3NetPositionValueInETH(
-        address user
-    ) public view returns (uint256) {
-        (
-            uint256 totalCollateralBase,
-            uint256 totalDebtBase
-        ) = getUserTotalCollateralAndDebt(user);
+    function getAaveV3NetPositionValueInETH(address user) public view returns (uint256) {
+        (uint256 totalCollateralBase, uint256 totalDebtBase) = getUserTotalCollateralAndDebt(user);
 
         uint256 wethPrice = aaveOracle.getAssetPrice(wethAddress); // 8 decimals
 

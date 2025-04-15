@@ -34,10 +34,7 @@ contract VaultDepositTest is SimpleVaultTestSetup {
         vm.assertEq(vault.maxWithdraw(bob), bobDeposit + bobSecondDeposit);
         vm.stopPrank();
 
-        vm.assertEq(
-            vault.totalAssets(),
-            aliceDeposit + bobDeposit + bobSecondDeposit
-        );
+        vm.assertEq(vault.totalAssets(), aliceDeposit + bobDeposit + bobSecondDeposit);
     }
 
     /* -----------------------MAX DEPOSIT----------------------- */

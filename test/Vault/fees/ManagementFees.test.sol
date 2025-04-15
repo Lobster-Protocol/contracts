@@ -19,20 +19,14 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
 
         // alice deposit 1000 assets
         vm.startPrank(alice);
-        uint256 initialFeeCollectorBalance = asset.balanceOf(
-            vault.feeCollector()
-        );
+        uint256 initialFeeCollectorBalance = asset.balanceOf(vault.feeCollector());
 
         uint256 depositAmount = 1000;
         uint256 shares = vault.deposit(depositAmount, alice);
         vm.stopPrank();
 
         uint256 duration = 365 days;
-        uint256 expectedFee = computeManagementFees(
-            depositAmount,
-            fee,
-            duration
-        );
+        uint256 expectedFee = computeManagementFees(depositAmount, fee, duration);
 
         // wait for 1 year
         vm.warp(duration);
@@ -48,16 +42,10 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         assertEq(vault.balanceOf(alice), shares);
 
         // ensure fee collector asset balance did not change
-        assertEq(
-            asset.balanceOf(vault.feeCollector()),
-            initialFeeCollectorBalance
-        );
+        assertEq(asset.balanceOf(vault.feeCollector()), initialFeeCollectorBalance);
 
         // ensure collectedFees1 is accurate
-        assertEq(
-            vault.balanceOf(vault.feeCollector()) - initialFeeCollectorBalance,
-            collectedFees1
-        );
+        assertEq(vault.balanceOf(vault.feeCollector()) - initialFeeCollectorBalance, collectedFees1);
 
         // ensure we can't withdraw again in the same block
         uint256 vaultTotalSupplyBefore = vault.totalSupply();
@@ -73,19 +61,14 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         assertEq(vault.balanceOf(alice), shares);
 
         // ensure fee collector asset balance did not change
-        assertEq(
-            asset.balanceOf(vault.feeCollector()),
-            initialFeeCollectorBalance
-        );
+        assertEq(asset.balanceOf(vault.feeCollector()), initialFeeCollectorBalance);
 
         vm.stopPrank();
     }
 
     /* -----------------------TEST DEPOSIT / MINT / WITHDRAW / REDEEM----------------------- */
     function testDeposit() public {
-        uint256 initialFeeCollectorBalance = asset.balanceOf(
-            vault.feeCollector()
-        );
+        uint256 initialFeeCollectorBalance = asset.balanceOf(vault.feeCollector());
 
         // alice deposit 1000 assets
         vm.startPrank(alice);
@@ -111,10 +94,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         vm.stopPrank();
 
         // management fees must have been collected
-        assertEq(
-            vault.balanceOf(vault.feeCollector()),
-            initialFeeCollectorBalance + expectedFee
-        );
+        assertEq(vault.balanceOf(vault.feeCollector()), initialFeeCollectorBalance + expectedFee);
 
         // ensure no assets where moved out of the vault
         assertEq(asset.balanceOf(address(vault)), depositAmount + bobDeposit);
@@ -130,9 +110,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
     }
 
     function testMint() public {
-        uint256 initialFeeCollectorBalance = asset.balanceOf(
-            vault.feeCollector()
-        );
+        uint256 initialFeeCollectorBalance = asset.balanceOf(vault.feeCollector());
 
         // alice mint 1000 shares
         vm.startPrank(alice);
@@ -158,19 +136,13 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         vm.stopPrank();
 
         // management fees must have been collected
-        assertEq(
-            vault.balanceOf(vault.feeCollector()),
-            initialFeeCollectorBalance + expectedFee
-        );
+        assertEq(vault.balanceOf(vault.feeCollector()), initialFeeCollectorBalance + expectedFee);
 
         // ensure no assets where moved out of the vault
         assertEq(asset.balanceOf(address(vault)), assets + bobAssets);
 
         // ensure alice can redeem her shares - fee
-        assertEq(
-            vault.maxWithdraw(alice),
-            assets - vault.convertToShares(expectedFee)
-        );
+        assertEq(vault.maxWithdraw(alice), assets - vault.convertToShares(expectedFee));
 
         // ensure bob can redeem his shares
         assertEq(vault.maxRedeem(bob), vault.convertToShares(bobAssets));

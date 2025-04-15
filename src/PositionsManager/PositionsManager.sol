@@ -21,11 +21,7 @@ contract LobsterPositionsManager is IPositionsManager, UniswapV3Position, AaveV3
         address aaveLendingPoolAddress,
         address aavePriceOracle
     )
-        UniswapV3Position(
-            uniswapPositionManagerAddress,
-            uniswapV3Factory_,
-            weth_
-        )
+        UniswapV3Position(uniswapPositionManagerAddress, uniswapV3Factory_, weth_)
         AaveV3Position(aaveLendingPoolAddress, aavePriceOracle, weth_)
     {}
 
@@ -34,10 +30,8 @@ contract LobsterPositionsManager is IPositionsManager, UniswapV3Position, AaveV3
         uint256 userNativeBalance = user.balance;
 
         return
-            // add any protocol as needed
-            getUniswapV3PositionValueInETH(user) +
-            getAaveV3NetPositionValueInETH(user) + // aave deposits - aave debts
-            userWETHBalance +
-            userNativeBalance;
+        // add any protocol as needed
+        getUniswapV3PositionValueInETH(user) + getAaveV3NetPositionValueInETH(user) // aave deposits - aave debts
+            + userWETHBalance + userNativeBalance;
     }
 }

@@ -16,6 +16,14 @@ optimizer = true
 [fmt]
 line_length = 120
 tab_width = 4
+bracket_spacing = false
+int_types = 'long'
+func_call_arg_multiline = true     # This makes function call arguments multi-line
+multiline_func_header = 'all'      # This ensures function declarations stay multi-line
+quote_style = 'double'
+number_underscore = 'preserve'
+single_line_statement_blocks = 'preserve'
+ignore = ["src/console.sol", "src/console2.sol"]
 
 [profile.remapping]
 "@openzeppelin/contracts/" = "lib/openzeppelin-contracts/contracts/"

@@ -7,22 +7,10 @@ struct PendingFeeUpdate {
 }
 
 interface IERC4626FeesEvents {
-    event NewPendingEntryFeeUpdate(
-        uint256 newFeeBasisPoints,
-        uint256 activationTimestamp
-    );
-    event NewPendingExitFeeUpdate(
-        uint256 newFeeBasisPoints,
-        uint256 activationTimestamp
-    );
-    event NewPendingManagementFeeUpdate(
-        uint256 newFeeBasisPoints,
-        uint256 activationTimestamp
-    );
-    event NewPendingPerformanceFeeUpdate(
-        uint256 newFeeBasisPoints,
-        uint256 activationTimestamp
-    );
+    event NewPendingEntryFeeUpdate(uint256 newFeeBasisPoints, uint256 activationTimestamp);
+    event NewPendingExitFeeUpdate(uint256 newFeeBasisPoints, uint256 activationTimestamp);
+    event NewPendingManagementFeeUpdate(uint256 newFeeBasisPoints, uint256 activationTimestamp);
+    event NewPendingPerformanceFeeUpdate(uint256 newFeeBasisPoints, uint256 activationTimestamp);
     event EntryFeeEnforced(uint256 newFeeBasisPoints);
     event ExitFeeEnforced(uint256 newFeeBasisPoints);
     event ManagementFeeEnforced(uint256 newFeeBasisPoints);
@@ -45,11 +33,8 @@ interface IERC4626FeesEvents {
      */
     event FeeCollectorUpdated(address feeCollector);
 
-        // Error definitions
-    error ActivationTimestampNotReached(
-        uint256 currentTimestamp,
-        uint256 activationTimestamp
-    );
+    // Error definitions
+    error ActivationTimestampNotReached(uint256 currentTimestamp, uint256 activationTimestamp);
     error NoPendingFeeUpdate();
     error InvalidFee();
     error InsufficientAssetsForFees();

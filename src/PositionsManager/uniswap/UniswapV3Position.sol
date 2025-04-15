@@ -24,22 +24,14 @@ contract UniswapV3Position is Constants {
     INonfungiblePositionManager public immutable positionManager;
     address public immutable uniswapV3Factory;
 
-    constructor(
-        address uniswapPositionManagerAddress,
-        address factory,
-        address weth
-    ) {
-        positionManager = INonfungiblePositionManager(
-            uniswapPositionManagerAddress
-        );
+    constructor(address uniswapPositionManagerAddress, address factory, address weth) {
+        positionManager = INonfungiblePositionManager(uniswapPositionManagerAddress);
         uniswapV3Factory = factory;
         wethAddress = weth;
     }
 
     // Get total value locked in Uniswap V3 for a specific address. returns the total value in ETH
-    function getUniswapV3PositionValueInETH(
-        address user
-    ) public view returns (uint256 totalValueInETH) {
+    function getUniswapV3PositionValueInETH(address user) public view returns (uint256 totalValueInETH) {
         uint256 balance = positionManager.balanceOf(user);
 
         for (uint256 i = 0; i < balance; i++) {
@@ -47,41 +39,16 @@ contract UniswapV3Position is Constants {
             uint256 tokenId = positionManager.tokenOfOwnerByIndex(user, i);
 
             // Retrieve position details
-            (
-                ,
-                ,
-                address token0,
-                address token1,
-                uint24 fee,
-                int24 tickLower,
-                int24 tickUpper,
-                uint128 liquidity,
-                ,
-                ,
-                ,
-
-            ) = positionManager.positions(tokenId);
+            (,, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity,,,,) =
+                positionManager.positions(tokenId);
 
             // Get the pool address
-            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(
-                token0,
-                token1,
-                fee
-            );
-            address poolAddress = PoolAddress.computeAddress(
-                uniswapV3Factory,
-                key
-            );
+            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(token0, token1, fee);
+            address poolAddress = PoolAddress.computeAddress(uniswapV3Factory, key);
 
             // Calculate position value
-            uint256 positionValueInETH = calculatePositionValue(
-                poolAddress,
-                token0,
-                token1,
-                liquidity,
-                tickLower,
-                tickUpper
-            );
+            uint256 positionValueInETH =
+                calculatePositionValue(poolAddress, token0, token1, liquidity, tickLower, tickUpper);
 
             totalValueInETH += positionValueInETH;
         }
@@ -98,28 +65,24 @@ contract UniswapV3Position is Constants {
         uint128 liquidity,
         int24 tickLower,
         int24 tickUpper
-    ) public view returns (uint256 valueInETH) {
+    )
+        public
+        view
+        returns (uint256 valueInETH)
+    {
         IUniswapV3Pool pool = IUniswapV3Pool(poolAddress);
 
         // Get current price
-        (, int24 currentTick, , , , , ) = pool.slot0();
+        (, int24 currentTick,,,,,) = pool.slot0();
 
         uint160 sqrtPriceA = TickMath.getSqrtRatioAtTick(tickLower);
         uint160 sqrtPriceB = TickMath.getSqrtRatioAtTick(tickUpper);
         uint160 sqrtPriceCurrent = TickMath.getSqrtRatioAtTick(currentTick);
 
         // extract position value
-        uint256 amount0 = UniswapV3MathLib.getToken0FromLiquidity(
-            liquidity,
-            sqrtPriceCurrent,
-            sqrtPriceB
-        );
+        uint256 amount0 = UniswapV3MathLib.getToken0FromLiquidity(liquidity, sqrtPriceCurrent, sqrtPriceB);
 
-        uint256 amount1 = UniswapV3MathLib.getToken1FromLiquidity(
-            liquidity,
-            sqrtPriceA,
-            sqrtPriceCurrent
-        );
+        uint256 amount1 = UniswapV3MathLib.getToken1FromLiquidity(liquidity, sqrtPriceA, sqrtPriceCurrent);
 
         // Convert to ETH
         uint256 token0ToETH = getTokenInETH(token0, amount0, uniswapV3Factory);
@@ -134,11 +97,7 @@ contract UniswapV3Position is Constants {
      * @param amount The amount of token to get the value for
      * @param factory The Uniswap V3 factory address to use
      */
-    function getTokenInETH(
-        address token,
-        uint256 amount,
-        address factory
-    ) internal view returns (uint256) {
+    function getTokenInETH(address token, uint256 amount, address factory) internal view returns (uint256) {
         // if token is weth, return the amount (1:1 ratio)
         if (token == wethAddress) return amount;
 
@@ -149,16 +108,12 @@ contract UniswapV3Position is Constants {
         fees[2] = 500; // 0.05% fee tier
 
         // Try different fee tiers to get a price quote
-        for (uint i = 0; i < fees.length; i++) {
-            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(
-                token,
-                wethAddress,
-                fees[i]
-            );
+        for (uint256 i = 0; i < fees.length; i++) {
+            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(token, wethAddress, fees[i]);
             address poolAddress = PoolAddress.computeAddress(factory, key);
 
             // check code length at address
-            uint codeSize;
+            uint256 codeSize;
             assembly {
                 codeSize := extcodesize(poolAddress)
             }
@@ -168,11 +123,7 @@ contract UniswapV3Position is Constants {
             }
 
             // get the quote
-            uint256 quote = UniswapV3MathLib.getQuote(
-                poolAddress,
-                amount,
-                wethAddress
-            );
+            uint256 quote = UniswapV3MathLib.getQuote(poolAddress, amount, wethAddress);
 
             // return the quote
             return quote;
@@ -194,38 +145,19 @@ contract UniswapV3Position is Constants {
         uint128 liquidityToWithdraw,
         uint256 amount0Min,
         uint256 amount1Min
-    ) external {
+    )
+        external
+    {
         // Get position information
-        (
-            ,
-            ,
-            ,
-            ,
-            ,
-            ,
-            ,
-            uint128 currentLiquidity,
-            ,
-            ,
-            ,
-
-        ) = positionManager.positions(tokenId);
+        (,,,,,,, uint128 currentLiquidity,,,,) = positionManager.positions(tokenId);
 
         // Ensure we're not trying to withdraw more than available
-        require(
-            liquidityToWithdraw <= currentLiquidity,
-            "Insufficient liquidity"
-        );
+        require(liquidityToWithdraw <= currentLiquidity, "Insufficient liquidity");
 
         // Call main withdrawal function
-        _withdrawPosition(
-            tokenId,
-            liquidityToWithdraw,
-            amount0Min,
-            amount1Min
-            // token0,
-            // token1
-        );
+        _withdrawPosition(tokenId, liquidityToWithdraw, amount0Min, amount1Min);
+        // token0,
+        // token1
     }
 
     function _withdrawPosition(
@@ -233,28 +165,29 @@ contract UniswapV3Position is Constants {
         uint128 liquidityToWithdraw,
         uint256 amount0Min,
         uint256 amount1Min
-    ) private returns (uint256 amount0, uint256 amount1) {
+    )
+        private
+        returns (uint256 amount0, uint256 amount1)
+    {
         // Decrease specified amount of liquidity
-        INonfungiblePositionManager.DecreaseLiquidityParams
-            memory params = INonfungiblePositionManager
-                .DecreaseLiquidityParams({
-                    tokenId: tokenId,
-                    liquidity: liquidityToWithdraw,
-                    amount0Min: amount0Min,
-                    amount1Min: amount1Min,
-                    deadline: block.timestamp
-                });
+        INonfungiblePositionManager.DecreaseLiquidityParams memory params = INonfungiblePositionManager
+            .DecreaseLiquidityParams({
+            tokenId: tokenId,
+            liquidity: liquidityToWithdraw,
+            amount0Min: amount0Min,
+            amount1Min: amount1Min,
+            deadline: block.timestamp
+        });
 
         positionManager.decreaseLiquidity(params);
 
         // Collect the withdrawn liquidity
-        INonfungiblePositionManager.CollectParams
-            memory collectParams = INonfungiblePositionManager.CollectParams({
-                tokenId: tokenId,
-                recipient: address(this),
-                amount0Max: type(uint128).max,
-                amount1Max: type(uint128).max
-            });
+        INonfungiblePositionManager.CollectParams memory collectParams = INonfungiblePositionManager.CollectParams({
+            tokenId: tokenId,
+            recipient: address(this),
+            amount0Max: type(uint128).max,
+            amount1Max: type(uint128).max
+        });
 
         (amount0, amount1) = positionManager.collect(collectParams);
     }

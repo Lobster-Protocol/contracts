@@ -11,10 +11,7 @@ interface IHook {
      * @param op - The operation to be executed.
      * @param caller - vault.msg.sender
      */
-    function preCheck(
-        Op memory op,
-        address caller
-    ) external returns (bytes memory context);
+    function preCheck(Op memory op, address caller) external returns (bytes memory context);
 
     /**
      * Function to be called after the main operation is executed by the Vault.

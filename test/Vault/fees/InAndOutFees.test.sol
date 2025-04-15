@@ -20,9 +20,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         // alice deposit 1000 assets
         vm.startPrank(alice);
         uint256 initialAliceBalance = asset.balanceOf(alice);
-        uint256 initialFeeCollectorBalance = asset.balanceOf(
-            vault.feeCollector()
-        );
+        uint256 initialFeeCollectorBalance = asset.balanceOf(vault.feeCollector());
 
         uint256 depositAmount = 1000;
         uint256 expectedFee = computeFees(depositAmount, fee);
@@ -39,10 +37,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         assertEq(shares, vault.balanceOf(alice));
 
         // check fee collector asset balance did not change
-        assertEq(
-            asset.balanceOf(vault.feeCollector()),
-            initialFeeCollectorBalance
-        );
+        assertEq(asset.balanceOf(vault.feeCollector()), initialFeeCollectorBalance);
 
         // check fee collector shares balance
         assertEq(vault.balanceOf(vault.feeCollector()), expectedFee);
@@ -55,9 +50,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         // alice mint 1000 shares
         vm.startPrank(alice);
         uint256 initialAliceBalance = asset.balanceOf(alice);
-        uint256 initialFeeCollectorBalance = asset.balanceOf(
-            vault.feeCollector()
-        );
+        uint256 initialFeeCollectorBalance = asset.balanceOf(vault.feeCollector());
 
         uint256 mintAmount = 1000;
         uint256 expectedFee = computeFees(mintAmount, fee);
@@ -74,10 +67,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         assertEq(vault.balanceOf(alice), mintAmount);
 
         // check fee collector asset balance did not change
-        assertEq(
-            asset.balanceOf(vault.feeCollector()),
-            initialFeeCollectorBalance
-        );
+        assertEq(asset.balanceOf(vault.feeCollector()), initialFeeCollectorBalance);
 
         // check fee collector shares balance
         assertEq(vault.balanceOf(vault.feeCollector()), expectedFee);
@@ -90,9 +80,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         vm.startPrank(alice);
         // alice deposit 1000 assets
         uint256 initialAliceBalance = asset.balanceOf(alice);
-        uint256 initialFeeCollectorBalance = asset.balanceOf(
-            vault.feeCollector()
-        );
+        uint256 initialFeeCollectorBalance = asset.balanceOf(vault.feeCollector());
 
         uint256 depositAmount = 1000;
         uint256 expectedFee = computeFees(depositAmount, fee);
@@ -107,10 +95,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         assertEq(asset.balanceOf(alice), initialAliceBalance - 10); // 10 is the expected fee for 1% management fee with a 1000 assets deposit for 1 block 1 year
 
         // check vault balance
-        assertEq(
-            asset.balanceOf(address(vault)),
-            vault.convertToAssets(expectedFee)
-        ); // (vault has been emptied, there is only the collected fees)
+        assertEq(asset.balanceOf(address(vault)), vault.convertToAssets(expectedFee)); // (vault has been emptied, there is only the collected fees)
 
         // ensure `shares`is the amount of shares burnt by alice
         assertEq(sharesBurnt, shares);
@@ -119,10 +104,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         assertEq(vault.balanceOf(alice), 0);
 
         // check fee collector asset balance did not change
-        assertEq(
-            asset.balanceOf(vault.feeCollector()),
-            initialFeeCollectorBalance
-        );
+        assertEq(asset.balanceOf(vault.feeCollector()), initialFeeCollectorBalance);
 
         // check fee collector shares balance
         assertEq(vault.balanceOf(vault.feeCollector()), expectedFee);
@@ -135,9 +117,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         vm.startPrank(alice);
         // alice deposit 1000 assets
         uint256 initialAliceBalance = asset.balanceOf(alice);
-        uint256 initialFeeCollectorBalance = asset.balanceOf(
-            vault.feeCollector()
-        );
+        uint256 initialFeeCollectorBalance = asset.balanceOf(vault.feeCollector());
 
         uint256 mintAmount = 1000;
         uint256 expectedFee = computeFees(mintAmount, fee);
@@ -150,10 +130,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         vm.stopPrank();
         console2.log(assetsRedeemed);
         // check alice asset balance
-        assertEq(
-            asset.balanceOf(alice),
-            initialAliceBalance - expectedFeeAsset
-        );
+        assertEq(asset.balanceOf(alice), initialAliceBalance - expectedFeeAsset);
 
         // check vault balance
         assertEq(asset.balanceOf(address(vault)), expectedFee); // (vault has been emptied, there is only the collected fees)
@@ -165,10 +142,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         assertEq(assetsRedeemed, assets - expectedFeeAsset);
 
         // check fee collector asset balance did not change
-        assertEq(
-            asset.balanceOf(vault.feeCollector()),
-            initialFeeCollectorBalance
-        );
+        assertEq(asset.balanceOf(vault.feeCollector()), initialFeeCollectorBalance);
 
         console2.log(vault.totalSupply());
 

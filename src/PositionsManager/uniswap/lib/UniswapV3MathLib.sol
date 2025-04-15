@@ -4,7 +4,6 @@ pragma solidity ^0.8.0;
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IUniswapV3Pool} from "../../../interfaces/uniswapV3/IUniswapV3Pool.sol";
 
-
 library UniswapV3MathLib {
     // Constants from Uniswap V3 for fixed-point arithmetic
     int24 internal constant MIN_TICK = -887272;
@@ -17,7 +16,11 @@ library UniswapV3MathLib {
         uint128 liquidity,
         uint160 sqrtPriceA,
         uint160 sqrtPriceB
-    ) internal pure returns (uint256 amount0) {
+    )
+        internal
+        pure
+        returns (uint256 amount0)
+    {
         require(sqrtPriceA <= sqrtPriceB, "Price A must be <= Price B");
 
         uint256 liq = uint256(liquidity);
@@ -26,18 +29,10 @@ library UniswapV3MathLib {
         // Token0Amount = liquidity * 2^96 * (sqrtRatioB - sqrtRatioA) / (sqrtRatioA * sqrtRatioB)
 
         // Calculate the numerator
-        uint256 numerator = Math.mulDiv(
-            Q96,
-            uint256(sqrtPriceB) - uint256(sqrtPriceA),
-            Q192
-        );
+        uint256 numerator = Math.mulDiv(Q96, uint256(sqrtPriceB) - uint256(sqrtPriceA), Q192);
 
         // Calculate the denominator
-        uint256 denominator = Math.mulDiv(
-            uint256(sqrtPriceA),
-            uint256(sqrtPriceB),
-            Q192
-        );
+        uint256 denominator = Math.mulDiv(uint256(sqrtPriceA), uint256(sqrtPriceB), Q192);
 
         // Calculate the final amount
         amount0 = Math.mulDiv(liq, numerator, denominator);
@@ -48,11 +43,12 @@ library UniswapV3MathLib {
         uint128 liquidity,
         uint160 sqrtPriceA,
         uint160 sqrtPriceCurrent
-    ) internal pure returns (uint256 amount1) {
-        require(
-            sqrtPriceA <= sqrtPriceCurrent,
-            "Price A must be <= Price current"
-        );
+    )
+        internal
+        pure
+        returns (uint256 amount1)
+    {
+        require(sqrtPriceA <= sqrtPriceCurrent, "Price A must be <= Price current");
 
         uint256 liq = uint256(liquidity);
 
@@ -63,23 +59,15 @@ library UniswapV3MathLib {
     }
 
     // returns the token amount equivalent value in eth
-    function getQuote(
-        address poolAddress,
-        uint256 amount,
-        address wethAddress
-    ) internal view returns (uint256) {
+    function getQuote(address poolAddress, uint256 amount, address wethAddress) internal view returns (uint256) {
         IUniswapV3Pool pool = IUniswapV3Pool(poolAddress);
 
         // Get current sqrt price and tick
-        (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
+        (uint160 sqrtPriceX96,,,,,,) = pool.slot0();
 
         // Calculate the price from sqrtPriceX96
         // price = (sqrtPriceX96 * sqrtPriceX96) / (2^192)
-        uint256 priceX96Squared = Math.mulDiv(
-            uint256(sqrtPriceX96),
-            uint256(sqrtPriceX96),
-            Q96
-        );
+        uint256 priceX96Squared = Math.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), Q96);
 
         // Convert the amount to ETH based on the price
         // If token is token0, then multiply by price

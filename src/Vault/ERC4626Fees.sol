@@ -128,7 +128,9 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
         return assets - _feeOnTotal(assets, exitFeeBasisPoints);
     }
 
-    /** @dev See {IERC4626-maxWithdraw}. */
+    /**
+     * @dev See {IERC4626-maxWithdraw}.
+     */
     function maxWithdraw(
         address owner
     ) public view virtual override returns (uint256) {
@@ -559,8 +561,9 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
     }
 
     function enforceNewEntryFee() external onlyOwner returns (bool) {
-        if (pendingEntryFeeUpdate.activationTimestamp == 0)
+        if (pendingEntryFeeUpdate.activationTimestamp == 0) {
             revert NoPendingFeeUpdate();
+        }
 
         // should revert if the activation timestamp is in the future
         if (block.timestamp < pendingEntryFeeUpdate.activationTimestamp) {
@@ -579,8 +582,9 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
     }
 
     function enforceNewExitFee() external onlyOwner returns (bool) {
-        if (pendingExitFeeUpdate.activationTimestamp == 0)
+        if (pendingExitFeeUpdate.activationTimestamp == 0) {
             revert NoPendingFeeUpdate();
+        }
 
         // should revert if the activation timestamp is in the future
         if (block.timestamp < pendingExitFeeUpdate.activationTimestamp) {
@@ -599,8 +603,9 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
     }
 
     function enforceNewManagementFee() external onlyOwner returns (bool) {
-        if (pendingManagementFeeUpdate.activationTimestamp == 0)
+        if (pendingManagementFeeUpdate.activationTimestamp == 0) {
             revert NoPendingFeeUpdate();
+        }
 
         // should revert if the activation timestamp is in the future
         if (block.timestamp < pendingManagementFeeUpdate.activationTimestamp) {
@@ -623,8 +628,9 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
     }
 
     function enforceNewPerformanceFee() external onlyOwner returns (bool) {
-        if (pendingPerformanceFeeUpdate.activationTimestamp == 0)
+        if (pendingPerformanceFeeUpdate.activationTimestamp == 0) {
             revert NoPendingFeeUpdate();
+        }
 
         // should revert if the activation timestamp is in the future
         if (block.timestamp < pendingPerformanceFeeUpdate.activationTimestamp) {

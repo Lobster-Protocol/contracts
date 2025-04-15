@@ -5,7 +5,6 @@ import "forge-std/Test.sol";
 import {LobsterVault, Op} from "../../../src/Vault/Vault.sol";
 import {Counter} from "../../Mocks/Counter.sol";
 import {MockERC20} from "../../Mocks/MockERC20.sol";
-import {MockPositionsManager} from "../../Mocks/MockPositionsManager.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {BASIS_POINT_SCALE, SECONDS_PER_YEAR} from "../../../src/Vault/Constants.sol";
@@ -23,7 +22,6 @@ enum RebaseType {
 contract VaultTestUtils is Test {
     using Math for uint256;
 
-    MockPositionsManager public positionManager;
     LobsterVault public vault;
     MockERC20 public asset;
     Counter public counter;
@@ -47,43 +45,27 @@ contract VaultTestUtils is Test {
         uint256 minEthAmountToRetrieve,
         RebaseType rebaseType,
         bytes memory withdrawOperations
-    ) public view returns (bytes memory) {
+    )
+        public
+        view
+        returns (bytes memory)
+    {
         bytes32 messageToBeSigned = MessageHashUtils.toEthSignedMessageHash(
-            keccak256(
-                abi.encode(
-                    valueOutsideVault,
-                    expirationBlock,
-                    withdrawOperations,
-                    block.chainid,
-                    vault
-                )
-            )
+            keccak256(abi.encode(valueOutsideVault, expirationBlock, withdrawOperations, block.chainid, vault))
         );
 
         // sign the data using the private key of the rebaser
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(
-            lobsterRebaserPrivateKey,
-            messageToBeSigned
-        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(lobsterRebaserPrivateKey, messageToBeSigned);
 
         // Concatenate the signature components
         bytes memory signature = abi.encodePacked(r, s, v);
 
-        return
-            abi.encodePacked(
-                rebaseType == RebaseType.DEPOSIT ||
-                    rebaseType == RebaseType.MINT
-                    ? hex"00"
-                    : hex"01",
-                minEthAmountToRetrieve,
-                vault_,
-                abi.encode(
-                    valueOutsideVault,
-                    expirationBlock,
-                    withdrawOperations,
-                    signature
-                )
-            );
+        return abi.encodePacked(
+            rebaseType == RebaseType.DEPOSIT || rebaseType == RebaseType.MINT ? hex"00" : hex"01",
+            minEthAmountToRetrieve,
+            vault_,
+            abi.encode(valueOutsideVault, expirationBlock, withdrawOperations, signature)
+        );
     }
 
     function setEntryFeeBasisPoint(uint256 fee) public returns (bool) {
@@ -134,10 +116,7 @@ contract VaultTestUtils is Test {
         return true;
     }
 
-    function computeFees(
-        uint256 amount,
-        uint256 fee
-    ) public pure returns (uint256) {
+    function computeFees(uint256 amount, uint256 fee) public pure returns (uint256) {
         return amount.mulDiv(fee, BASIS_POINT_SCALE, Math.Rounding.Ceil);
     }
 
@@ -145,21 +124,36 @@ contract VaultTestUtils is Test {
         uint256 vaultShares,
         uint256 fee, // basis point
         uint256 duration
-    ) public pure returns (uint256) {
-        return
-            (vaultShares * fee).mulDiv(
-                duration,
-                (BASIS_POINT_SCALE * SECONDS_PER_YEAR),
-                Math.Rounding.Ceil
-            );
+    )
+        public
+        pure
+        returns (uint256)
+    {
+        return (vaultShares * fee).mulDiv(duration, (BASIS_POINT_SCALE * SECONDS_PER_YEAR), Math.Rounding.Ceil);
     }
 
     function computePerformanceFees(
         uint256 vaultShares,
         uint256 fee, // basis point
         uint256 duration
-    ) public pure returns (uint256) {
+    )
+        public
+        pure
+        returns (uint256)
+    {
         // todo
         revert("Not implemented");
+    }
+
+    // check if we are in a delegate call
+    function amIDelegated() public view returns (bool) {
+        // Get the address where the code is actually stored
+        address codeAddress;
+        assembly {
+            codeAddress := extcodesize(address())
+        }
+
+        // If the code address is different from address(this), we're in a delegatecall
+        return codeAddress != address(this);
     }
 }

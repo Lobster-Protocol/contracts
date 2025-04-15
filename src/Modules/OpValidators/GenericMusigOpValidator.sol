@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
-import {Op, BatchOp, IOpValidatorModule, WhitelistedCall, Signers} from "../../interfaces/modules/IOpValidatorModule.sol";
+import {
+    Op, BatchOp, IOpValidatorModule, WhitelistedCall, Signers
+} from "../../interfaces/modules/IOpValidatorModule.sol";
 import {IParameterValidator} from "../../interfaces/modules/IParameterValidator.sol";
 import {NO_PARAMS_CHECKS_ADDRESS, SEND_ETH, CALL_FUNCTIONS} from "./constants.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
@@ -53,13 +55,10 @@ contract GenericMusigOpValidator is IOpValidatorModule {
     error EmptyOperation();
     error DataFieldTooShort();
 
-    constructor(
-        WhitelistedCall[] memory whitelist,
-        Signers[] memory signers_,
-        uint256 quorum_
-    ) {
-        if (whitelist.length == 0 || signers_.length == 0)
+    constructor(WhitelistedCall[] memory whitelist, Signers[] memory signers_, uint256 quorum_) {
+        if (whitelist.length == 0 || signers_.length == 0) {
             revert EmptyWhitelistOrSigners();
+        }
 
         if (quorum_ == 0) revert("Quorum cannot be zero");
 
@@ -89,19 +88,19 @@ contract GenericMusigOpValidator is IOpValidatorModule {
     function validateOp(Op calldata op) public view returns (bool) {
         bytes32 message = messageFromOp(op);
 
-        if (!isValidSignature(message, op.validationData))
+        if (!isValidSignature(message, op.validationData)) {
             revert InvalidSignature();
+        }
 
         return _validateOp(op);
     }
 
-    function validateBatchedOp(
-        BatchOp calldata batch
-    ) external view returns (bool) {
+    function validateBatchedOp(BatchOp calldata batch) external view returns (bool) {
         bytes32 message = messageFromOps(batch.ops);
 
-        if (!isValidSignature(message, batch.validationData))
+        if (!isValidSignature(message, batch.validationData)) {
             revert InvalidSignature();
+        }
 
         for (uint256 i = 0; i < batch.ops.length; i++) {
             if (!_validateOp(batch.ops[i])) {
@@ -117,10 +116,9 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         if (call.permissions == 0) revert InvalidPermissions();
 
         // if call is allowed, ensure there is at least 1 selector allowed
-        if (
-            (call.permissions & bytes1(CALL_FUNCTIONS)) != 0 &&
-            call.selectorAndChecker.length == 0
-        ) revert InvalidPermissions();
+        if ((call.permissions & bytes1(CALL_FUNCTIONS)) != 0 && call.selectorAndChecker.length == 0) {
+            revert InvalidPermissions();
+        }
 
         if (call.maxAllowance > 0) {
             maxAllowance[call.target] = call.maxAllowance;
@@ -130,9 +128,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
 
         for (uint256 i = 0; i < call.selectorAndChecker.length; i++) {
             bytes4 selector = call.selectorAndChecker[i].selector;
-            address paramsValidator = call
-                .selectorAndChecker[i]
-                .paramsValidator;
+            address paramsValidator = call.selectorAndChecker[i].paramsValidator;
 
             if (paramsValidator == address(0)) {
                 revert ZeroAddress();
@@ -144,10 +140,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
     }
 
     // todo: use bls signatures for better gas efficiency
-    function isValidSignature(
-        bytes32 message,
-        bytes memory signatures
-    ) public view returns (bool) {
+    function isValidSignature(bytes32 message, bytes memory signatures) public view returns (bool) {
         uint256 allSignaturesLen = signatures.length;
 
         // ensure the data length is correct
@@ -207,8 +200,9 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         }
 
         // Check if the total signature weight meets the quorum
-        if (totalSigWeight < quorum)
+        if (totalSigWeight < quorum) {
             revert QuorumNotMet(totalSigWeight, quorum);
+        }
 
         return true;
     }
@@ -226,18 +220,16 @@ contract GenericMusigOpValidator is IOpValidatorModule {
             revert EmptyOperation();
         }
 
-        if (
-            (value > 0 && (authorization & SEND_ETH) == 0) ||
-            (value > maxAllowance[target])
-        ) {
+        if ((value > 0 && (authorization & SEND_ETH) == 0) || (value > maxAllowance[target])) {
             revert ExceedsAllowance(maxAllowance[target], value);
         }
 
         uint256 dataLen = op.data.length;
         if (dataLen > 0 && dataLen < 4) revert DataFieldTooShort();
 
-        if (dataLen > 0 && (authorization & CALL_FUNCTIONS) == 0)
+        if (dataLen > 0 && (authorization & CALL_FUNCTIONS) == 0) {
             revert TargetNotWhitelisted(target);
+        }
 
         // Ensure function selector is whitelisted
         if (dataLen >= 4) {
@@ -249,9 +241,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
             if (paramsValidator != NO_PARAMS_CHECKS_ADDRESS && dataLen > 4) {
                 bytes memory data = op.data[4:];
                 // Validate parameters
-                IParameterValidator validator = IParameterValidator(
-                    paramsValidator
-                );
+                IParameterValidator validator = IParameterValidator(paramsValidator);
                 if (!validator.validateParameters(data)) {
                     revert ParameterValidationFailed();
                 }
@@ -269,10 +259,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
 
         // Concatenate the encoding of each operation
         for (uint256 i = 0; i < ops.length; i++) {
-            combinedData = abi.encodePacked(
-                combinedData,
-                abi.encodePacked(ops[i].target, ops[i].value, ops[i].data)
-            );
+            combinedData = abi.encodePacked(combinedData, abi.encodePacked(ops[i].target, ops[i].value, ops[i].data));
         }
 
         // Create the hash in the Ethereum format
@@ -280,15 +267,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
     }
 
     function messageFromOp(Op calldata op) public view returns (bytes32) {
-        return
-            keccak256(
-                abi.encodePacked(
-                    block.chainid,
-                    msg.sender,
-                    op.target,
-                    op.value,
-                    op.data
-                )
-            ).toEthSignedMessageHash();
+        return keccak256(abi.encodePacked(block.chainid, msg.sender, op.target, op.value, op.data))
+            .toEthSignedMessageHash();
     }
 }

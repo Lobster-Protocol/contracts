@@ -7,8 +7,7 @@ contract Counter {
     // IERC20 immutable asset;
     uint256 public value = 0;
 
-    constructor(/* IERC20 asset_ */) {
-    }
+    constructor( /* IERC20 asset_ */ ) {}
 
     function ping() external pure returns (string memory) {
         return "pong";

@@ -7,9 +7,11 @@ import {MockERC20} from "../../Mocks/MockERC20.sol";
 import {IHook} from "../../../src/interfaces/IHook.sol";
 import {IOpValidatorModule} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
 import {VaultTestUtils} from "./VaultTestUtils.sol";
+import {DummyHook} from "../../Mocks/modules/DummyHook.sol";
+import {DummyValidator} from "../../Mocks/modules/DummyValidator.sol";
 
-// Vault base setup & utils function to be used in other test files
-contract SimpleVaultTestSetup is VaultTestUtils {
+// Vault base setup with validator function to be used in other test files
+contract VaultWithValidatorTestSetup is VaultTestUtils {
     function setUp() public {
         owner = makeAddr("owner");
         alice = makeAddr("alice");
@@ -19,13 +21,14 @@ contract SimpleVaultTestSetup is VaultTestUtils {
         lobsterRebaserPrivateKey = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
         lobsterRebaser = vm.addr(lobsterRebaserPrivateKey);
 
+        IHook hook = IHook(address(0));
+        IOpValidatorModule opValidator = new DummyValidator();
+
         // Deploy contracts
         asset = new MockERC20();
         counter = new Counter();
 
-        vault = new LobsterVault(
-            owner, asset, "Vault Token", "vTKN", lobsterAlgorithm, IOpValidatorModule(address(0)), IHook(address(0))
-        );
+        vault = new LobsterVault(owner, asset, "Vault Token", "vTKN", lobsterAlgorithm, opValidator, hook);
 
         // Setup initial state
         asset.mint(alice, 10000 ether);

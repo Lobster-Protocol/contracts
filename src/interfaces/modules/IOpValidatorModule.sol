@@ -38,8 +38,6 @@ struct Signers {
     uint256 weight;
 }
 
-
-
 interface IOpValidatorModule {
     function validateOp(Op calldata op) external returns (bool);
 

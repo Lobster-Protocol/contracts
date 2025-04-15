@@ -5,9 +5,9 @@ import {IOpValidatorModule} from "../interfaces/modules/IOpValidatorModule.sol";
 import {IHook} from "../interfaces/IHook.sol";
 
 contract Modular {
-    IOpValidatorModule immutable opValidator;
+    IOpValidatorModule public immutable opValidator;
     // todo: 1 hook for all calls or 1 hook per call?
-    IHook immutable hook;
+    IHook public immutable hook;
 
     error PreHookFailed();
     error PostHookFailed();

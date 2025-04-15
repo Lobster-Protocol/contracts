@@ -37,10 +37,7 @@ contract VaultMintTest is SimpleVaultTestSetup {
         vm.assertEq(vault.maxRedeem(bob), bobMint + bobSecondDeposit);
         vm.stopPrank();
 
-        vm.assertEq(
-            vault.totalAssets(),
-            aliceMint + bobMint + bobSecondDeposit
-        );
+        vm.assertEq(vault.totalAssets(), aliceMint + bobMint + bobSecondDeposit);
     }
 
     /* -----------------------MAX MINT----------------------- */
