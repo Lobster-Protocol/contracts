@@ -2,15 +2,15 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import {LobsterVault, Op} from "../../src/Vault/Vault.sol";
-import {Counter} from "../Mocks/Counter.sol";
-import {MockERC20} from "../Mocks/MockERC20.sol";
-import {MockPositionsManager} from "../Mocks/MockPositionsManager.sol";
+import {LobsterVault, Op} from "../../../src/Vault/Vault.sol";
+import {Counter} from "../../Mocks/Counter.sol";
+import {MockERC20} from "../../Mocks/MockERC20.sol";
+import {MockPositionsManager} from "../../Mocks/MockPositionsManager.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {BASIS_POINT_SCALE, SECONDS_PER_YEAR} from "../../src/Vault/Constants.sol";
-import {IHook} from "../../src/interfaces/IHook.sol";
-import {IOpValidatorModule} from "../../src/interfaces/modules/IOpValidatorModule.sol";
+import {BASIS_POINT_SCALE, SECONDS_PER_YEAR} from "../../../src/Vault/Constants.sol";
+import {IHook} from "../../../src/interfaces/IHook.sol";
+import {IOpValidatorModule} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
 
 enum RebaseType {
     DEPOSIT,
@@ -20,7 +20,7 @@ enum RebaseType {
 }
 
 // Vault base setup & utils function to be used in other test files
-contract VaultTestSetup is Test {
+contract VaultTestUtils is Test {
     using Math for uint256;
 
     MockPositionsManager public positionManager;
@@ -38,45 +38,6 @@ contract VaultTestSetup is Test {
     address public feeCollector;
     uint256 public entryFeeBasisPoints = 0;
     uint256 public exitFeeBasisPoints = 0;
-
-    //
-
-    function setUp() public {
-        owner = makeAddr("owner");
-        alice = makeAddr("alice");
-        bob = makeAddr("bob");
-        lobsterAlgorithm = makeAddr("lobsterAlgorithm");
-        feeCollector = makeAddr("feeCollector");
-        lobsterRebaserPrivateKey = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
-        lobsterRebaser = vm.addr(lobsterRebaserPrivateKey);
-
-        // Deploy contracts
-        asset = new MockERC20();
-        positionManager = new MockPositionsManager();
-        counter = new Counter();
-
-        vault = new LobsterVault(
-            owner,
-            asset,
-            "Vault Token",
-            "vTKN",
-            lobsterAlgorithm,
-            IOpValidatorModule(address(0)),
-            IHook(address(0))
-        );
-
-        // Setup initial state
-        asset.mint(alice, 10000 ether);
-        asset.mint(bob, 10000 ether);
-
-        vm.startPrank(alice);
-        asset.approve(address(vault), type(uint256).max);
-        vm.stopPrank();
-
-        vm.startPrank(bob);
-        asset.approve(address(vault), type(uint256).max);
-        vm.stopPrank();
-    }
 
     /* -------------- Helper Functions -------------- */
     function getValidRebaseData(

@@ -2,9 +2,9 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import {VaultTestSetup} from "./VaultTestSetup.sol";
+import {SimpleVaultTestSetup} from "../VaultSetups/SimpleVaultTestSetup.sol";
 
-contract VaultMintTest is VaultTestSetup {
+contract VaultMintTest is SimpleVaultTestSetup {
     /* -----------------------MINT----------------------- */
 
     function testMint() public {

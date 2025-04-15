@@ -2,12 +2,12 @@
 pragma solidity 0.8.28;
 
 import "forge-std/Test.sol";
-import {VaultTestSetup} from "./VaultTestSetup.sol";
+import {SimpleVaultTestSetup} from "../VaultSetups/SimpleVaultTestSetup.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 // test deposit / withdraw / mint / redeem functions with performance fee
 // test collecting performance fees manually
-contract PerformanceFeeTest is VaultTestSetup {
+contract PerformanceFeeTest is SimpleVaultTestSetup {
     // using Math for uint256;
 
     // /* -----------------------TEST UPDATING PERFORMANCE FEE----------------------- */

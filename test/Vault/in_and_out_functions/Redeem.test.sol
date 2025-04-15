@@ -2,9 +2,9 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import {VaultTestSetup} from "./VaultTestSetup.sol";
+import {SimpleVaultTestSetup} from "../VaultSetups/SimpleVaultTestSetup.sol";
 
-contract VaultRedeemTest is VaultTestSetup {
+contract VaultRedeemTest is SimpleVaultTestSetup {
     /* -----------------------REDEEM----------------------- */
 
     function testRedeem() public {
