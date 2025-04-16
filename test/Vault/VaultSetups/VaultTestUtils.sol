@@ -133,9 +133,9 @@ contract VaultTestUtils is Test {
     }
 
     function computePerformanceFees(
-        uint256 vaultShares,
-        uint256 fee, // basis point
-        uint256 duration
+        uint256, /* vaultShares */
+        uint256, /* fee */ // basis point
+        uint256 /* duration */
     )
         public
         pure

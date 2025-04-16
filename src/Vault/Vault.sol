@@ -7,7 +7,6 @@ import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Op, BatchOp} from "../interfaces/modules/IOpValidatorModule.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {LobsterPositionsManager as PositionsManager} from "../PositionsManager/PositionsManager.sol";
 import {BASIS_POINT_SCALE} from "./Constants.sol";
 import {Modular} from "../Modules/Modular.sol";
 import {IHook} from "../interfaces/modules/IHook.sol";
