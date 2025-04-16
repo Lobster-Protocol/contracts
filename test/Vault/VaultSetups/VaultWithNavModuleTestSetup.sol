@@ -12,11 +12,11 @@ import {DummyHook} from "../../Mocks/modules/DummyHook.sol";
 import {DummyValidator} from "../../Mocks/modules/DummyValidator.sol";
 import {INav} from "../../../src/interfaces/modules/INav.sol";
 import {DummyNav} from "../../Mocks/modules/DummyNav.sol";
+import {IVaultOperations} from "../../../src/interfaces/modules/IVaultOperations.sol";
 
 // Vault base setup with validator function to be used in other test files
 contract VaultWithNavModuleTestSetup is VaultTestUtils {
     function setUp() public {
-        console.log("azerty");
         owner = makeAddr("owner");
         alice = makeAddr("alice");
         bob = makeAddr("bob");
@@ -27,13 +27,24 @@ contract VaultWithNavModuleTestSetup is VaultTestUtils {
 
         IHook hook = IHook(address(0));
         IOpValidatorModule opValidator = IOpValidatorModule(address(0));
+        IVaultOperations vaultOperations = IVaultOperations(address(0));
         INav navModule = new DummyNav();
 
         // Deploy contracts
         asset = new MockERC20();
         counter = new Counter();
 
-        vault = new LobsterVault(owner, asset, "Vault Token", "vTKN", lobsterAlgorithm, opValidator, hook, navModule);
+        vault = new LobsterVault(
+            owner,
+            asset,
+            "Vault Token",
+            "vTKN",
+            lobsterAlgorithm,
+            opValidator,
+            hook,
+            navModule,
+            vaultOperations
+        );
 
         // Setup initial state
         asset.mint(alice, 10000 ether);

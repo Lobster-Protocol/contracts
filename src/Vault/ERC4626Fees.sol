@@ -257,7 +257,6 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
             totalAssets(),
             newShareSupply
         );
-        console.log("shares: ", shares);
 
         uint256 exitFeeShares = _convertToShares(
             exitFeeAssets,
@@ -617,7 +616,7 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
 
         // collect fees
         _collectAllFees(0, 0);
-        console.log("block timestamp: ", block.timestamp);
+
         managementFeeBasisPoints = pendingManagementFeeUpdate.value;
 
         delete pendingManagementFeeUpdate;

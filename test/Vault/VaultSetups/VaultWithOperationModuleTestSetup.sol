@@ -1,19 +1,17 @@
-// SPDX-License-Identifier: GNU AGPL v3.0
+// SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
-import {LobsterVault} from "../../../src/Vault/Vault.sol";
-import {Counter} from "../../Mocks/Counter.sol";
-import {MockERC20} from "../../Mocks/MockERC20.sol";
-import {IHook} from "../../../src/interfaces/modules/IHook.sol";
-import {INav} from "../../../src/interfaces/modules/INav.sol";
-import {IOpValidatorModule} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
 import {VaultTestUtils} from "./VaultTestUtils.sol";
-import {DummyHook} from "../../Mocks/modules/DummyHook.sol";
-import {DummyValidator} from "../../Mocks/modules/DummyValidator.sol";
 import {IVaultOperations} from "../../../src/interfaces/modules/IVaultOperations.sol";
+import {IHook} from "../../../src/interfaces/modules/IHook.sol";
+import {IOpValidatorModule} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
+import {INav} from "../../../src/interfaces/modules/INav.sol";
+import {DummyVaultOperations} from "../../Mocks/modules/DummyVaultOperations.sol";
+import {MockERC20} from "../../Mocks/MockERC20.sol";
+import {Counter} from "../../Mocks/Counter.sol";
+import {LobsterVault} from "../../../src/Vault/Vault.sol";
 
-// Vault base setup with validator function to be used in other test files
-contract VaultWithValidatorTestSetup is VaultTestUtils {
+contract VaultWithOperationModuleTestSetup is VaultTestUtils {
     function setUp() public {
         owner = makeAddr("owner");
         alice = makeAddr("alice");
@@ -24,8 +22,8 @@ contract VaultWithValidatorTestSetup is VaultTestUtils {
         lobsterRebaser = vm.addr(lobsterRebaserPrivateKey);
 
         IHook hook = IHook(address(0));
-        IOpValidatorModule opValidator = new DummyValidator();
-        IVaultOperations vaultOperations = IVaultOperations(address(0));
+        IOpValidatorModule opValidator = IOpValidatorModule(address(0));
+        IVaultOperations vaultOperations = new DummyVaultOperations();
         INav navModule = INav(address(0));
 
         // Deploy contracts
@@ -57,3 +55,5 @@ contract VaultWithValidatorTestSetup is VaultTestUtils {
         vm.stopPrank();
     }
 }
+
+

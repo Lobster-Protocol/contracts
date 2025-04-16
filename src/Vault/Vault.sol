@@ -13,6 +13,7 @@ import {Modular} from "../Modules/Modular.sol";
 import {IHook} from "../interfaces/modules/IHook.sol";
 import {INav} from "../interfaces/modules/INav.sol";
 import {IOpValidatorModule} from "../interfaces/modules/IOpValidatorModule.sol";
+import {IVaultOperations} from "../../src/interfaces/modules/IVaultOperations.sol";
 
 contract LobsterVault is Modular, ERC4626Fees {
     using Math for uint256;
@@ -35,7 +36,8 @@ contract LobsterVault is Modular, ERC4626Fees {
         address initialFeeCollector,
         IOpValidatorModule opValidator_,
         IHook hook_,
-        INav navModule_
+        INav navModule_,
+        IVaultOperations vaultOperationsModule
     )
         Ownable(initialOwner)
         ERC20(underlyingTokenName, underlyingTokenSymbol)
@@ -52,6 +54,9 @@ contract LobsterVault is Modular, ERC4626Fees {
 
         navModule = navModule_;
         emit NavModuleSet(navModule_);
+
+        vaultOperations = vaultOperationsModule;
+        emit VaultOperationsSet(vaultOperationsModule);
     }
 
     /* ------------------SETTERS------------------ */
@@ -155,5 +160,70 @@ contract LobsterVault is Modular, ERC4626Fees {
 
             if (!success) revert PostHookFailed();
         }
+    }
+
+    /* ------------------DEPOSIT & WITHDRAW MODULES------------------ */
+    /**
+     * Override of ERC4626._deposit
+     * Delegate call to the vaultOperations module
+     * If no vaultOperations module is set, use the "default" one (ERC4626._deposit)
+     */
+    function _deposit(
+        address caller,
+        address receiver,
+        uint256 assets,
+        uint256 shares
+    ) internal override {
+        if (address(vaultOperations) != address(0)) {
+            (bool success, ) = address(vaultOperations).delegatecall(
+                abi.encodeWithSelector(
+                    vaultOperations._deposit.selector,
+                    caller,
+                    receiver,
+                    assets,
+                    shares
+                )
+            );
+
+            if (!success) revert DepositModuleFailed();
+
+            return;
+        }
+
+        // if no module set, backoff to default
+        return super._deposit(caller, receiver, assets, shares);
+    }
+
+    /**
+     * Override of ERC4626._withdraw
+     * Delegate call to the vaultOperations module
+     * If no vaultOperations module is set, use the "default" one (ERC4626._withdraw)
+     */
+    function _withdraw(
+        address caller,
+        address receiver,
+        address owner,
+        uint256 assets,
+        uint256 shares
+    ) internal override {
+        if (address(vaultOperations) != address(0)) {
+            (bool success, ) = address(vaultOperations).delegatecall(
+                abi.encodeWithSelector(
+                    vaultOperations._withdraw.selector,
+                    caller,
+                    receiver,
+                    owner,
+                    assets,
+                    shares
+                )
+            );
+
+            if (!success) revert WithdrawModuleFailed();
+
+            return;
+        }
+
+        // if no module set, backoff to default
+        return super._withdraw(caller, receiver, owner, assets, shares);
     }
 }

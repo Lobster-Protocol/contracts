@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import "forge-std/Test.sol";
 import {IOpValidatorModule, BatchOp, Op} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
 
-bytes4 constant UNAUTHORIZED = bytes4(0xB00B5EE5);
+bytes4 constant UNAUTHORIZED = bytes4(0x0B00BEE5);
 bytes4 constant AUTHORIZED = bytes4(0x00000001);
 
 contract DummyValidator is IOpValidatorModule {

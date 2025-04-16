@@ -6,16 +6,16 @@ import {LobsterVault} from "../../../src/Vault/Vault.sol";
 import {Counter} from "../../Mocks/Counter.sol";
 import {MockERC20} from "../../Mocks/MockERC20.sol";
 import {IHook} from "../../../src/interfaces/modules/IHook.sol";
-import {INav}from "../../../src/interfaces/modules/INav.sol";
+import {INav} from "../../../src/interfaces/modules/INav.sol";
 import {IOpValidatorModule} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
 import {VaultTestUtils} from "./VaultTestUtils.sol";
 import {DummyHook} from "../../Mocks/modules/DummyHook.sol";
 import {DummyValidator} from "../../Mocks/modules/DummyValidator.sol";
+import {IVaultOperations} from "../../../src/interfaces/modules/IVaultOperations.sol";
 
 // Vault base setup with validator function to be used in other test files
 contract VaultWithValidatorAndHookTestSetup is VaultTestUtils {
     function setUp() public {
-        console.log("azerty");
         owner = makeAddr("owner");
         alice = makeAddr("alice");
         bob = makeAddr("bob");
@@ -26,6 +26,7 @@ contract VaultWithValidatorAndHookTestSetup is VaultTestUtils {
 
         IHook hook = new DummyHook();
         IOpValidatorModule opValidator = new DummyValidator();
+        IVaultOperations vaultOperations = IVaultOperations(address(0));
         INav navModule = INav(address(0));
 
         // Deploy contracts
@@ -40,7 +41,8 @@ contract VaultWithValidatorAndHookTestSetup is VaultTestUtils {
             lobsterAlgorithm,
             opValidator,
             hook,
-            navModule
+            navModule,
+            vaultOperations
         );
 
         // Setup initial state
