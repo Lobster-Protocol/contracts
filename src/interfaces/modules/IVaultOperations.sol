@@ -8,7 +8,9 @@ interface IVaultOperations {
         address receiver,
         uint256 assets,
         uint256 shares
-    ) external returns (bool success);
+    )
+        external
+        returns (bool success);
 
     function _withdraw(
         address caller,
@@ -16,5 +18,7 @@ interface IVaultOperations {
         address owner,
         uint256 assets,
         uint256 shares
-    ) external returns (bool success);
+    )
+        external
+        returns (bool success);
 }

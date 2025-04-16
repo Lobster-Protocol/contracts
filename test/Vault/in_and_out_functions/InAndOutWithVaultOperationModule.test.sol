@@ -19,12 +19,7 @@ contract InAndOutWithVaultOperationModule is VaultWithOperationModuleTestSetup {
         vm.expectEmit(true, true, true, true);
 
         // Emit the same event with the expected values
-        emit DummyVaultOperations.DepositHasBeenCalled(
-            ACCEPTED_CALLER,
-            receiver,
-            assets,
-            shares
-        );
+        emit DummyVaultOperations.DepositHasBeenCalled(ACCEPTED_CALLER, receiver, assets, shares);
 
         vault.deposit(assets, receiver);
 
@@ -56,12 +51,7 @@ contract InAndOutWithVaultOperationModule is VaultWithOperationModuleTestSetup {
         vm.expectEmit(true, true, true, true);
 
         // Emit the same event with the expected values
-        emit DummyVaultOperations.DepositHasBeenCalled(
-            ACCEPTED_CALLER,
-            receiver,
-            assets,
-            shares
-        );
+        emit DummyVaultOperations.DepositHasBeenCalled(ACCEPTED_CALLER, receiver, assets, shares);
 
         vault.mint(shares, receiver);
 
@@ -84,27 +74,27 @@ contract InAndOutWithVaultOperationModule is VaultWithOperationModuleTestSetup {
     /* ------------------WITHDRAW------------------ */
     // todo
     // function testCustomWithdraw() public {
-        // vm.startPrank(ACCEPTED_CALLER);
+    // vm.startPrank(ACCEPTED_CALLER);
 
-        // uint256 assets = 1 ether;
-        // uint256 shares = vault.convertToShares(assets);
-        // address receiver = makeAddr("some receiver");
+    // uint256 assets = 1 ether;
+    // uint256 shares = vault.convertToShares(assets);
+    // address receiver = makeAddr("some receiver");
 
-        // // expect a 'DepositHasBeenCalled' event
-        // // vm.expectEmit(true, true, true, true);
+    // // expect a 'DepositHasBeenCalled' event
+    // // vm.expectEmit(true, true, true, true);
 
-        // // Emit the same event with the expected values
-        // emit DummyVaultOperations.WithdrawHasBeenCalled(
-        //     ACCEPTED_CALLER,
-        //     receiver,
-        //     ACCEPTED_CALLER,
-        //     assets,
-        //     shares
-        // );
+    // // Emit the same event with the expected values
+    // emit DummyVaultOperations.WithdrawHasBeenCalled(
+    //     ACCEPTED_CALLER,
+    //     receiver,
+    //     ACCEPTED_CALLER,
+    //     assets,
+    //     shares
+    // );
 
-        // vault.withdraw(assets, receiver, ACCEPTED_CALLER);
+    // vault.withdraw(assets, receiver, ACCEPTED_CALLER);
 
-        // vm.stopPrank();
+    // vm.stopPrank();
     // }
 
     // todo

@@ -8,19 +8,8 @@ address constant ACCEPTED_CALLER = address(888);
 address constant PANIC_CALLER = address(12);
 
 contract DummyVaultOperations is IVaultOperations {
-    event DepositHasBeenCalled(
-        address caller,
-        address receiver,
-        uint256 assets,
-        uint256 shares
-    );
-    event WithdrawHasBeenCalled(
-        address caller,
-        address receiver,
-        address owner,
-        uint256 assets,
-        uint256 shares
-    );
+    event DepositHasBeenCalled(address caller, address receiver, uint256 assets, uint256 shares);
+    event WithdrawHasBeenCalled(address caller, address receiver, address owner, uint256 assets, uint256 shares);
 
     modifier onlyDelegateCall() {
         require(_amIDelegated(), "DummyVaultOperations: Not a delegate call");
@@ -32,7 +21,11 @@ contract DummyVaultOperations is IVaultOperations {
         address receiver,
         uint256 assets,
         uint256 shares
-    ) external onlyDelegateCall returns (bool success) {
+    )
+        external
+        onlyDelegateCall
+        returns (bool success)
+    {
         emit DepositHasBeenCalled(caller, receiver, assets, shares);
 
         // revert if caller is PANIC_CALLER
@@ -47,7 +40,11 @@ contract DummyVaultOperations is IVaultOperations {
         address owner,
         uint256 assets,
         uint256 shares
-    ) external onlyDelegateCall returns (bool success) {
+    )
+        external
+        onlyDelegateCall
+        returns (bool success)
+    {
         emit WithdrawHasBeenCalled(caller, receiver, owner, assets, shares);
         // revert if caller is PANIC_CALLER
         if (caller == PANIC_CALLER) revert();

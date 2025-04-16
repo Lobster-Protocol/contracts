@@ -9,18 +9,12 @@ import {DUMMY_NAV_AMOUNT} from "../Mocks/modules/DummyNav.sol";
 
 contract TotalAssetsNoNavModuleTest is SimpleVaultTestSetup {
     function testTotalAssets() public view {
-        assertEq(
-            vault.totalAssets(),
-            IERC20(vault.asset()).balanceOf(address(vault))
-        );
+        assertEq(vault.totalAssets(), IERC20(vault.asset()).balanceOf(address(vault)));
     }
 }
 
 contract TotalAssetsWithNavModuleTest is VaultWithNavModuleTestSetup {
     function testTotalAssets() public view {
-        assertEq(
-            vault.totalAssets(),
-            DUMMY_NAV_AMOUNT
-        );
+        assertEq(vault.totalAssets(), DUMMY_NAV_AMOUNT);
     }
 }

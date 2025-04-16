@@ -18,12 +18,7 @@ import {IVaultOperations} from "../../src/interfaces/modules/IVaultOperations.so
 contract LobsterVault is Modular, ERC4626Fees {
     using Math for uint256;
 
-    event FeesCollected(
-        uint256 total,
-        uint256 managementFees,
-        uint256 performanceFees,
-        uint256 timestamp
-    );
+    event FeesCollected(uint256 total, uint256 managementFees, uint256 performanceFees, uint256 timestamp);
 
     error ZeroAddress();
 
@@ -75,10 +70,7 @@ contract LobsterVault is Modular, ERC4626Fees {
     /* ------------------FUNCTIONS FOR CUSTOM CALLS------------------ */
 
     function executeOp(Op calldata op) external {
-        if (
-            opValidator == IOpValidatorModule(address(0)) ||
-            !opValidator.validateOp(op)
-        ) {
+        if (opValidator == IOpValidatorModule(address(0)) || !opValidator.validateOp(op)) {
             revert OpNotApproved();
         }
         bytes memory ctx = _preCallHook(op, msg.sender);
@@ -87,15 +79,12 @@ contract LobsterVault is Modular, ERC4626Fees {
     }
 
     function executeOpBatch(BatchOp calldata batch) external {
-        if (
-            opValidator == IOpValidatorModule(address(0)) ||
-            !opValidator.validateBatchedOp(batch)
-        ) {
+        if (opValidator == IOpValidatorModule(address(0)) || !opValidator.validateBatchedOp(batch)) {
             revert OpNotApproved();
         }
 
         uint256 length = batch.ops.length;
-        for (uint256 i = 0; i < length; ) {
+        for (uint256 i = 0; i < length;) {
             bytes memory ctx = _preCallHook(batch.ops[i], msg.sender);
             _call(batch.ops[i]);
             _postCallHook(ctx);
@@ -106,14 +95,10 @@ contract LobsterVault is Modular, ERC4626Fees {
     }
 
     function _call(Op calldata op) private {
-        (bool success, bytes memory result) = op.target.call{value: op.value}(
-            op.data
-        );
+        (bool success, bytes memory result) = op.target.call{value: op.value}(op.data);
 
         assembly {
-            if iszero(success) {
-                revert(add(result, 32), mload(result))
-            }
+            if iszero(success) { revert(add(result, 32), mload(result)) }
         }
 
         bytes4 selector;
@@ -130,15 +115,11 @@ contract LobsterVault is Modular, ERC4626Fees {
      * @param op - the op to execute
      * @param caller - the address of the caller
      */
-    function _preCallHook(
-        Op memory op,
-        address caller
-    ) private returns (bytes memory context) {
+    function _preCallHook(Op memory op, address caller) private returns (bytes memory context) {
         if (address(hook) != address(0)) {
             // delegatecall to the hook contract
-            (bool success, bytes memory ctx) = address(hook).delegatecall(
-                abi.encodeWithSelector(hook.preCheck.selector, op, caller)
-            );
+            (bool success, bytes memory ctx) =
+                address(hook).delegatecall(abi.encodeWithSelector(hook.preCheck.selector, op, caller));
 
             if (!success) revert PreHookFailed();
 
@@ -154,9 +135,7 @@ contract LobsterVault is Modular, ERC4626Fees {
      */
     function _postCallHook(bytes memory ctx) private returns (bool success) {
         if (address(hook) != address(0)) {
-            (success, ) = address(hook).delegatecall(
-                abi.encodeWithSelector(hook.postCheck.selector, ctx)
-            );
+            (success,) = address(hook).delegatecall(abi.encodeWithSelector(hook.postCheck.selector, ctx));
 
             if (!success) revert PostHookFailed();
         }
@@ -168,21 +147,10 @@ contract LobsterVault is Modular, ERC4626Fees {
      * Delegate call to the vaultOperations module
      * If no vaultOperations module is set, use the "default" one (ERC4626._deposit)
      */
-    function _deposit(
-        address caller,
-        address receiver,
-        uint256 assets,
-        uint256 shares
-    ) internal override {
+    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
         if (address(vaultOperations) != address(0)) {
-            (bool success, ) = address(vaultOperations).delegatecall(
-                abi.encodeWithSelector(
-                    vaultOperations._deposit.selector,
-                    caller,
-                    receiver,
-                    assets,
-                    shares
-                )
+            (bool success,) = address(vaultOperations).delegatecall(
+                abi.encodeWithSelector(vaultOperations._deposit.selector, caller, receiver, assets, shares)
             );
 
             if (!success) revert DepositModuleFailed();
@@ -205,17 +173,13 @@ contract LobsterVault is Modular, ERC4626Fees {
         address owner,
         uint256 assets,
         uint256 shares
-    ) internal override {
+    )
+        internal
+        override
+    {
         if (address(vaultOperations) != address(0)) {
-            (bool success, ) = address(vaultOperations).delegatecall(
-                abi.encodeWithSelector(
-                    vaultOperations._withdraw.selector,
-                    caller,
-                    receiver,
-                    owner,
-                    assets,
-                    shares
-                )
+            (bool success,) = address(vaultOperations).delegatecall(
+                abi.encodeWithSelector(vaultOperations._withdraw.selector, caller, receiver, owner, assets, shares)
             );
 
             if (!success) revert WithdrawModuleFailed();

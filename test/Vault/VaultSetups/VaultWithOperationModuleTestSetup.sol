@@ -31,15 +31,7 @@ contract VaultWithOperationModuleTestSetup is VaultTestUtils {
         counter = new Counter();
 
         vault = new LobsterVault(
-            owner,
-            asset,
-            "Vault Token",
-            "vTKN",
-            lobsterAlgorithm,
-            opValidator,
-            hook,
-            navModule,
-            vaultOperations
+            owner, asset, "Vault Token", "vTKN", lobsterAlgorithm, opValidator, hook, navModule, vaultOperations
         );
 
         // Setup initial state
@@ -55,5 +47,3 @@ contract VaultWithOperationModuleTestSetup is VaultTestUtils {
         vm.stopPrank();
     }
 }
-
-
