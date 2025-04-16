@@ -24,8 +24,6 @@ contract LobsterVault is Modular, ERC4626Fees {
         uint256 timestamp
     );
 
-    error InitialDepositTooLow(uint256 minimumDeposit);
-    error NotEnoughAssets();
     error ZeroAddress();
 
     // todo: add initial fees
