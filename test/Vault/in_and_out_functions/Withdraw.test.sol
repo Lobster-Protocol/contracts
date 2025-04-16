@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: GNU AGPL v3.0
+pragma solidity ^0.8.28;
+
+import "forge-std/Test.sol";
+import {SimpleVaultTestSetup} from "../VaultSetups/SimpleVaultTestSetup.sol";
+
+contract VaultMintTest is SimpleVaultTestSetup {
+    /* -----------------------WITHDRAW---------------------- */
+    function testWithdraw() public {
+        // Setup initial state
+        vm.startPrank(alice);
+        vault.deposit(10 ether, alice);
+        uint256 initialBalance = asset.balanceOf(alice);
+
+        // Withdraw half the assets
+        vault.withdraw(5 ether, alice, alice);
+
+        assertEq(vault.balanceOf(alice), 5 ether);
+        assertEq(asset.balanceOf(alice), initialBalance + 5 ether);
+        assertEq(vault.totalAssets(), 5 ether);
+        vm.stopPrank();
+    }
+
+    /* -----------------------MAX WITHDRAW----------------------- */
+    // todo
+    /* -----------------------PREVIEW WITHDRAW----------------------- */
+    function testPreviewWithdrawNoFee() public view {
+        // deposit 1000
+        uint256 assetsToWithdraw = 1000;
+        uint256 shares = vault.previewWithdraw(assetsToWithdraw);
+
+        // at first, 1 share = 1 asset
+        assertEq(shares, assetsToWithdraw);
+    }
+
+    function testPreviewWithdrawFee() public {
+        uint256 exitFeeBasisPoints = 100; // 1%
+        setExitFeeBasisPoint(exitFeeBasisPoints);
+
+        // deposit 1000
+        uint256 assetsToWithdraw = 1000;
+        uint256 expectedFee = computeFees(assetsToWithdraw, exitFeeBasisPoints);
+        uint256 shares = vault.previewWithdraw(assetsToWithdraw);
+
+        // at first, 1 share = 1 asset
+        assertEq(shares, assetsToWithdraw + expectedFee);
+    }
+}

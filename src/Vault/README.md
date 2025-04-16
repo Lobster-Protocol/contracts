@@ -1,5 +1,31 @@
 # Lobster Protocol - ERC4626 Vault
 
-The Lobster Protocol Vault is a smart contract allowing users to deposit and withdraw ERC20 tokens. The Vault is designed so that the assets are managed by the lobster algorithm, which is an offchain script that determines the optimal allocation of assets in the vault. The lobster algorithm is not part of the smart contract and is not open source.
+## Fee Structure
 
-Any update made by the lobster algorithm must be approved by a [Validator contract](../Validator/README.md) before it can be executed. The Validator contract is a multisig contract that requires a majority of validators to approve an update before it can be executed.
+### Performance Fees
+- Fixed percentage that can be updated by Lobster
+- Collected during each rebase event
+
+### Management Fees
+- Fixed annual percentage that can be updated by Lobster
+- Collected during each rebase event
+
+### Deposit Fees
+- Fixed value that can be updated by Lobster
+- Deducted from shares before conversion to underlying assets
+- Took into account when computing the new shares for the user
+- Set to 0% by default
+ 
+### Withdrawal Fees
+- Fixed value that can be updated by Lobster
+- Deducted from shares before conversion to underlying assets
+
+### Insurance Fees
+A part (which needs to be determined) of the fees collected by the vault will be used to insure the vault. The insurance will be used to cover the losses of the vault in case of a hack or any other exceptional circumstances. The insurance will be provided by a third party.
+
+## Technical Implementation Notes
+
+All fee parameters are maintained as protocol constants but can be modified by Lobster governance through update. Fee collection is automated and integrated into the rebasing process to ensure consistent protocol revenue management.
+
+
+> Note: When users request a withdrawal, the offchain script which creates the operation to execute to unlock the assets MUST first use the assets from the vault first and only retrieve the missing funds from third party protocols (if needed)
