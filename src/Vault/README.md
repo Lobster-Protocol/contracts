@@ -1,36 +1,5 @@
 # Lobster Protocol - ERC4626 Vault
 
-The Lobster Protocol Vault is a smart contract allowing users to deposit and withdraw ERC20 tokens. The Vault is designed so that the assets are managed by the lobster algorithm, which is an offchain script that determines the optimal allocation of assets in the vault. The lobster algorithm is not part of the smart contract and is not open source.
-
-## Core Concepts
-
-### Rebasing
-Since some tokens can be in other blockchain (Derive chain for instance) or protocols, the vault cannot know the exact value of the assets it manages. To solve this issue, the vault uses a rebasing mechanism. Lobster manually update the `valueOutsideVault` value with the new TVL (in eth) locked there. 
-
-> The vault's TVL can be updated at anytime through a rebase by calling `function rebase(bytes calldata rebaseData) external`. 
-> A rebase also happens when a user requires a deposit or a withdraw.
-> Note: a rebase has an expiration date. If the last rebase expired, no one will be able to deposit or withdraw without the rebase data from Lobster
-
-
-## Protocol Flow
-
-1. **Initial Deposit**
-   - User deposits assets into the vault. Based on the last rebases (if it did not expire), the vault compute the amount of shares the user will receive. The amount of shares the user will receive is calculated as follows: $shares = (ethDeposited * totalShares) / totalEthManaged$
-
-> - If the last rebase expired, the vault will not accept any deposit and withdrawals without a rebase
-
-
-1. **Asset Management**
-   - Deposited assets become immediately available to Lobster's algorithm
-   - Algorithm periodically rebalance/update its positions to optimize yield based on market conditions
-   - Each operation from the algorithm is verified by the Validator contract before being executed
-
-2. **Withdrawal / Redeem Process**
-   - On withdrawal request, the vault calculates the amount of shares the user will burn. The amount of shares the user will burn is calculated as follows: $ethAmount = (sharesToBurn * totalEthManaged) / totalShares$ (the user can chose to redeem a certain amount of shares or withdraw a certain amount of eth)
-
-> To determine how many tokens is worth one share, the vault compute the eth value deposited by itself in each one of the supported protocols + the value in the L3 (from the last rebase). 
-> If the rebase is too old, see  `Initial Deposit` note [above](#protocol-flow)
-   
 ## Fee Structure
 
 ### Performance Fees
