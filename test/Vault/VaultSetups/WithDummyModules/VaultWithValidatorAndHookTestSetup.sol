@@ -2,16 +2,16 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import {LobsterVault} from "../../../src/Vault/Vault.sol";
-import {Counter} from "../../Mocks/Counter.sol";
-import {MockERC20} from "../../Mocks/MockERC20.sol";
-import {IHook} from "../../../src/interfaces/modules/IHook.sol";
-import {INav} from "../../../src/interfaces/modules/INav.sol";
-import {IOpValidatorModule} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
-import {VaultTestUtils} from "./VaultTestUtils.sol";
-import {DummyHook} from "../../Mocks/modules/DummyHook.sol";
-import {DummyValidator} from "../../Mocks/modules/DummyValidator.sol";
-import {IVaultOperations} from "../../../src/interfaces/modules/IVaultOperations.sol";
+import {LobsterVault} from "../../../../src/Vault/Vault.sol";
+import {Counter} from "../../../Mocks/Counter.sol";
+import {MockERC20} from "../../../Mocks/MockERC20.sol";
+import {IHook} from "../../../../src/interfaces/modules/IHook.sol";
+import {INav} from "../../../../src/interfaces/modules/INav.sol";
+import {IOpValidatorModule} from "../../../../src/interfaces/modules/IOpValidatorModule.sol";
+import {VaultTestUtils} from "../VaultTestUtils.sol";
+import {DummyHook} from "../../../Mocks/modules/DummyHook.sol";
+import {DummyValidator} from "../../../Mocks/modules/DummyValidator.sol";
+import {IVaultOperations} from "../../../../src/interfaces/modules/IVaultOperations.sol";
 
 // Vault base setup with validator function to be used in other test files
 contract VaultWithValidatorAndHookTestSetup is VaultTestUtils {
@@ -19,10 +19,7 @@ contract VaultWithValidatorAndHookTestSetup is VaultTestUtils {
         owner = makeAddr("owner");
         alice = makeAddr("alice");
         bob = makeAddr("bob");
-        lobsterAlgorithm = makeAddr("lobsterAlgorithm");
         feeCollector = makeAddr("feeCollector");
-        lobsterRebaserPrivateKey = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
-        lobsterRebaser = vm.addr(lobsterRebaserPrivateKey);
 
         IHook hook = new DummyHook();
         IOpValidatorModule opValidator = new DummyValidator();
@@ -34,7 +31,7 @@ contract VaultWithValidatorAndHookTestSetup is VaultTestUtils {
         counter = new Counter();
 
         vault = new LobsterVault(
-            owner, asset, "Vault Token", "vTKN", lobsterAlgorithm, opValidator, hook, navModule, vaultOperations
+            owner, asset, "Vault Token", "vTKN", feeCollector, opValidator, hook, navModule, vaultOperations
         );
 
         // Setup initial state

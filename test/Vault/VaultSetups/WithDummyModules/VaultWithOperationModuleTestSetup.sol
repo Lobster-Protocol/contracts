@@ -1,25 +1,22 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
-import {VaultTestUtils} from "./VaultTestUtils.sol";
-import {IVaultOperations} from "../../../src/interfaces/modules/IVaultOperations.sol";
-import {IHook} from "../../../src/interfaces/modules/IHook.sol";
-import {IOpValidatorModule} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
-import {INav} from "../../../src/interfaces/modules/INav.sol";
-import {DummyVaultOperations} from "../../Mocks/modules/DummyVaultOperations.sol";
-import {MockERC20} from "../../Mocks/MockERC20.sol";
-import {Counter} from "../../Mocks/Counter.sol";
-import {LobsterVault} from "../../../src/Vault/Vault.sol";
+import {VaultTestUtils} from "../VaultTestUtils.sol";
+import {IVaultOperations} from "../../../../src/interfaces/modules/IVaultOperations.sol";
+import {IHook} from "../../../../src/interfaces/modules/IHook.sol";
+import {IOpValidatorModule} from "../../../../src/interfaces/modules/IOpValidatorModule.sol";
+import {INav} from "../../../../src/interfaces/modules/INav.sol";
+import {DummyVaultOperations} from "../../../Mocks/modules/DummyVaultOperations.sol";
+import {MockERC20} from "../../../Mocks/MockERC20.sol";
+import {Counter} from "../../../Mocks/Counter.sol";
+import {LobsterVault} from "../../../../src/Vault/Vault.sol";
 
 contract VaultWithOperationModuleTestSetup is VaultTestUtils {
     function setUp() public {
         owner = makeAddr("owner");
         alice = makeAddr("alice");
         bob = makeAddr("bob");
-        lobsterAlgorithm = makeAddr("lobsterAlgorithm");
         feeCollector = makeAddr("feeCollector");
-        lobsterRebaserPrivateKey = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
-        lobsterRebaser = vm.addr(lobsterRebaserPrivateKey);
 
         IHook hook = IHook(address(0));
         IOpValidatorModule opValidator = IOpValidatorModule(address(0));
@@ -31,7 +28,7 @@ contract VaultWithOperationModuleTestSetup is VaultTestUtils {
         counter = new Counter();
 
         vault = new LobsterVault(
-            owner, asset, "Vault Token", "vTKN", lobsterAlgorithm, opValidator, hook, navModule, vaultOperations
+            owner, asset, "Vault Token", "vTKN", feeCollector, opValidator, hook, navModule, vaultOperations
         );
 
         // Setup initial state
