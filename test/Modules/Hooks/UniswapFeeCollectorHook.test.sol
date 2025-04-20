@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
-import "forge-std/Test.sol";
 import {VaultWithUniswapFeeCollectorHookSetup} from
     "../../Vault/VaultSetups/WithRealModules/VaultWithUniswapFeeCollectorHookSetup.sol";
 import {UniswapFeeCollectorHook, BASIS_POINT_SCALE} from "../../../src/Modules/Hooks/UniswapFeeCollectorHook.sol";

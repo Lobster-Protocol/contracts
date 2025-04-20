@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
-import "forge-std/Test.sol";
 import {IHook} from "../../interfaces/modules/IHook.sol";
 import {IUniswapV3PoolMinimal} from "../../interfaces/IUniswapV3PoolMinimal.sol";
 import {Op} from "../../interfaces/modules/IOpValidatorModule.sol";
@@ -104,7 +103,6 @@ contract UniswapFeeCollectorHook is IHook, Ownable {
         }
 
         if (feeCollected) {
-            console.log();
             emit UniswapPositionPerformanceFee(feeReceiver, token0Fee, token1Fee);
         }
     }

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GNU AGPL v3.0
 pragma solidity ^0.8.28;
 
-import "forge-std/Test.sol";
 import {VaultWithValidatorTestSetup} from "./VaultSetups/WithDummyModules/VaultWithValidatorTestSetup.sol";
 import {VaultWithValidatorAndHookTestSetup} from "./VaultSetups/WithDummyModules/VaultWithValidatorAndHookTestSetup.sol";
 import {SimpleVaultTestSetup} from "./VaultSetups/SimpleVaultTestSetup.sol";
