@@ -155,6 +155,14 @@ contract ExecuteOpsWithHookTest is VaultWithValidatorAndHookTestSetup {
         vm.expectRevert(Modular.PostHookFailed.selector);
         vault.executeOpBatch(batch);
     }
+
+    // ensure the vault cannot be called by the hook if the vault did not call it first
+    function testHookCallsVaultFirst() public {
+        DummyHook hook = DummyHook(address(vault.hook()));
+
+        vm.expectRevert("Not allowed Hook call");
+        hook.callVault(vault);
+    }
 }
 
 // ensure executeOps function throw when no validator is set

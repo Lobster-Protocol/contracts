@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import {IHook} from "../../../src/interfaces/modules/IHook.sol";
 import {Op} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
+import {LobsterVault} from "../../../src/Vault/Vault.sol";
 
 bytes4 constant UNAUTHORIZED_PREHOOK = bytes4(0x12345678);
 bytes4 constant UNAUTHORIZED_POSTHOOK = bytes4(0x01234567);
@@ -14,6 +15,8 @@ contract DummyHook is IHook {
     mapping(address => uint256) public postCheckCalls;
 
     error InvalidContext();
+
+    event Ping();
 
     function preCheck(Op calldata op, address caller) external pure returns (bytes memory context) {
         // fail if selector is UNAUTHORIZED
@@ -39,5 +42,24 @@ contract DummyHook is IHook {
 
         // Dummy logic to simulate post-check
         success = true;
+    }
+
+    /**
+     * Calls the Vault without having been called by it first
+     */
+    function callVault(LobsterVault vault) external {
+        // dummy op
+        Op memory op = Op(
+            address(this),
+            0,
+            abi.encodeWithSelector(DummyHook.ping.selector),
+            "" // no need for validationData, caller is the hook
+        );
+
+        vault.executeOp(op);
+    }
+
+    function ping() external {
+        emit Ping();
     }
 }

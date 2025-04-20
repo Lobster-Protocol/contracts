@@ -68,6 +68,8 @@ contract UniswapFeeCollectorHook is IHook, Ownable {
 
         bool feeCollected = false;
 
+        // todo: we might do this in 1 batched call to the vault
+
         // If the token balances increased for a token, a cut is taken
         uint256 token0Fee = 0;
         if (token0Balance > oldBalanceToken0) {
