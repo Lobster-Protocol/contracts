@@ -11,25 +11,19 @@ bytes4 constant UNAUTHORIZED_POSTHOOK = bytes4(0x01234567);
 contract DummyHook is IHook {
     bytes32 private constant CONTEXT = keccak256("DummyHook");
 
-    // used to ensure the hook is called with delegatecall
     mapping(address => uint256) public preCheckCalls;
     mapping(address => uint256) public postCheckCalls;
 
     error InvalidContext();
 
-    modifier onlyDelegateCall() {
-        require(_amIDelegated(), "Not a delegate call");
-        _;
-    }
-
-    function preCheck(Op calldata op, address caller) external view onlyDelegateCall returns (bytes memory context) {
+    function preCheck(Op calldata op, address caller) external pure returns (bytes memory context) {
         // fail if selector is UNAUTHORIZED
         if (op.validationData.length == 4 && bytes4(op.validationData[:4]) == UNAUTHORIZED_PREHOOK) revert();
 
         return abi.encode(CONTEXT, op, caller);
     }
 
-    function postCheck(bytes calldata ctx) external onlyDelegateCall returns (bool success) {
+    function postCheck(bytes calldata ctx) external returns (bool success) {
         (bytes32 context, Op memory op,) = abi.decode(ctx, (bytes32, Op, address));
 
         if (context != CONTEXT) {
@@ -46,17 +40,5 @@ contract DummyHook is IHook {
 
         // Dummy logic to simulate post-check
         success = true;
-    }
-
-    // check if we are in a delegate call
-    function _amIDelegated() public view returns (bool) {
-        // Get the address where the code is actually stored
-        address codeAddress;
-        assembly {
-            codeAddress := extcodesize(address())
-        }
-
-        // If the code address is different from address(this), we're in a delegatecall
-        return codeAddress != address(this);
     }
 }

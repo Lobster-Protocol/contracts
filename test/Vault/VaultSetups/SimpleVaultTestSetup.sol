@@ -18,8 +18,6 @@ contract SimpleVaultTestSetup is VaultTestUtils {
         bob = makeAddr("bob");
         lobsterAlgorithm = makeAddr("lobsterAlgorithm");
         feeCollector = makeAddr("feeCollector");
-        lobsterRebaserPrivateKey = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
-        lobsterRebaser = vm.addr(lobsterRebaserPrivateKey);
 
         // Deploy contracts
         asset = new MockERC20();

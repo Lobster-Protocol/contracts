@@ -2,8 +2,8 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import {VaultWithValidatorTestSetup} from "./VaultSetups/VaultWithValidatorTestSetup.sol";
-import {VaultWithValidatorAndHookTestSetup} from "./VaultSetups/VaultWithValidatorAndHookTestSetup.sol";
+import {VaultWithValidatorTestSetup} from "./VaultSetups/WithDummyModules/VaultWithValidatorTestSetup.sol";
+import {VaultWithValidatorAndHookTestSetup} from "./VaultSetups/WithDummyModules/VaultWithValidatorAndHookTestSetup.sol";
 import {SimpleVaultTestSetup} from "./VaultSetups/SimpleVaultTestSetup.sol";
 import {BatchOp, Op} from "../../src/interfaces/modules/IOpValidatorModule.sol";
 import {Modular} from "../../src/Modules/Modular.sol";
@@ -181,3 +181,5 @@ contract ExecuteOpsNoValidatorTest is SimpleVaultTestSetup {
         vault.executeOpBatch(batch);
     }
 }
+
+// todo: test when a hook calls executeOp and executeBatchedOps

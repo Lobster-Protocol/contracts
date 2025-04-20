@@ -39,6 +39,9 @@ contract LobsterVault is Modular, ERC4626Fees {
         ERC4626Fees(initialFeeCollector)
     {
         if (initialOwner == address(0)) revert ZeroAddress();
+        if (address(opValidator_) == address(0) && address(hook) != address(0)) {
+            revert("Cannot install hook if there is no op validator");
+        }
 
         opValidator = opValidator_;
         emit OpValidatorSet(opValidator_);
@@ -69,9 +72,11 @@ contract LobsterVault is Modular, ERC4626Fees {
     /* ------------------FUNCTIONS FOR CUSTOM CALLS------------------ */
 
     function executeOp(Op calldata op) external {
-        if (opValidator == IOpValidatorModule(address(0)) || !opValidator.validateOp(op)) {
+        // Op must be validated or come from the hook. No
+        if (address(opValidator) == address(0) || (msg.sender != address(hook) && !opValidator.validateOp(op))) {
             revert OpNotApproved();
         }
+        // todo: Should the hook op be approved by the opValidator ??
         bytes memory ctx = _preCallHook(op, msg.sender);
         _call(op);
         _postCallHook(ctx);
@@ -110,34 +115,51 @@ contract LobsterVault is Modular, ERC4626Fees {
 
     /* ------------------HOOKS------------------- */
     /**
-     * Delegate call to the preCheck function from the Hook contract (if set)
+     * Calls the preCheck function from the Hook contract (if set)
+     * @dev use a low level staticcall
      * @param op - the op to execute
      * @param caller - the address of the caller
      */
     function _preCallHook(Op memory op, address caller) private returns (bytes memory context) {
         if (address(hook) != address(0)) {
-            // delegatecall to the hook contract
-            (bool success, bytes memory ctx) =
-                address(hook).delegatecall(abi.encodeWithSelector(hook.preCheck.selector, op, caller));
+            // Prepare the call data for preCheck function
+            bytes memory callData = abi.encodeWithSelector(hook.preCheck.selector, op, caller);
 
-            if (!success) revert PreHookFailed();
+            // Perform low-level static call
+            (bool success, bytes memory returnData) = address(hook).call(callData);
 
-            bytes memory decodedCtx = abi.decode(ctx, (bytes));
+            // Revert with PreHookFailed error if the call fails
+            if (!success) {
+                revert PreHookFailed();
+            }
 
-            return decodedCtx;
+            return abi.decode(returnData, (bytes)); // decode the output
         }
+
+        return "";
     }
 
     /**
-     * Delegate call to the postCheck function from the Hook contract (if set)
+     * Calls the postCheck function from the Hook contract (if set)
      * @param ctx - the context returned by _preCallHook
      */
     function _postCallHook(bytes memory ctx) private returns (bool success) {
-        if (address(hook) != address(0)) {
-            (success,) = address(hook).delegatecall(abi.encodeWithSelector(hook.postCheck.selector, ctx));
+        if (ctx.length > 0) {
+            // Prepare the call data for preCheck function
+            bytes memory callData = abi.encodeWithSelector(hook.postCheck.selector, ctx);
 
-            if (!success) revert PostHookFailed();
+            // Perform low-level static call
+            (bool callSuccess,) = address(hook).call(callData);
+
+            // Revert with PreHookFailed error if the call fails
+            if (!callSuccess) {
+                revert PostHookFailed();
+            }
+
+            return true;
         }
+
+        return true;
     }
 
     /* ------------------DEPOSIT & WITHDRAW MODULES------------------ */
