@@ -13,10 +13,12 @@ import {UniswapFeeCollectorHook} from "../../../../src/Modules/Hooks/UniswapFeeC
 import {IUniswapV3PoolMinimal} from "../../../../src/interfaces/IUniswapV3PoolMinimal.sol";
 import {DummyValidator} from "../../../Mocks/modules/DummyValidator.sol";
 import {IVaultOperations} from "../../../../src/interfaces/modules/IVaultOperations.sol";
-import {DummyUniswapV3PoolMinimal} from "../../../Mocks/modules/DummyUniswapV3PoolMinimal.sol";
+import {DummyUniswapV3PoolMinimal} from "../../../Mocks/DummyUniswapV3PoolMinimal.sol";
 
 // Vault base setup with validator function to be used in other test files
 contract VaultWithUniswapFeeCollectorHookSetup is VaultTestUtils {
+    DummyUniswapV3PoolMinimal uniV3MockedPool;
+
     function setUp() public {
         owner = makeAddr("owner");
         alice = makeAddr("alice");
@@ -24,13 +26,13 @@ contract VaultWithUniswapFeeCollectorHookSetup is VaultTestUtils {
         feeCollector = makeAddr("feeCollector");
 
         // Hook parameters
-        IUniswapV3PoolMinimal pool = new DummyUniswapV3PoolMinimal();
+        uniV3MockedPool = new DummyUniswapV3PoolMinimal();
         address initialHookOwner = makeAddr("initialHookOwner");
         uint256 initialFee = 100; // 100 over 10_000 = 1%
         address hookFeeCollector = makeAddr("hookFeeCollector");
 
         // module instantiation
-        IHook hook = new UniswapFeeCollectorHook(pool, initialHookOwner, initialFee, hookFeeCollector);
+        IHook hook = new UniswapFeeCollectorHook(uniV3MockedPool, initialHookOwner, initialFee, hookFeeCollector);
         IOpValidatorModule opValidator = new DummyValidator();
         IVaultOperations vaultOperations = IVaultOperations(address(0));
         INav navModule = INav(address(0));

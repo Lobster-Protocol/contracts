@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: GNU AGPL v3.0
 pragma solidity ^0.8.28;
 
-import {IUniswapV3PoolMinimal} from "../../../src/interfaces/IUniswapV3PoolMinimal.sol";
-import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
-import {MockERC20} from "../MockERC20.sol";
+import {IUniswapV3PoolMinimal} from "../../src/interfaces/IUniswapV3PoolMinimal.sol";
+import {MockERC20} from "./MockERC20.sol";
 
 contract DummyUniswapV3PoolMinimal is IUniswapV3PoolMinimal {
-    IERC20 public token0_;
-    IERC20 public token1_;
+    MockERC20 public token0_;
+    MockERC20 public token1_;
 
     constructor() {
         token0_ = new MockERC20();
@@ -40,14 +39,19 @@ contract DummyUniswapV3PoolMinimal is IUniswapV3PoolMinimal {
 
     function collect(
         address recipient,
-        int24 tickLower,
-        int24 tickUpper,
+        int24, /* tickLower */
+        int24, /* tickUpper */
         uint128 amount0Requested,
         uint128 amount1Requested
     )
         external
         returns (uint128 amount0, uint128 amount1)
     {
-        // todo
+        amount0 = amount0Requested;
+        amount1 = amount1Requested;
+
+        // Mint a pseudo random amount of tokens 0 & 1 to the recipient
+        token0_.mint(recipient, amount0);
+        token1_.mint(recipient, amount1);
     }
 }

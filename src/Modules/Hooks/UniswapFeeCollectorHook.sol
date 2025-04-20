@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
+import "forge-std/Test.sol";
 import {IHook} from "../../interfaces/modules/IHook.sol";
 import {IUniswapV3PoolMinimal} from "../../interfaces/IUniswapV3PoolMinimal.sol";
 import {Op} from "../../interfaces/modules/IOpValidatorModule.sol";
@@ -8,11 +9,11 @@ import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {LobsterVault} from "../../../src/Vault/Vault.sol";
 
 uint256 constant BASIS_POINT_SCALE = 10_000;
 
 // Hook used to take a fee when the vault collect its fees from a uniswap pool
-// expected to be delegateCalled
 contract UniswapFeeCollectorHook is IHook, Ownable {
     using Math for uint256;
     using SafeERC20 for IERC20;
@@ -42,32 +43,29 @@ contract UniswapFeeCollectorHook is IHook, Ownable {
         feeReceiver = initialFeeReceiver;
     }
 
-    // intended to be delegateCalled
     function preCheck(Op calldata op, address) external view returns (bytes memory context) {
         // check if we are collecting fees for the pool
-        if (
-            op.target == address(pool) && op.data.length >= 4
-                && bytes4(op.data[:4]) == IUniswapV3PoolMinimal.collect.selector
-        ) {
-            // get the current vault balance for both tokens
-            uint256 token0Balance = token0.balanceOf(address(this));
-            uint256 token1Balance = token1.balanceOf(address(this));
+        if (op.target == address(pool) && op.data.length >= 4) {
+            if (bytes4(op.data[:4]) == IUniswapV3PoolMinimal.collect.selector) {
+                // get the current vault balance for both tokens
+                uint256 token0Balance = token0.balanceOf(msg.sender);
+                uint256 token1Balance = token1.balanceOf(msg.sender);
 
-            return abi.encode(token0Balance, token1Balance);
+                return abi.encode(token0Balance, token1Balance);
+            }
         }
 
         return "";
     }
 
-    // intended to be delegateCalled
     function postCheck(bytes memory ctx) external returns (bool success) {
         if (ctx.length == 0) return true;
 
         (uint256 oldBalanceToken0, uint256 oldBalanceToken1) = abi.decode(ctx, (uint256, uint256));
 
         // get the current vault balance for both tokens
-        uint256 token0Balance = token0.balanceOf(address(this));
-        uint256 token1Balance = token1.balanceOf(address(this));
+        uint256 token0Balance = token0.balanceOf(msg.sender);
+        uint256 token1Balance = token1.balanceOf(msg.sender);
 
         bool feeCollected = false;
 
@@ -75,18 +73,38 @@ contract UniswapFeeCollectorHook is IHook, Ownable {
         uint256 token0Fee = 0;
         if (token0Balance > oldBalanceToken0) {
             token0Fee = (token0Balance - oldBalanceToken0).mulDiv(feeBasisPoint, BASIS_POINT_SCALE, Math.Rounding.Floor);
-            token0.safeTransfer(feeReceiver, token0Fee);
+
+            // Setup the vault op to extract the fees
+            Op memory collectLobsterFee = Op(
+                address(token0),
+                0,
+                abi.encodeWithSelector(token0.transfer.selector, feeReceiver, token0Fee),
+                "" // no need for validation data, msg.sender will be the hook
+            );
+
+            LobsterVault(msg.sender).executeOp(collectLobsterFee);
+
             feeCollected = true;
         }
 
         uint256 token1Fee = 0;
         if (token1Balance > oldBalanceToken1) {
             token1Fee = (token1Balance - oldBalanceToken1).mulDiv(feeBasisPoint, BASIS_POINT_SCALE, Math.Rounding.Floor);
-            token1.safeTransfer(feeReceiver, token1Fee);
+            // Setup the vault op to extract the fees
+            Op memory collectLobsterFee = Op(
+                address(token1),
+                0,
+                abi.encodeWithSelector(token1.transfer.selector, feeReceiver, token1Fee),
+                "" // no need for validation data, msg.sender will be the hook
+            );
+
+            LobsterVault(msg.sender).executeOp(collectLobsterFee);
+
             feeCollected = true;
         }
 
         if (feeCollected) {
+            console.log();
             emit UniswapPositionPerformanceFee(feeReceiver, token0Fee, token1Fee);
         }
     }
