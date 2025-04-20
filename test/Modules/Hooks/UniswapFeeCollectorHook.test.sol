@@ -123,13 +123,65 @@ contract UniswapFeeCollectorHookTest is VaultWithUniswapFeeCollectorHookSetup {
         assertEq(feeReceiverInitBalance1 + fee1, MockERC20(uniV3MockedPool.token1()).balanceOf(feeReceiver));
     }
 
-    // // Collect the fees from a pool that is not the registered pool
-    // function testCallWrongPool() public {}
+    // Collect the fees from a pool that is not the registered pool
+    function testCallWrongPool() public {
+        address wrongPool = address(new DummyUniswapV3PoolMinimal());
 
-    // // Calls the right pool but not the collect() function
-    // function testCallWrongSelector() public {}
+        MockERC20 token0 = MockERC20(address(UniswapFeeCollectorHook(address(vault.hook())).token0()));
+        MockERC20 token1 = MockERC20(address(UniswapFeeCollectorHook(address(vault.hook())).token1()));
 
-    // /*---------------E2E--------------- */
-    // // E2E implementation with the Lobster Vault
-    // function testEnd2End() public {}
+        // Mint some tokens
+        uint256 amount0 = 100;
+        token0.mint(address(alice), amount0);
+        uint256 amount1 = 112;
+        token1.mint(address(alice), amount1);
+
+        // we don't care about the op itself, the preCheck must only check for alice's balance
+        Op memory op = Op(
+            wrongPool, // target is not the right pool
+            0, // value
+            abi.encodePacked(IUniswapV3PoolMinimal.collect.selector), // data (right selector)
+            "" // validation data
+        );
+
+        vm.startPrank(alice);
+        bytes memory ctx = vault.hook().preCheck(
+            op,
+            address(0) // we don't care about this in this hook
+        );
+        vm.stopPrank();
+
+        // Expect no ctx
+        assertEq("", ctx);
+    }
+
+    // Calls the right pool but not the collect() function
+    function testCallWrongSelector() public {
+        MockERC20 token0 = MockERC20(address(UniswapFeeCollectorHook(address(vault.hook())).token0()));
+        MockERC20 token1 = MockERC20(address(UniswapFeeCollectorHook(address(vault.hook())).token1()));
+
+        // Mint some tokens
+        uint256 amount0 = 100;
+        token0.mint(address(alice), amount0);
+        uint256 amount1 = 112;
+        token1.mint(address(alice), amount1);
+
+        // we don't care about the op itself, the preCheck must only check for alice's balance
+        Op memory op = Op(
+            address(UniswapFeeCollectorHook(address(vault.hook())).pool()), // target is the right pool
+            0, // value
+            abi.encodePacked(IUniswapV3PoolMinimal.token0.selector), // data (wrong selector)
+            "" // validation data
+        );
+
+        vm.startPrank(alice);
+        bytes memory ctx = vault.hook().preCheck(
+            op,
+            address(0) // we don't care about this in this hook
+        );
+        vm.stopPrank();
+
+        // Expect no ctx
+        assertEq("", ctx);
+    }
 }
