@@ -181,3 +181,5 @@ contract ExecuteOpsNoValidatorTest is SimpleVaultTestSetup {
         vault.executeOpBatch(batch);
     }
 }
+
+// todo: test when a hook calls executeOp and executeBatchedOps
