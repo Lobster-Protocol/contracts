@@ -17,9 +17,24 @@ import {IVaultOperations} from "../../src/interfaces/modules/IVaultOperations.so
 contract LobsterVault is Modular, ERC4626Fees {
     using Math for uint256;
 
+    bool private _executingOps;
+
     event FeesCollected(uint256 total, uint256 managementFees, uint256 performanceFees, uint256 timestamp);
 
     error ZeroAddress();
+
+    // this modifier ensures a hook cannot call th vault by itself. Without having been called
+    modifier inExecutionContext() {
+        if (msg.sender == address(hook)) {
+            // if the caller is the hook, only check if the call is allowed
+            require(_executingOps, "Not allowed Hook call");
+            _;
+        } else {
+            _executingOps = true;
+            _;
+            _executingOps = false;
+        }
+    }
 
     // todo: add initial fees
     constructor(
@@ -71,27 +86,65 @@ contract LobsterVault is Modular, ERC4626Fees {
 
     /* ------------------FUNCTIONS FOR CUSTOM CALLS------------------ */
 
-    function executeOp(Op calldata op) external {
-        // Op must be validated or come from the hook. No
-        if (address(opValidator) == address(0) || (msg.sender != address(hook) && !opValidator.validateOp(op))) {
+    function executeOp(Op calldata op) external inExecutionContext {
+        // Always revert if validator is not set
+        address validator = address(opValidator);
+        if (validator == address(0)) {
             revert OpNotApproved();
         }
-        // todo: Should the hook op be approved by the opValidator ??
-        bytes memory ctx = _preCallHook(op, msg.sender);
+
+        // Skip validation if caller is the hook
+        bool isFromHook = msg.sender == address(hook);
+
+        // Validate operation if not from hook
+        if (!isFromHook && !opValidator.validateOp(op)) {
+            revert OpNotApproved();
+        }
+
+        // Execute operation with hook calls only if not from hook
+        bytes memory ctx;
+        if (!isFromHook) {
+            ctx = _preCallHook(op, msg.sender);
+        }
+
         _call(op);
-        _postCallHook(ctx);
+
+        if (!isFromHook) {
+            _postCallHook(ctx);
+        }
     }
 
-    function executeOpBatch(BatchOp calldata batch) external {
-        if (opValidator == IOpValidatorModule(address(0)) || !opValidator.validateBatchedOp(batch)) {
+    function executeOpBatch(BatchOp calldata batch) external inExecutionContext {
+        // Always revert if validator is not set
+        address validator = address(opValidator);
+        if (validator == address(0)) {
             revert OpNotApproved();
         }
 
+        // Validate batch operation
+        if (!opValidator.validateBatchedOp(batch)) {
+            revert OpNotApproved();
+        }
+
+        // Check if caller is the hook
+        bool isFromHook = msg.sender == address(hook);
+
+        // Process all operations in batch
         uint256 length = batch.ops.length;
         for (uint256 i = 0; i < length;) {
-            bytes memory ctx = _preCallHook(batch.ops[i], msg.sender);
+            // Execute operation with hook calls only if not from hook
+            bytes memory ctx;
+            if (!isFromHook) {
+                // todo: would it be better to call the hook once ? (but les granularity)
+                ctx = _preCallHook(batch.ops[i], msg.sender);
+            }
+
             _call(batch.ops[i]);
-            _postCallHook(ctx);
+
+            if (!isFromHook) {
+                _postCallHook(ctx);
+            }
+
             unchecked {
                 ++i;
             }
