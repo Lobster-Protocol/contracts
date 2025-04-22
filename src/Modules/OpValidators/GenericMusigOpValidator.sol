@@ -10,6 +10,7 @@ import {console} from "forge-std/console.sol";
 uint256 constant NONCE_OFFSET = 32; // Offset for the nonce in the validation data
 
 contract GenericMusigOpValidator is IOpValidatorModule {
+    // todo: support eip-712 signatures & message signing that are not vault transactions
     using MessageHashUtils for bytes32;
 
     /* -------------MUSIG VARIABLES------------- */
@@ -93,6 +94,13 @@ contract GenericMusigOpValidator is IOpValidatorModule {
     }
 
     function validateOp(Op calldata op) public returns (bool result) {
+        result = validateOpView(op);
+        // Increment the nonce after the operation is validated
+        nextNonce++;
+    }
+
+    // same as validateOp but does not increment the nonce (used to preview op verification)
+    function validateOpView(Op calldata op) public view returns (bool result) {
         // Ensure nonce validity
         checkNonce(uint256(bytes32(op.validationData[:NONCE_OFFSET])));
 
@@ -103,12 +111,22 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         }
 
         result = _validateBaseOp(op.base);
-
-        // Increment the nonce after the operation is validated
-        nextNonce++;
     }
 
-    function validateBatchedOp(BatchOp calldata batch) external returns (bool) {
+    function validateBatchedOp(
+        BatchOp calldata batch
+    ) external returns (bool result) {
+        result = validateBatchedOpView(batch);
+        // Increment the nonce after all operations are validated
+        nextNonce++;
+
+        return true;
+    }
+
+    // same as validateBatchedOp but does not increment the nonce (used to preview op verification)
+    function validateBatchedOpView(
+        BatchOp calldata batch
+    ) public view returns (bool) {
         // Ensure nonce validity
         checkNonce(uint256(bytes32(batch.validationData[:NONCE_OFFSET])));
 
@@ -123,10 +141,6 @@ contract GenericMusigOpValidator is IOpValidatorModule {
                 return false;
             }
         }
-
-        // Increment the nonce after all operations are validated
-        nextNonce++;
-
         return true;
     }
 
