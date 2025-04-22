@@ -5,7 +5,7 @@ import {ERC4626, ERC20} from "@openzeppelin/contracts/token/ERC20/extensions/ERC
 import {ERC4626Fees} from "./ERC4626Fees.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Op, BatchOp} from "../interfaces/modules/IOpValidatorModule.sol";
+import {BaseOp, Op, BatchOp} from "../interfaces/modules/IOpValidatorModule.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {BASIS_POINT_SCALE} from "./Constants.sol";
 import {Modular} from "../Modules/Modular.sol";
@@ -104,10 +104,10 @@ contract LobsterVault is Modular, ERC4626Fees {
         // Execute operation with hook calls only if not from hook
         bytes memory ctx;
         if (!isFromHook) {
-            ctx = _preCallHook(op, msg.sender);
+            ctx = _preCallHook(op.base, msg.sender);
         }
 
-        _call(op);
+        _call(op.base);
 
         if (!isFromHook) {
             _postCallHook(ctx);
@@ -151,7 +151,7 @@ contract LobsterVault is Modular, ERC4626Fees {
         }
     }
 
-    function _call(Op calldata op) private {
+    function _call(BaseOp calldata op) private {
         (bool success, bytes memory result) = op.target.call{value: op.value}(op.data);
 
         assembly {
@@ -169,11 +169,10 @@ contract LobsterVault is Modular, ERC4626Fees {
     /* ------------------HOOKS------------------- */
     /**
      * Calls the preCheck function from the Hook contract (if set)
-     * @dev use a low level staticcall
      * @param op - the op to execute
      * @param caller - the address of the caller
      */
-    function _preCallHook(Op memory op, address caller) private returns (bytes memory context) {
+    function _preCallHook(BaseOp memory op, address caller) private returns (bytes memory context) {
         if (address(hook) != address(0)) {
             // Prepare the call data for preCheck function
             bytes memory callData = abi.encodeWithSelector(hook.preCheck.selector, op, caller);

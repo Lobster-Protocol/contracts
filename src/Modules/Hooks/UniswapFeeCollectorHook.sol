@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {IHook} from "../../interfaces/modules/IHook.sol";
 import {IUniswapV3PoolMinimal} from "../../interfaces/IUniswapV3PoolMinimal.sol";
-import {Op} from "../../interfaces/modules/IOpValidatorModule.sol";
+import {BaseOp, Op} from "../../interfaces/modules/IOpValidatorModule.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
@@ -42,7 +42,7 @@ contract UniswapFeeCollectorHook is IHook, Ownable {
         feeReceiver = initialFeeReceiver;
     }
 
-    function preCheck(Op calldata op, address) external view returns (bytes memory context) {
+    function preCheck(BaseOp calldata op, address) external view returns (bytes memory context) {
         // check if we are collecting fees for the pool
         if (op.target == address(pool) && op.data.length >= 4) {
             if (bytes4(op.data[:4]) == IUniswapV3PoolMinimal.collect.selector) {
@@ -77,9 +77,7 @@ contract UniswapFeeCollectorHook is IHook, Ownable {
 
             // Setup the vault op to extract the fees
             Op memory collectLobsterFee = Op(
-                address(token0),
-                0,
-                abi.encodeWithSelector(token0.transfer.selector, feeReceiver, token0Fee),
+                BaseOp(address(token0), 0, abi.encodeWithSelector(token0.transfer.selector, feeReceiver, token0Fee)),
                 "" // no need for validation data, msg.sender will be the hook
             );
 
@@ -93,9 +91,7 @@ contract UniswapFeeCollectorHook is IHook, Ownable {
             token1Fee = (token1Balance - oldBalanceToken1).mulDiv(feeBasisPoint, BASIS_POINT_SCALE, Math.Rounding.Floor);
             // Setup the vault op to extract the fees
             Op memory collectLobsterFee = Op(
-                address(token1),
-                0,
-                abi.encodeWithSelector(token1.transfer.selector, feeReceiver, token1Fee),
+                BaseOp(address(token1), 0, abi.encodeWithSelector(token1.transfer.selector, feeReceiver, token1Fee)),
                 "" // no need for validation data, msg.sender will be the hook
             );
 

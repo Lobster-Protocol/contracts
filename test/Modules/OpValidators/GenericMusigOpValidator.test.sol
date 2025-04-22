@@ -6,6 +6,7 @@ import {
     WhitelistedCall,
     SelectorAndChecker,
     Signers,
+    BaseOp,
     Op,
     BatchOp
 } from "../../../src/interfaces/modules/IOpValidatorModule.sol";
@@ -29,7 +30,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         });
 
         GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
-        Op memory op = Op({target: makeAddr("alice"), value: 1 ether, data: "", validationData: ""});
+        Op memory op = Op(BaseOp({target: makeAddr("alice"), value: 1 ether, data: ""}), "");
         bytes32 message = validator.messageFromOp(op);
         uint256[] memory opSigners = new uint256[](2);
         opSigners[0] = signer1;
@@ -60,9 +61,10 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         });
 
         GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
-        BatchOp memory batchOp = BatchOp({ops: new Op[](2), validationData: ""});
-        Op memory op1 = Op({target: makeAddr("alice"), value: 1 ether, data: "", validationData: ""});
-        Op memory op2 = Op({target: makeAddr("alice"), value: 1 ether, data: "", validationData: ""});
+        BatchOp memory batchOp = BatchOp({ops: new BaseOp[](2), validationData: ""});
+        BaseOp memory op1 = BaseOp({target: makeAddr("alice"), value: 1 ether, data: ""});
+        BaseOp memory op2 = BaseOp({target: makeAddr("alice"), value: 1 ether, data: ""});
+
         batchOp.ops[0] = op1;
         batchOp.ops[1] = op2;
 
@@ -289,7 +291,8 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         });
 
         GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
-        Op memory op = Op({target: makeAddr("bob"), value: 1 ether, data: "", validationData: ""});
+        Op memory op = Op({base: BaseOp({target: makeAddr("bob"), value: 1 ether, data: ""}), validationData: ""});
+
         bytes32 message = validator.messageFromOp(op);
         uint256[] memory opSigners = new uint256[](2);
         opSigners[0] = signer1;
@@ -299,7 +302,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         op.validationData = signatures;
 
-        vm.expectRevert(abi.encodeWithSelector(GenericMusigOpValidator.TargetNotWhitelisted.selector, op.target));
+        vm.expectRevert(abi.encodeWithSelector(GenericMusigOpValidator.TargetNotWhitelisted.selector, op.base.target));
         validator.validateOp(op);
     }
 
@@ -317,7 +320,8 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         });
 
         GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
-        Op memory op = Op({target: makeAddr("alice"), value: allowance + 1, data: "", validationData: ""});
+        Op memory op =
+            Op({base: BaseOp({target: makeAddr("alice"), value: allowance + 1, data: ""}), validationData: ""});
         bytes32 message = validator.messageFromOp(op);
         uint256[] memory opSigners = new uint256[](2);
         opSigners[0] = signer1;
@@ -327,7 +331,9 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         op.validationData = signatures;
 
-        vm.expectRevert(abi.encodeWithSelector(GenericMusigOpValidator.ExceedsAllowance.selector, allowance, op.value));
+        vm.expectRevert(
+            abi.encodeWithSelector(GenericMusigOpValidator.ExceedsAllowance.selector, allowance, op.base.value)
+        );
         validator.validateOp(op);
     }
 
@@ -345,7 +351,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         });
 
         GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
-        Op memory op = Op({target: makeAddr("alice"), value: 1 ether, data: "", validationData: ""});
+        Op memory op = Op({base: BaseOp({target: makeAddr("alice"), value: 1 ether, data: ""}), validationData: ""});
         bytes32 message = validator.messageFromOp(op);
         uint256[] memory opSigners = new uint256[](2);
         opSigners[0] = signer1;
@@ -381,7 +387,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
         bytes memory selector = abi.encodeWithSelector(counter.ping.selector);
         // op to counter.ping() fct
-        Op memory op = Op({target: address(counter), value: 0, data: selector, validationData: ""});
+        Op memory op = Op({base: BaseOp({target: address(counter), value: 0, data: selector}), validationData: ""});
         bytes32 message = validator.messageFromOp(op);
         uint256[] memory opSigners = new uint256[](2);
         opSigners[0] = signer1;
@@ -424,7 +430,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
         // op to counter.increment() fct
-        Op memory op = Op({target: address(counter), value: 0, data: selector, validationData: ""});
+        Op memory op = Op({base: BaseOp({target: address(counter), value: 0, data: selector}), validationData: ""});
         bytes32 message = validator.messageFromOp(op);
         uint256[] memory opSigners = new uint256[](2);
         opSigners[0] = signer1;
@@ -459,9 +465,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
 
         Op memory op = Op({
-            target: address(counter),
-            value: 0,
-            data: "", // empty selector
+            base: BaseOp({
+                target: address(counter),
+                value: 0,
+                data: "" // empty selector
+            }),
             validationData: ""
         });
 
@@ -500,9 +508,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
 
         Op memory op = Op({
-            target: address(counter),
-            value: 0,
-            data: hex"0123", // selector len < 4 bytes
+            base: BaseOp({
+                target: address(counter),
+                value: 0,
+                data: hex"0123" // selector len < 4 bytes
+            }),
             validationData: ""
         });
 
@@ -541,9 +551,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
         // op to counter.increment() fct
         Op memory op = Op({
-            target: address(counter),
-            value: 0,
-            data: abi.encodeWithSelector(counter.incrementWithAmount.selector, 2),
+            base: BaseOp({
+                target: address(counter),
+                value: 0,
+                data: abi.encodeWithSelector(counter.incrementWithAmount.selector, 2)
+            }),
             validationData: ""
         });
         bytes32 message = validator.messageFromOp(op);

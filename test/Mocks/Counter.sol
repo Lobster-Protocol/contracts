@@ -1,19 +1,22 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-// import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+// Used to allow or deny ops in opValidators
+bytes4 constant UNAUTHORIZED = bytes4(0x00000001);
+bytes4 constant AUTHORIZED = bytes4(0x00000002);
+// used to test pre and post hooks
+bytes4 constant UNAUTHORIZED_PREHOOK = bytes4(0x00000003);
+bytes4 constant UNAUTHORIZED_POSTHOOK = bytes4(0x00000004);
+//
 
 contract Counter {
-    // IERC20 immutable asset;
     uint256 public value = 0;
-
-    constructor( /* IERC20 asset_ */ ) {}
 
     function ping() external pure returns (string memory) {
         return "pong";
     }
 
-    function increment() external {
+    function increment() public {
         value++;
     }
 
@@ -21,16 +24,17 @@ contract Counter {
         value += amount;
     }
 
-    // function incrementAndClaim(uint256 amount) external returns (uint256) {
-    //     // Check contract's balance first
-    //     uint256 contractBalance = asset.balanceOf(address(this));
-    //     require(contractBalance >= amount, "Contract has insufficient balance");
+    fallback() external {
+        // use to test allowed / unauthorized selectors
+        // always return true if the selector is known
+        if (
+            msg.sig == UNAUTHORIZED || msg.sig == AUTHORIZED || msg.sig == UNAUTHORIZED_PREHOOK
+                || msg.sig == UNAUTHORIZED_POSTHOOK
+        ) {
+            increment();
+            return;
+        }
 
-    //     counter++;
-
-    //     bool success = asset.transfer(msg.sender, amount);
-    //     require(success, "Transfer failed");
-
-    //     return counter;
-    // }
+        revert("Unknown selector");
+    }
 }

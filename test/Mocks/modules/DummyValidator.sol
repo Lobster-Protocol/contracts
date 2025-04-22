@@ -2,9 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {IOpValidatorModule, BatchOp, Op} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
-
-bytes4 constant UNAUTHORIZED = bytes4(0x0B00BEE5);
-bytes4 constant AUTHORIZED = bytes4(0x00000001);
+import {Counter, AUTHORIZED, UNAUTHORIZED} from "../Counter.sol";
 
 contract DummyValidator is IOpValidatorModule {
     // Dummy validator that always returns true unless the op validation data is UNAUTHORIZED

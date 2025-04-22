@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {VaultWithValidatorTestSetup} from "./VaultSetups/WithDummyModules/VaultWithValidatorTestSetup.sol";
 import {VaultWithValidatorAndHookTestSetup} from "./VaultSetups/WithDummyModules/VaultWithValidatorAndHookTestSetup.sol";
 import {SimpleVaultTestSetup} from "./VaultSetups/SimpleVaultTestSetup.sol";
-import {BatchOp, Op} from "../../src/interfaces/modules/IOpValidatorModule.sol";
+import {BaseOp, Op, BatchOp} from "../../src/interfaces/modules/IOpValidatorModule.sol";
 import {Modular} from "../../src/Modules/Modular.sol";
 import {AUTHORIZED, UNAUTHORIZED} from "../Mocks/modules/DummyValidator.sol";
 import {DummyHook, UNAUTHORIZED_POSTHOOK, UNAUTHORIZED_PREHOOK} from "../Mocks/modules/DummyHook.sol";
@@ -20,8 +20,7 @@ contract ExecuteOpsNoHookTest is VaultWithValidatorTestSetup {
 
         uint256 initial_value = counter.value();
 
-        Op memory op =
-            Op(address(counter), 0, abi.encodeWithSelector(counter.increment.selector), abi.encodePacked(AUTHORIZED));
+        Op memory op = Op(BaseOp(address(counter), 0, abi.encodeWithSelector(AUTHORIZED)), "");
 
         vault.executeOp(op);
 
@@ -31,8 +30,10 @@ contract ExecuteOpsNoHookTest is VaultWithValidatorTestSetup {
     function testDeniedOp() public {
         hookNotSet();
 
-        Op memory op =
-            Op(address(counter), 0, abi.encodeWithSelector(counter.increment.selector), abi.encodePacked(UNAUTHORIZED));
+        Op memory op = Op(
+            BaseOp(address(counter), 0, abi.encodeWithSelector(counter.increment.selector)),
+            abi.encodePacked(UNAUTHORIZED)
+        );
 
         vm.expectRevert(Modular.OpNotApproved.selector);
         vault.executeOp(op);
@@ -44,10 +45,10 @@ contract ExecuteOpsNoHookTest is VaultWithValidatorTestSetup {
 
         uint256 initial_value = counter.value();
 
-        BatchOp memory batch = BatchOp({ops: new Op[](2), validationData: abi.encodePacked(AUTHORIZED)});
+        BatchOp memory batch = BatchOp({ops: new BaseOp[](2), validationData: abi.encodePacked(AUTHORIZED)});
 
-        Op memory op1 = Op(address(counter), 0, abi.encodeWithSelector(counter.increment.selector), "");
-        Op memory op2 = Op(address(counter), 0, abi.encodeWithSelector(counter.increment.selector), "");
+        BaseOp memory op1 = BaseOp(address(counter), 0, abi.encodeWithSelector(counter.increment.selector));
+        BaseOp memory op2 = BaseOp(address(counter), 0, abi.encodeWithSelector(counter.increment.selector));
 
         batch.ops[0] = op1;
         batch.ops[1] = op2;
@@ -60,10 +61,10 @@ contract ExecuteOpsNoHookTest is VaultWithValidatorTestSetup {
     function testDeniedOps() public {
         hookNotSet();
 
-        BatchOp memory batch = BatchOp({ops: new Op[](2), validationData: abi.encodePacked(UNAUTHORIZED)});
+        BatchOp memory batch = BatchOp({ops: new BaseOp[](2), validationData: abi.encodePacked(UNAUTHORIZED)});
 
-        Op memory op1 = Op(address(counter), 0, abi.encodeWithSelector(counter.increment.selector), "");
-        Op memory op2 = Op(address(counter), 0, abi.encodeWithSelector(counter.increment.selector), "");
+        BaseOp memory op1 = BaseOp(address(counter), 0, abi.encodeWithSelector(counter.increment.selector));
+        BaseOp memory op2 = BaseOp(address(counter), 0, abi.encodeWithSelector(counter.increment.selector));
 
         batch.ops[0] = op1;
         batch.ops[1] = op2;
@@ -82,8 +83,12 @@ contract ExecuteOpsWithHookTest is VaultWithValidatorAndHookTestSetup {
     function testApprovedOp() public {
         hookSet();
 
-        Op memory op =
-            Op(address(counter), 0, abi.encodeWithSelector(counter.increment.selector), abi.encodePacked(AUTHORIZED));
+        Op memory op = Op(
+            BaseOp(
+                address(counter), 0, abi.encodeWithSelector(counter.increment.selector) /* != UNAUTHORIZED selector */
+            ),
+            ""
+        );
 
         // the execution is expected to be smooth (will revert if pre or post check fails)
         vault.executeOp(op);
@@ -92,12 +97,7 @@ contract ExecuteOpsWithHookTest is VaultWithValidatorAndHookTestSetup {
     function testDeniedByPreHookOp() public {
         hookSet();
 
-        Op memory op = Op(
-            address(counter),
-            0,
-            abi.encodeWithSelector(counter.increment.selector),
-            abi.encodePacked(UNAUTHORIZED_PREHOOK)
-        );
+        Op memory op = Op(BaseOp(address(counter), 0, abi.encodePacked(UNAUTHORIZED_PREHOOK)), "");
 
         vm.expectRevert(Modular.PreHookFailed.selector);
         vault.executeOp(op);
@@ -106,12 +106,7 @@ contract ExecuteOpsWithHookTest is VaultWithValidatorAndHookTestSetup {
     function testDeniedByPostHookOp() public {
         hookSet();
 
-        Op memory op = Op(
-            address(counter),
-            0,
-            abi.encodeWithSelector(counter.increment.selector),
-            abi.encodePacked(UNAUTHORIZED_POSTHOOK)
-        );
+        Op memory op = Op(BaseOp(address(counter), 0, abi.encodePacked(UNAUTHORIZED_POSTHOOK)), "");
 
         vm.expectRevert(Modular.PostHookFailed.selector);
         vault.executeOp(op);
@@ -123,10 +118,10 @@ contract ExecuteOpsWithHookTest is VaultWithValidatorAndHookTestSetup {
 
         uint256 initial_value = counter.value();
 
-        BatchOp memory batch = BatchOp({ops: new Op[](2), validationData: abi.encodePacked(AUTHORIZED)});
+        BatchOp memory batch = BatchOp({ops: new BaseOp[](2), validationData: abi.encodePacked(AUTHORIZED)});
 
-        Op memory op1 = Op(address(counter), 0, abi.encodeWithSelector(counter.increment.selector), "");
-        Op memory op2 = Op(address(counter), 0, abi.encodeWithSelector(counter.increment.selector), "");
+        BaseOp memory op1 = BaseOp(address(counter), 0, abi.encodeWithSelector(counter.increment.selector));
+        BaseOp memory op2 = BaseOp(address(counter), 0, abi.encodeWithSelector(counter.increment.selector));
 
         batch.ops[0] = op1;
         batch.ops[1] = op2;
@@ -139,15 +134,10 @@ contract ExecuteOpsWithHookTest is VaultWithValidatorAndHookTestSetup {
     function testDeniedOps() public {
         hookSet();
 
-        BatchOp memory batch = BatchOp({ops: new Op[](2), validationData: abi.encodePacked(AUTHORIZED)});
+        BatchOp memory batch = BatchOp({ops: new BaseOp[](2), validationData: ""});
 
-        Op memory op1 = Op(address(counter), 0, abi.encodeWithSelector(counter.increment.selector), "");
-        Op memory op2 = Op(
-            address(counter),
-            0,
-            abi.encodeWithSelector(counter.increment.selector),
-            abi.encodePacked(UNAUTHORIZED_POSTHOOK) // supposed to be empty but analyzed by the dummy hook to know if it needs to revert
-        );
+        BaseOp memory op1 = BaseOp(address(counter), 0, abi.encodePacked(UNAUTHORIZED_POSTHOOK));
+        BaseOp memory op2 = BaseOp(address(counter), 0, abi.encodePacked(AUTHORIZED));
 
         batch.ops[0] = op1;
         batch.ops[1] = op2;
@@ -168,18 +158,20 @@ contract ExecuteOpsWithHookTest is VaultWithValidatorAndHookTestSetup {
 // ensure executeOps function throw when no validator is set
 contract ExecuteOpsNoValidatorTest is SimpleVaultTestSetup {
     function testExecuteOp() public {
-        Op memory op =
-            Op(address(counter), 0, abi.encodeWithSelector(counter.increment.selector), abi.encodePacked(AUTHORIZED));
+        Op memory op = Op(
+            BaseOp(address(counter), 0, abi.encodeWithSelector(counter.increment.selector)),
+            abi.encodePacked(AUTHORIZED)
+        );
 
         vm.expectRevert(Modular.OpNotApproved.selector);
         vault.executeOp(op);
     }
 
     function testExecuteBatchedOps() public {
-        BatchOp memory batch = BatchOp({ops: new Op[](2), validationData: abi.encodePacked(AUTHORIZED)});
+        BatchOp memory batch = BatchOp({ops: new BaseOp[](2), validationData: abi.encodePacked(AUTHORIZED)});
 
-        Op memory op1 = Op(address(counter), 0, abi.encodeWithSelector(counter.increment.selector), "");
-        Op memory op2 = Op(address(counter), 0, abi.encodeWithSelector(counter.increment.selector), "");
+        BaseOp memory op1 = BaseOp(address(counter), 0, abi.encodeWithSelector(counter.increment.selector));
+        BaseOp memory op2 = BaseOp(address(counter), 0, abi.encodeWithSelector(counter.increment.selector));
 
         batch.ops[0] = op1;
         batch.ops[1] = op2;
