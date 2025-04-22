@@ -314,12 +314,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
     function messageFromOp(Op calldata op) public view returns (bytes32) {
         return keccak256(
             abi.encodePacked(
-                block.chainid,
-                msg.sender,
-                uint256(bytes32(op.validationData[:32])),
-                op.base.target,
-                op.base.value,
-                op.base.data
+                block.chainid, msg.sender, bytes32(op.validationData[:32]), op.base.target, op.base.value, op.base.data
             )
         ).toEthSignedMessageHash(); // nonce
     }
