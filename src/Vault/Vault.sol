@@ -23,7 +23,7 @@ contract LobsterVault is Modular, ERC4626Fees {
 
     error ZeroAddress();
 
-    // this modifier ensures a hook cannot call th vault by itself. Without having been called
+    // this modifier ensures a hook cannot call the vault by itself. Without having been called
     modifier inExecutionContext() {
         if (msg.sender == address(hook)) {
             // if the caller is the hook, only check if the call is allowed
