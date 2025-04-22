@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
+import "forge-std/Test.sol";
 import {GenericMusigOpValidator} from "../../../src/Modules/OpValidators/GenericMusigOpValidator.sol";
 import {
     WhitelistedCall,
@@ -13,10 +14,16 @@ import {
 import {SEND_ETH, CALL_FUNCTIONS, NO_PARAMS_CHECKS_ADDRESS} from "../../../src/Modules/OpValidators/constants.sol";
 import {Counter} from "../../Mocks/Counter.sol";
 import {GenericMusigOpValidatorTestSetup} from "./GenericMusigOpValidatorTestSetup.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
+    using MessageHashUtils for bytes32;
+
     /* -----------------SINGLE OP----------------- */
     function testSingleOp() public {
+        address alice = makeAddr("alice");
+        vm.startPrank(alice);
+
         uint256 cpt_start = counter.value();
         // Create a list of whitelisted calls
         WhitelistedCall[] memory whitelistedCalls = new WhitelistedCall[](1);
@@ -29,8 +36,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
-        Op memory op = Op(BaseOp({target: makeAddr("alice"), value: 1 ether, data: ""}), "");
+        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        uint256 nonce = validator.nextNonce();
+
+        Op memory op = Op(BaseOp({target: makeAddr("alice"), value: 1 ether, data: ""}), abi.encodePacked(nonce));
+
         bytes32 message = validator.messageFromOp(op);
         uint256[] memory opSigners = new uint256[](2);
         opSigners[0] = signer1;
@@ -38,16 +48,21 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         bytes memory signatures = multiSign(opSigners, message);
 
-        op.validationData = signatures;
+        op.validationData = abi.encodePacked(nonce, signatures);
 
         // Validate the operation
         assertEq(true, validator.validateOp(op));
         // the call is not executed
         assertEq(counter.value(), cpt_start);
+
+        vm.stopPrank();
     }
 
     /* -----------------BATCHED OPs----------------- */
     function testBatchedOps() public {
+        address alice = makeAddr("alice");
+        vm.startPrank(alice);
+
         uint256 cpt_start = counter.value();
         // Create a list of whitelisted calls
         WhitelistedCall[] memory whitelistedCalls = new WhitelistedCall[](1);
@@ -60,8 +75,9 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
-        BatchOp memory batchOp = BatchOp({ops: new BaseOp[](2), validationData: ""});
+        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        uint256 nonce = validator.nextNonce();
+        BatchOp memory batchOp = BatchOp({ops: new BaseOp[](2), validationData: abi.encodePacked(nonce)});
         BaseOp memory op1 = BaseOp({target: makeAddr("alice"), value: 1 ether, data: ""});
         BaseOp memory op2 = BaseOp({target: makeAddr("alice"), value: 1 ether, data: ""});
 
@@ -75,7 +91,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         bytes memory signatures = multiSign(opSigners, message);
 
-        batchOp.validationData = signatures;
+        batchOp.validationData = abi.encodePacked(nonce, signatures);
 
         // Validate the operation
         assertEq(true, validator.validateBatchedOp(batchOp));
@@ -86,6 +102,9 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
     /* -----------------isValidSignature----------------- */
     // test valid signatures
     function testValidSignatures() public {
+        address alice = makeAddr("alice");
+        vm.startPrank(alice);
+
         // Create a list of whitelisted calls
         WhitelistedCall[] memory whitelistedCalls = new WhitelistedCall[](1);
 
@@ -97,7 +116,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
+        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message = keccak256("this is a message");
         uint256[] memory opSigners = new uint256[](2);
@@ -112,6 +131,9 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
     // test signature threshold not reached
     function testSignatureThresholdNotReached() public {
+        address alice = makeAddr("alice");
+        vm.startPrank(alice);
+
         // Create a list of whitelisted calls
         WhitelistedCall[] memory whitelistedCalls = new WhitelistedCall[](1);
 
@@ -123,7 +145,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
+        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message = keccak256("this is a message");
         uint256[] memory opSigners = new uint256[](1);
@@ -144,6 +166,9 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
     // test signature from non-allowed signer
     function testSignatureFromNonAllowedSigner() public {
+        address alice = makeAddr("alice");
+        vm.startPrank(alice);
+
         // Create a list of whitelisted calls
         WhitelistedCall[] memory whitelistedCalls = new WhitelistedCall[](1);
 
@@ -155,7 +180,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
+        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message = keccak256("this is a message");
         uint256[] memory opSigners = new uint256[](2);
@@ -174,6 +199,9 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
     // test 1 signer signed multiple times in the array
     function testSameSignerSignedMultipleTimes() public {
+        address alice = makeAddr("alice");
+        vm.startPrank(alice);
+
         // Create a list of whitelisted calls
         WhitelistedCall[] memory whitelistedCalls = new WhitelistedCall[](1);
 
@@ -185,7 +213,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
+        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message = keccak256("this is a message");
         uint256[] memory opSigners = new uint256[](2);
@@ -203,6 +231,9 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
     // test invalid signature len
     function testInvalidSignatureLen() public {
+        address alice = makeAddr("alice");
+        vm.startPrank(alice);
+
         // Create a list of whitelisted calls
         WhitelistedCall[] memory whitelistedCalls = new WhitelistedCall[](1);
 
@@ -214,7 +245,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
+        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message = keccak256("this is a message");
         uint256[] memory opSigners = new uint256[](2);
@@ -238,6 +269,9 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
     // test invalid signature
     // test invalid signature len
     function testInvalidSignature() public {
+        address alice = makeAddr("alice");
+        vm.startPrank(alice);
+
         // Create a list of whitelisted calls
         WhitelistedCall[] memory whitelistedCalls = new WhitelistedCall[](1);
 
@@ -249,7 +283,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
+        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message = keccak256("this is a message");
         uint256[] memory opSigners = new uint256[](2);
@@ -279,6 +313,9 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
     /* -----------------NATIVE TRANSFER----------------- */
     function testNotWhitelistedTransferTarget() public {
+        address alice = makeAddr("alice");
+        vm.startPrank(alice);
+
         // Create a list of whitelisted calls
         WhitelistedCall[] memory whitelistedCalls = new WhitelistedCall[](1);
 
@@ -290,8 +327,12 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
-        Op memory op = Op({base: BaseOp({target: makeAddr("bob"), value: 1 ether, data: ""}), validationData: ""});
+        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        uint256 nonce = validator.nextNonce();
+        Op memory op = Op({
+            base: BaseOp({target: makeAddr("bob"), value: 1 ether, data: ""}),
+            validationData: abi.encodePacked(nonce)
+        });
 
         bytes32 message = validator.messageFromOp(op);
         uint256[] memory opSigners = new uint256[](2);
@@ -300,13 +341,16 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         bytes memory signatures = multiSign(opSigners, message);
 
-        op.validationData = signatures;
+        op.validationData = abi.encodePacked(nonce, signatures);
 
         vm.expectRevert(abi.encodeWithSelector(GenericMusigOpValidator.TargetNotWhitelisted.selector, op.base.target));
         validator.validateOp(op);
     }
 
     function testAmountSupAllowance() public {
+        address alice = makeAddr("alice");
+        vm.startPrank(alice);
+
         // Create a list of whitelisted calls
         WhitelistedCall[] memory whitelistedCalls = new WhitelistedCall[](1);
 
@@ -319,9 +363,13 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
-        Op memory op =
-            Op({base: BaseOp({target: makeAddr("alice"), value: allowance + 1, data: ""}), validationData: ""});
+        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        uint256 nonce = validator.nextNonce();
+        Op memory op = Op({
+            base: BaseOp({target: makeAddr("alice"), value: allowance + 1, data: ""}),
+            validationData: abi.encodePacked(nonce)
+        });
+
         bytes32 message = validator.messageFromOp(op);
         uint256[] memory opSigners = new uint256[](2);
         opSigners[0] = signer1;
@@ -329,7 +377,8 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         bytes memory signatures = multiSign(opSigners, message);
 
-        op.validationData = signatures;
+        // concat nonce & signatures
+        op.validationData = abi.encodePacked(nonce, signatures);
 
         vm.expectRevert(
             abi.encodeWithSelector(GenericMusigOpValidator.ExceedsAllowance.selector, allowance, op.base.value)
@@ -338,6 +387,9 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
     }
 
     function testValidNativeTransfer() public {
+        address alice = makeAddr("alice");
+        vm.startPrank(alice);
+
         uint256 cpt_start = counter.value();
         // Create a list of whitelisted calls
         WhitelistedCall[] memory whitelistedCalls = new WhitelistedCall[](1);
@@ -350,8 +402,13 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
-        Op memory op = Op({base: BaseOp({target: makeAddr("alice"), value: 1 ether, data: ""}), validationData: ""});
+        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        uint256 nonce = validator.nextNonce();
+
+        Op memory op = Op({
+            base: BaseOp({target: makeAddr("alice"), value: 1 ether, data: ""}),
+            validationData: abi.encodePacked(nonce)
+        });
         bytes32 message = validator.messageFromOp(op);
         uint256[] memory opSigners = new uint256[](2);
         opSigners[0] = signer1;
@@ -359,7 +416,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         bytes memory signatures = multiSign(opSigners, message);
 
-        op.validationData = signatures;
+        op.validationData = abi.encodePacked(nonce, signatures);
 
         // Validate the operation
         assertEq(true, validator.validateOp(op));
@@ -369,6 +426,9 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
     /* -----------------CALL----------------- */
     function testNotWhitelistedCallTarget() public {
+        address alice = makeAddr("alice");
+        vm.startPrank(alice);
+
         // Create a list of whitelisted calls
         WhitelistedCall[] memory whitelistedCalls = new WhitelistedCall[](1);
 
@@ -384,10 +444,14 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         whitelistedCalls[0].selectorAndChecker[0] =
             SelectorAndChecker({selector: counter.increment.selector, paramsValidator: NO_PARAMS_CHECKS_ADDRESS});
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
+        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        uint256 nonce = validator.nextNonce();
         bytes memory selector = abi.encodeWithSelector(counter.ping.selector);
         // op to counter.ping() fct
-        Op memory op = Op({base: BaseOp({target: address(counter), value: 0, data: selector}), validationData: ""});
+        Op memory op = Op({
+            base: BaseOp({target: address(counter), value: 0, data: selector}),
+            validationData: abi.encodePacked(nonce)
+        });
         bytes32 message = validator.messageFromOp(op);
         uint256[] memory opSigners = new uint256[](2);
         opSigners[0] = signer1;
@@ -395,7 +459,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         bytes memory signatures = multiSign(opSigners, message);
 
-        op.validationData = signatures;
+        op.validationData = abi.encodePacked(nonce, signatures);
 
         vm.expectRevert();
         // commented since forge is buggy and display:
@@ -411,6 +475,9 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
     }
 
     function testValidCallNoArgs() public {
+        address alice = makeAddr("alice");
+        vm.startPrank(alice);
+
         // Create a list of whitelisted calls
         WhitelistedCall[] memory whitelistedCalls = new WhitelistedCall[](1);
 
@@ -428,9 +495,14 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         whitelistedCalls[0].selectorAndChecker[0] =
             SelectorAndChecker({selector: bytes4(selector), paramsValidator: NO_PARAMS_CHECKS_ADDRESS});
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
+        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        uint256 nonce = validator.nextNonce();
+
         // op to counter.increment() fct
-        Op memory op = Op({base: BaseOp({target: address(counter), value: 0, data: selector}), validationData: ""});
+        Op memory op = Op({
+            base: BaseOp({target: address(counter), value: 0, data: selector}),
+            validationData: abi.encodePacked(nonce)
+        });
         bytes32 message = validator.messageFromOp(op);
         uint256[] memory opSigners = new uint256[](2);
         opSigners[0] = signer1;
@@ -438,13 +510,16 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         bytes memory signatures = multiSign(opSigners, message);
 
-        op.validationData = signatures;
+        op.validationData = abi.encodePacked(nonce, signatures);
 
         // Validate the operation
         assertEq(true, validator.validateOp(op));
     }
 
     function testEmptySelector() public {
+        address alice = makeAddr("alice");
+        vm.startPrank(alice);
+
         // Create a list of whitelisted calls
         WhitelistedCall[] memory whitelistedCalls = new WhitelistedCall[](1);
 
@@ -462,15 +537,15 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         whitelistedCalls[0].selectorAndChecker[0] =
             SelectorAndChecker({selector: bytes4(selector), paramsValidator: NO_PARAMS_CHECKS_ADDRESS});
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
-
+        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        uint256 nonce = validator.nextNonce();
         Op memory op = Op({
             base: BaseOp({
                 target: address(counter),
                 value: 0,
                 data: "" // empty selector
             }),
-            validationData: ""
+            validationData: abi.encodePacked(nonce)
         });
 
         bytes32 message = validator.messageFromOp(op);
@@ -480,7 +555,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         bytes memory signatures = multiSign(opSigners, message);
 
-        op.validationData = signatures;
+        op.validationData = abi.encodePacked(nonce, signatures);
 
         vm.expectRevert(abi.encodeWithSelector(GenericMusigOpValidator.EmptyOperation.selector));
 
@@ -488,6 +563,9 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
     }
 
     function testSelectorLenInf4AndNot0() public {
+        address alice = makeAddr("alice");
+        vm.startPrank(alice);
+
         // Create a list of whitelisted calls
         WhitelistedCall[] memory whitelistedCalls = new WhitelistedCall[](1);
 
@@ -505,7 +583,8 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         whitelistedCalls[0].selectorAndChecker[0] =
             SelectorAndChecker({selector: bytes4(selector), paramsValidator: NO_PARAMS_CHECKS_ADDRESS});
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
+        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        uint256 nonce = validator.nextNonce();
 
         Op memory op = Op({
             base: BaseOp({
@@ -513,7 +592,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
                 value: 0,
                 data: hex"0123" // selector len < 4 bytes
             }),
-            validationData: ""
+            validationData: abi.encodePacked(nonce)
         });
 
         bytes32 message = validator.messageFromOp(op);
@@ -523,7 +602,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         bytes memory signatures = multiSign(opSigners, message);
 
-        op.validationData = signatures;
+        op.validationData = abi.encodePacked(nonce, signatures);
 
         vm.expectRevert(abi.encodeWithSelector(GenericMusigOpValidator.DataFieldTooShort.selector));
 
@@ -531,6 +610,9 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
     }
 
     function testValidCallWithArgs() public {
+        address alice = makeAddr("alice");
+        vm.startPrank(alice);
+
         // Create a list of whitelisted calls
         WhitelistedCall[] memory whitelistedCalls = new WhitelistedCall[](1);
 
@@ -548,7 +630,9 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         whitelistedCalls[0].selectorAndChecker[0] =
             SelectorAndChecker({selector: bytes4(selector), paramsValidator: NO_PARAMS_CHECKS_ADDRESS});
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls);
+        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        uint256 nonce = validator.nextNonce();
+
         // op to counter.increment() fct
         Op memory op = Op({
             base: BaseOp({
@@ -556,7 +640,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
                 value: 0,
                 data: abi.encodeWithSelector(counter.incrementWithAmount.selector, 2)
             }),
-            validationData: ""
+            validationData: abi.encodePacked(nonce)
         });
         bytes32 message = validator.messageFromOp(op);
         uint256[] memory opSigners = new uint256[](2);
@@ -565,9 +649,123 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         bytes memory signatures = multiSign(opSigners, message);
 
-        op.validationData = signatures;
+        op.validationData = abi.encodePacked(nonce, signatures);
 
         // Validate the operation
         assertEq(true, validator.validateOp(op));
+    }
+
+    function testNonceIncrementBetweenCalls() public {
+        address alice = makeAddr("alice");
+
+        vm.startPrank(alice);
+        // Create a list of whitelisted calls
+        WhitelistedCall[] memory whitelistedCalls = new WhitelistedCall[](1);
+
+        // allow native transfer to alice's address and call functions
+        whitelistedCalls[0] = WhitelistedCall({
+            target: address(counter),
+            maxAllowance: 0,
+            permissions: bytes1(CALL_FUNCTIONS),
+            selectorAndChecker: new SelectorAndChecker[](1)
+        });
+
+        bytes memory selector = abi.encodeWithSelector(counter.increment.selector);
+
+        // allow increment() function
+        whitelistedCalls[0].selectorAndChecker[0] =
+            SelectorAndChecker({selector: bytes4(selector), paramsValidator: NO_PARAMS_CHECKS_ADDRESS});
+
+        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        uint256 nonce = validator.nextNonce();
+
+        Op memory op = Op({
+            base: BaseOp({target: address(counter), value: 0, data: selector}),
+            validationData: abi.encodePacked(nonce)
+        });
+        bytes32 message = validator.messageFromOp(op);
+        uint256[] memory opSigners = new uint256[](2);
+        opSigners[0] = signer1;
+        opSigners[1] = signer2;
+
+        bytes memory signatures = multiSign(opSigners, message);
+
+        op.validationData = abi.encodePacked(nonce, signatures);
+
+        // Validate the operation
+        assertEq(true, validator.validateOp(op));
+
+        // check that the nonce is incremented
+        assertEq(validator.nextNonce(), nonce + 1);
+
+        vm.stopPrank();
+    }
+
+    function testSettingVaultTwice() public {
+        address alice = makeAddr("alice");
+        vm.startPrank(alice);
+
+        // Create a list of whitelisted calls
+        WhitelistedCall[] memory whitelistedCalls = new WhitelistedCall[](1);
+
+        // allow native transfer to alice's address and call functions
+        whitelistedCalls[0] = WhitelistedCall({
+            target: makeAddr("alice"),
+            maxAllowance: 1 ether,
+            permissions: bytes1(SEND_ETH),
+            selectorAndChecker: new SelectorAndChecker[](0)
+        });
+
+        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+
+        bytes32 message =
+            keccak256(abi.encodePacked("GenericMusigOpValidator_SET_VAULT", alice)).toEthSignedMessageHash();
+
+        uint256[] memory opSigners = new uint256[](2);
+        opSigners[0] = signer1;
+        opSigners[1] = signer2;
+
+        bytes memory signatures = multiSign(opSigners, message);
+
+        vm.expectRevert(abi.encodeWithSelector(GenericMusigOpValidator.VaultAlreadySet.selector));
+
+        validator.setVault(alice, signatures);
+    }
+
+    function testCallValidateOpAsNotVault() public {
+        address alice = makeAddr("alice");
+
+        // Create a list of whitelisted calls
+        WhitelistedCall[] memory whitelistedCalls = new WhitelistedCall[](1);
+
+        // allow native transfer to alice's address and call functions
+        whitelistedCalls[0] = WhitelistedCall({
+            target: makeAddr("alice"),
+            maxAllowance: 1 ether,
+            permissions: bytes1(SEND_ETH),
+            selectorAndChecker: new SelectorAndChecker[](0)
+        });
+
+        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+
+        bytes32 message =
+            keccak256(abi.encodePacked("GenericMusigOpValidator_SET_VAULT", alice)).toEthSignedMessageHash();
+
+        uint256[] memory opSigners = new uint256[](2);
+        opSigners[0] = signer1;
+        opSigners[1] = signer2;
+
+        bytes memory signatures = multiSign(opSigners, message);
+
+        address bob = makeAddr("bob"); // Not the vault
+        vm.startPrank(bob);
+
+        vm.expectRevert(abi.encodeWithSelector(GenericMusigOpValidator.NotVault.selector));
+
+        validator.validateOp(
+            Op({base: BaseOp({target: address(counter), value: 0, data: ""}), validationData: signatures})
+        );
+
+        vm.stopPrank();
     }
 }

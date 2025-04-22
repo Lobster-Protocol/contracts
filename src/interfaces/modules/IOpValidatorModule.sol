@@ -43,6 +43,9 @@ struct Signers {
     uint256 weight;
 }
 
+/// @notice Interface for OpValidator modules
+/// @dev This interface defines the functions that must be implemented by any OpValidator module.
+/// The validateOp & validateBatchedOp MUST protect against replay attacks (by implementing a nonce check for instance).
 interface IOpValidatorModule {
     function validateOp(Op calldata op) external returns (bool);
 

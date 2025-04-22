@@ -12,16 +12,22 @@ import {
 import {IParameterValidator} from "../../interfaces/modules/IParameterValidator.sol";
 import {NO_PARAMS_CHECKS_ADDRESS, SEND_ETH, CALL_FUNCTIONS} from "./constants.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import {console} from "forge-std/console.sol";
+
+uint256 constant NONCE_OFFSET = 32; // Offset for the nonce in the validation data
 
 contract GenericMusigOpValidator is IOpValidatorModule {
+    // todo: support eip-712 signatures & message signing that are not vault transactions
     using MessageHashUtils for bytes32;
+
+    address public vault;
 
     /* -------------MUSIG VARIABLES------------- */
     // Sum of all the signer's weight
     uint256 public totalWeight = 0;
     // Sum of all signer's weight needed to
     uint256 public quorum = 0;
+    // Nonce for the next operation
+    uint256 public nextNonce = 0;
 
     // Mapping to store the signers and their weight in the musig
     mapping(address => uint256) public signers;
@@ -59,6 +65,18 @@ contract GenericMusigOpValidator is IOpValidatorModule {
     error QuorumNotMet(uint256 totalSigWeight, uint256 quorum);
     error EmptyOperation();
     error DataFieldTooShort();
+    error InvalidNonce(uint256 nonce, uint256 nextNonce);
+    error NotVault();
+    error VaultNotInitialized();
+    error VaultAlreadySet();
+
+    modifier onlyVault() {
+        if (msg.sender != vault) {
+            if (vault == address(0)) revert VaultNotInitialized();
+            revert NotVault();
+        }
+        _;
+    }
 
     constructor(WhitelistedCall[] memory whitelist, Signers[] memory signers_, uint256 quorum_) {
         if (whitelist.length == 0 || signers_.length == 0) {
@@ -90,20 +108,42 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         }
     }
 
-    function validateOp(Op calldata op) public view returns (bool) {
+    function validateOp(Op calldata op) public onlyVault returns (bool result) {
+        result = validateOpView(op);
+        // Increment the nonce after the operation is validated
+        nextNonce++;
+    }
+
+    // same as validateOp but does not increment the nonce (used to preview op verification)
+    function validateOpView(Op calldata op) public view returns (bool result) {
+        // Ensure nonce validity
+        checkNonce(uint256(bytes32(op.validationData[:NONCE_OFFSET])));
+
         bytes32 message = messageFromOp(op);
 
-        if (!isValidSignature(message, op.validationData)) {
+        if (!isValidSignature(message, op.validationData[NONCE_OFFSET:])) {
             revert InvalidSignature();
         }
 
-        return _validateBaseOp(op.base);
+        result = _validateBaseOp(op.base);
     }
 
-    function validateBatchedOp(BatchOp calldata batch) external view returns (bool) {
+    function validateBatchedOp(BatchOp calldata batch) external onlyVault returns (bool result) {
+        result = validateBatchedOpView(batch);
+        // Increment the nonce after all operations are validated
+        nextNonce++;
+
+        return true;
+    }
+
+    // same as validateBatchedOp but does not increment the nonce (used to preview op verification)
+    function validateBatchedOpView(BatchOp calldata batch) public view returns (bool) {
+        // Ensure nonce validity
+        checkNonce(uint256(bytes32(batch.validationData[:NONCE_OFFSET])));
+
         bytes32 message = messageFromOps(batch.ops);
 
-        if (!isValidSignature(message, batch.validationData)) {
+        if (!isValidSignature(message, batch.validationData[NONCE_OFFSET:])) {
             revert InvalidSignature();
         }
 
@@ -272,7 +312,33 @@ contract GenericMusigOpValidator is IOpValidatorModule {
     }
 
     function messageFromOp(Op calldata op) public view returns (bytes32) {
-        return keccak256(abi.encodePacked(block.chainid, msg.sender, op.base.target, op.base.value, op.base.data))
-            .toEthSignedMessageHash();
+        return keccak256(
+            abi.encodePacked(
+                block.chainid, msg.sender, bytes32(op.validationData[:32]), op.base.target, op.base.value, op.base.data
+            )
+        ).toEthSignedMessageHash(); // nonce
+    }
+
+    function checkNonce(uint256 nonce) internal view {
+        if (nonce != nextNonce) {
+            revert InvalidNonce(nonce, nextNonce);
+        }
+    }
+
+    // Set vault using a signed message from the signers
+    function setVault(address _vault, bytes calldata signatures) external {
+        require(vault == address(0), VaultAlreadySet());
+        require(_vault != address(0), ZeroAddress());
+
+        // Create a message hash for signers to sign
+        bytes32 messageHash =
+            keccak256(abi.encodePacked("GenericMusigOpValidator_SET_VAULT", _vault)).toEthSignedMessageHash();
+
+        // Verify the signatures meet the quorum
+        if (!isValidSignature(messageHash, signatures)) {
+            revert InvalidSignature();
+        }
+
+        vault = _vault;
     }
 }
