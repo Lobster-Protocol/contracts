@@ -8,8 +8,11 @@ import {
 } from "../../../src/interfaces/modules/IOpValidatorModule.sol";
 import {SEND_ETH, CALL_FUNCTIONS, NO_PARAMS_CHECKS_ADDRESS} from "../../../src/Modules/OpValidators/constants.sol";
 import {Counter} from "../../Mocks/Counter.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 contract GenericMusigOpValidatorTestSetup is Test {
+    using MessageHashUtils for bytes32;
+
     Counter public counter;
 
     // anvil private keys
@@ -30,7 +33,13 @@ contract GenericMusigOpValidatorTestSetup is Test {
         signers[2] = Signers({signer: vm.addr(signer3), weight: 2});
     }
 
-    function setupValidator(WhitelistedCall[] memory whitelistedCalls) public returns (GenericMusigOpValidator) {
+    function setupValidator(
+        WhitelistedCall[] memory whitelistedCalls,
+        address vault
+    )
+        public
+        returns (GenericMusigOpValidator)
+    {
         // allow transfer of erc20 to bob's address
         SelectorAndChecker[] memory selectorAndChecker = new SelectorAndChecker[](1);
         selectorAndChecker[0] =
@@ -38,6 +47,17 @@ contract GenericMusigOpValidatorTestSetup is Test {
 
         // Deploy the GenericMusigOpValidator contract
         GenericMusigOpValidator validator = new GenericMusigOpValidator(whitelistedCalls, signers, 2);
+
+        // Set the vault address
+        bytes32 message =
+            keccak256(abi.encodePacked("GenericMusigOpValidator_SET_VAULT", vault)).toEthSignedMessageHash();
+        uint256[] memory privateKeys = new uint256[](3);
+        privateKeys[0] = signer1;
+        privateKeys[1] = signer2;
+        privateKeys[2] = signer3;
+        bytes memory signatures = multiSign(privateKeys, message);
+
+        validator.setVault(vault, signatures);
 
         return validator;
     }
