@@ -1,14 +1,7 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
-import {
-    BaseOp,
-    Op,
-    BatchOp,
-    IOpValidatorModule,
-    WhitelistedCall,
-    Signers
-} from "../../interfaces/modules/IOpValidatorModule.sol";
+import {BaseOp, Op, BatchOp, IOpValidatorModule, WhitelistedCall, Signers} from "../../interfaces/modules/IOpValidatorModule.sol";
 import {IParameterValidator} from "../../interfaces/modules/IParameterValidator.sol";
 import {NO_PARAMS_CHECKS_ADDRESS, SEND_ETH, CALL_FUNCTIONS} from "./constants.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
@@ -18,6 +11,8 @@ uint256 constant NONCE_OFFSET = 32; // Offset for the nonce in the validation da
 contract GenericMusigOpValidator is IOpValidatorModule {
     // todo: support eip-712 signatures & message signing that are not vault transactions
     using MessageHashUtils for bytes32;
+
+    address public vault;
 
     /* -------------MUSIG VARIABLES------------- */
     // Sum of all the signer's weight
@@ -64,8 +59,18 @@ contract GenericMusigOpValidator is IOpValidatorModule {
     error EmptyOperation();
     error DataFieldTooShort();
     error InvalidNonce(uint256 nonce, uint256 nextNonce);
+    error NotVault();
 
-    constructor(WhitelistedCall[] memory whitelist, Signers[] memory signers_, uint256 quorum_) {
+    modifier onlyVault() {
+        if (msg.sender != vault) revert NotVault();
+        _;
+    }
+
+    constructor(
+        WhitelistedCall[] memory whitelist,
+        Signers[] memory signers_,
+        uint256 quorum_
+    ) {
         if (whitelist.length == 0 || signers_.length == 0) {
             revert EmptyWhitelistOrSigners();
         }
@@ -95,7 +100,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         }
     }
 
-    function validateOp(Op calldata op) public returns (bool result) {
+    function validateOp(Op calldata op) public onlyVault returns (bool result) {
         result = validateOpView(op);
         // Increment the nonce after the operation is validated
         nextNonce++;
@@ -115,7 +120,9 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         result = _validateBaseOp(op.base);
     }
 
-    function validateBatchedOp(BatchOp calldata batch) external returns (bool result) {
+    function validateBatchedOp(
+        BatchOp calldata batch
+    ) external onlyVault returns (bool result) {
         result = validateBatchedOpView(batch);
         // Increment the nonce after all operations are validated
         nextNonce++;
@@ -124,7 +131,9 @@ contract GenericMusigOpValidator is IOpValidatorModule {
     }
 
     // same as validateBatchedOp but does not increment the nonce (used to preview op verification)
-    function validateBatchedOpView(BatchOp calldata batch) public view returns (bool) {
+    function validateBatchedOpView(
+        BatchOp calldata batch
+    ) public view returns (bool) {
         // Ensure nonce validity
         checkNonce(uint256(bytes32(batch.validationData[:NONCE_OFFSET])));
 
@@ -148,7 +157,10 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         if (call.permissions == 0) revert InvalidPermissions();
 
         // if call is allowed, ensure there is at least 1 selector allowed
-        if ((call.permissions & bytes1(CALL_FUNCTIONS)) != 0 && call.selectorAndChecker.length == 0) {
+        if (
+            (call.permissions & bytes1(CALL_FUNCTIONS)) != 0 &&
+            call.selectorAndChecker.length == 0
+        ) {
             revert InvalidPermissions();
         }
 
@@ -160,7 +172,9 @@ contract GenericMusigOpValidator is IOpValidatorModule {
 
         for (uint256 i = 0; i < call.selectorAndChecker.length; i++) {
             bytes4 selector = call.selectorAndChecker[i].selector;
-            address paramsValidator = call.selectorAndChecker[i].paramsValidator;
+            address paramsValidator = call
+                .selectorAndChecker[i]
+                .paramsValidator;
 
             if (paramsValidator == address(0)) {
                 revert ZeroAddress();
@@ -172,7 +186,10 @@ contract GenericMusigOpValidator is IOpValidatorModule {
     }
 
     // todo: use bls signatures for better gas efficiency
-    function isValidSignature(bytes32 message, bytes memory signatures) public view returns (bool) {
+    function isValidSignature(
+        bytes32 message,
+        bytes memory signatures
+    ) public view returns (bool) {
         uint256 allSignaturesLen = signatures.length;
 
         // ensure the data length is correct
@@ -252,7 +269,10 @@ contract GenericMusigOpValidator is IOpValidatorModule {
             revert EmptyOperation();
         }
 
-        if ((value > 0 && (authorization & SEND_ETH) == 0) || (value > maxAllowance[target])) {
+        if (
+            (value > 0 && (authorization & SEND_ETH) == 0) ||
+            (value > maxAllowance[target])
+        ) {
             revert ExceedsAllowance(maxAllowance[target], value);
         }
 
@@ -273,7 +293,9 @@ contract GenericMusigOpValidator is IOpValidatorModule {
             if (paramsValidator != NO_PARAMS_CHECKS_ADDRESS && dataLen > 4) {
                 bytes memory data = op.data[4:];
                 // Validate parameters
-                IParameterValidator validator = IParameterValidator(paramsValidator);
+                IParameterValidator validator = IParameterValidator(
+                    paramsValidator
+                );
                 if (!validator.validateParameters(data)) {
                     revert ParameterValidationFailed();
                 }
@@ -283,7 +305,9 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         return true;
     }
 
-    function messageFromOps(BaseOp[] calldata ops) public view returns (bytes32) {
+    function messageFromOps(
+        BaseOp[] calldata ops
+    ) public view returns (bytes32) {
         bytes memory combinedData = new bytes(0);
 
         // add the chainId and msg.sender to the combinedData
@@ -291,7 +315,10 @@ contract GenericMusigOpValidator is IOpValidatorModule {
 
         // Concatenate the encoding of each operation
         for (uint256 i = 0; i < ops.length; i++) {
-            combinedData = abi.encodePacked(combinedData, abi.encodePacked(ops[i].target, ops[i].value, ops[i].data));
+            combinedData = abi.encodePacked(
+                combinedData,
+                abi.encodePacked(ops[i].target, ops[i].value, ops[i].data)
+            );
         }
 
         // Create the hash in the Ethereum format
@@ -299,22 +326,40 @@ contract GenericMusigOpValidator is IOpValidatorModule {
     }
 
     function messageFromOp(Op calldata op) public view returns (bytes32) {
-        return keccak256(
-            abi.encodePacked(
-                block.chainid,
-                msg.sender,
-                uint256(bytes32(op.validationData[:32])),
-                op.base.target,
-                op.base.value,
-                op.base.data
-            )
-        ) // nonce
-            .toEthSignedMessageHash();
+        return
+            keccak256(
+                abi.encodePacked(
+                    block.chainid,
+                    msg.sender,
+                    uint256(bytes32(op.validationData[:32])),
+                    op.base.target,
+                    op.base.value,
+                    op.base.data
+                )
+            ).toEthSignedMessageHash(); // nonce
     }
 
     function checkNonce(uint256 nonce) internal view {
         if (nonce != nextNonce) {
             revert InvalidNonce(nonce, nextNonce);
         }
+    }
+
+    // Set vault using a signed message from the signers
+    function setVault(address _vault, bytes calldata signatures) external {
+        require(vault == address(0), ZeroAddress());
+        require(_vault != address(0), ZeroAddress());
+
+        // Create a message hash for signers to sign
+        bytes32 messageHash = keccak256(
+            abi.encodePacked("GenericMusigOpValidator_SET_VAULT", _vault)
+        ).toEthSignedMessageHash();
+
+        // Verify the signatures meet the quorum
+        if (!isValidSignature(messageHash, signatures)) {
+            revert InvalidSignature();
+        }
+
+        vault = _vault;
     }
 }
