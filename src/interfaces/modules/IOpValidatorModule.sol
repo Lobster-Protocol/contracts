@@ -1,17 +1,22 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
-// For individual operations
-struct Op {
-    address target;
-    uint256 value;
-    bytes data;
-    bytes validationData;
+/// @notice Base operation data shared across all operation types
+struct BaseOp {
+    address target; // Target contract to call
+    uint256 value; // ETH value to send
+    bytes data; // Calldata for the operation
 }
 
-// For batch operations with shared validation data
+/// @notice Complete operation with validation data and nonce
+struct Op {
+    BaseOp base; // Core operation data
+    bytes validationData; // Data for validation
+}
+
+/// @notice For batch operations with shared validation data
 struct BatchOp {
-    Op[] ops; // ops with validationData = 0x
+    BaseOp[] ops;
     bytes validationData;
 }
 

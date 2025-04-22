@@ -2,11 +2,9 @@
 pragma solidity ^0.8.28;
 
 import {IHook} from "../../../src/interfaces/modules/IHook.sol";
-import {Op} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
+import {BaseOp, Op} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
 import {LobsterVault} from "../../../src/Vault/Vault.sol";
-
-bytes4 constant UNAUTHORIZED_PREHOOK = bytes4(0x12345678);
-bytes4 constant UNAUTHORIZED_POSTHOOK = bytes4(0x01234567);
+import {UNAUTHORIZED_PREHOOK, UNAUTHORIZED_POSTHOOK} from "../Counter.sol";
 
 contract DummyHook is IHook {
     bytes32 private constant CONTEXT = keccak256("DummyHook");
@@ -18,24 +16,21 @@ contract DummyHook is IHook {
 
     event Ping();
 
-    function preCheck(Op calldata op, address caller) external pure returns (bytes memory context) {
-        // fail if selector is UNAUTHORIZED
-        if (op.validationData.length == 4 && bytes4(op.validationData[:4]) == UNAUTHORIZED_PREHOOK) revert();
+    function preCheck(BaseOp calldata op, address caller) external pure returns (bytes memory context) {
+        // fail if data is UNAUTHORIZED_PREHOOK
+        if (op.data.length == 4 && bytes4(op.data[:4]) == UNAUTHORIZED_PREHOOK) revert();
 
         return abi.encode(CONTEXT, op, caller);
     }
 
     function postCheck(bytes calldata ctx) external returns (bool success) {
-        (bytes32 context, Op memory op,) = abi.decode(ctx, (bytes32, Op, address));
+        (bytes32 context, BaseOp memory op,) = abi.decode(ctx, (bytes32, BaseOp, address));
 
         if (context != CONTEXT) {
             revert InvalidContext();
         }
 
-        if (
-            op.validationData.length == 4
-                && keccak256(op.validationData) == keccak256(abi.encodePacked(UNAUTHORIZED_POSTHOOK))
-        ) revert();
+        if (op.data.length == 4 && keccak256(op.data) == keccak256(abi.encodePacked(UNAUTHORIZED_POSTHOOK))) revert();
 
         // Increment the postCheckCalls counter for the caller
         postCheckCalls[msg.sender]++; // msg.sender must be the vault
@@ -50,9 +45,7 @@ contract DummyHook is IHook {
     function callVault(LobsterVault vault) external {
         // dummy op
         Op memory op = Op(
-            address(this),
-            0,
-            abi.encodeWithSelector(DummyHook.ping.selector),
+            BaseOp(address(this), 0, abi.encodeWithSelector(DummyHook.ping.selector)),
             "" // no need for validationData, caller is the hook
         );
 

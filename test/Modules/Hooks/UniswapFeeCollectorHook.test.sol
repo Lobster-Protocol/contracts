@@ -5,7 +5,7 @@ import {VaultWithUniswapFeeCollectorHookSetup} from
     "../../Vault/VaultSetups/WithRealModules/VaultWithUniswapFeeCollectorHookSetup.sol";
 import {UniswapFeeCollectorHook, BASIS_POINT_SCALE} from "../../../src/Modules/Hooks/UniswapFeeCollectorHook.sol";
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/IUniswapV3PoolMinimal.sol";
-import {Op} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
+import {BaseOp, Op} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
 import {MockERC20} from "../../Mocks/MockERC20.sol";
 import {DummyUniswapV3PoolMinimal} from "../../Mocks/DummyUniswapV3PoolMinimal.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
@@ -26,13 +26,15 @@ contract UniswapFeeCollectorHookTest is VaultWithUniswapFeeCollectorHookSetup {
 
         // we don't care about the op itself, the preCheck must only check for alice's balance
         Op memory op = Op(
-            address(0), // target
-            0, // value
-            "", // data with selector != uniswapPool.collect selector
+            BaseOp(
+                address(0), // target
+                0, // value
+                "" // data with selector != uniswapPool.collect selector
+            ),
             "" // validation data
         );
 
-        bytes memory ctx = vault.hook().preCheck(op, alice /* We don't care about the sender here */ );
+        bytes memory ctx = vault.hook().preCheck(op.base, alice /* We don't care about the sender here */ );
 
         // expect the context to be empty
         assertEq("", ctx);
@@ -50,15 +52,17 @@ contract UniswapFeeCollectorHookTest is VaultWithUniswapFeeCollectorHookSetup {
 
         // we don't care about the op itself, the preCheck must only check for alice's balance
         Op memory op = Op(
-            address(UniswapFeeCollectorHook(address(vault.hook())).pool()), // target is the pool
-            0, // value
-            abi.encodePacked(IUniswapV3PoolMinimal.collect.selector), // data (right selector)
+            BaseOp(
+                address(UniswapFeeCollectorHook(address(vault.hook())).pool()), // target is the pool
+                0, // value
+                abi.encodePacked(IUniswapV3PoolMinimal.collect.selector) // data (right selector)
+            ),
             "" // validation data
         );
 
         vm.startPrank(alice);
         bytes memory ctx = vault.hook().preCheck(
-            op,
+            op.base,
             address(0) // we don't care about this in this hook
         );
 
@@ -86,15 +90,17 @@ contract UniswapFeeCollectorHookTest is VaultWithUniswapFeeCollectorHookSetup {
         uint128 amount1 = 763 ether;
 
         Op memory collectFeeOp = Op(
-            address(UniswapFeeCollectorHook(address(vault.hook())).pool()),
-            0, // eth value
-            abi.encodeWithSelector(
-                DummyUniswapV3PoolMinimal.collect.selector,
-                address(vault), /* recipient */
-                0, /* tickLower - the dummy pool does not care */
-                0, /* tickUpper - the dummy pool does not care */
-                amount0, /* amount0Requested */
-                amount1 /* amount1Requested */
+            BaseOp(
+                address(UniswapFeeCollectorHook(address(vault.hook())).pool()),
+                0, // eth value
+                abi.encodeWithSelector(
+                    DummyUniswapV3PoolMinimal.collect.selector,
+                    address(vault), /* recipient */
+                    0, /* tickLower - the dummy pool does not care */
+                    0, /* tickUpper - the dummy pool does not care */
+                    amount0, /* amount0Requested */
+                    amount1 /* amount1Requested */
+                )
             ),
             ""
         );
@@ -137,15 +143,17 @@ contract UniswapFeeCollectorHookTest is VaultWithUniswapFeeCollectorHookSetup {
 
         // we don't care about the op itself, the preCheck must only check for alice's balance
         Op memory op = Op(
-            wrongPool, // target is not the right pool
-            0, // value
-            abi.encodePacked(IUniswapV3PoolMinimal.collect.selector), // data (right selector)
+            BaseOp(
+                wrongPool, // target is not the right pool
+                0, // value
+                abi.encodePacked(IUniswapV3PoolMinimal.collect.selector) // data (right selector)
+            ),
             "" // validation data
         );
 
         vm.startPrank(alice);
         bytes memory ctx = vault.hook().preCheck(
-            op,
+            op.base,
             address(0) // we don't care about this in this hook
         );
         vm.stopPrank();
@@ -167,15 +175,17 @@ contract UniswapFeeCollectorHookTest is VaultWithUniswapFeeCollectorHookSetup {
 
         // we don't care about the op itself, the preCheck must only check for alice's balance
         Op memory op = Op(
-            address(UniswapFeeCollectorHook(address(vault.hook())).pool()), // target is the right pool
-            0, // value
-            abi.encodePacked(IUniswapV3PoolMinimal.token0.selector), // data (wrong selector)
+            BaseOp(
+                address(UniswapFeeCollectorHook(address(vault.hook())).pool()), // target is the right pool
+                0, // value
+                abi.encodePacked(IUniswapV3PoolMinimal.token0.selector) // data (wrong selector)
+            ),
             "" // validation data
         );
 
         vm.startPrank(alice);
         bytes memory ctx = vault.hook().preCheck(
-            op,
+            op.base,
             address(0) // we don't care about this in this hook
         );
         vm.stopPrank();

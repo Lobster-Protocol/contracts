@@ -2,7 +2,12 @@
 pragma solidity ^0.8.28;
 
 import {
-    Op, BatchOp, IOpValidatorModule, WhitelistedCall, Signers
+    BaseOp,
+    Op,
+    BatchOp,
+    IOpValidatorModule,
+    WhitelistedCall,
+    Signers
 } from "../../interfaces/modules/IOpValidatorModule.sol";
 import {IParameterValidator} from "../../interfaces/modules/IParameterValidator.sol";
 import {NO_PARAMS_CHECKS_ADDRESS, SEND_ETH, CALL_FUNCTIONS} from "./constants.sol";
@@ -92,7 +97,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
             revert InvalidSignature();
         }
 
-        return _validateOp(op);
+        return _validateBaseOp(op.base);
     }
 
     function validateBatchedOp(BatchOp calldata batch) external view returns (bool) {
@@ -103,7 +108,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         }
 
         for (uint256 i = 0; i < batch.ops.length; i++) {
-            if (!_validateOp(batch.ops[i])) {
+            if (!_validateBaseOp(batch.ops[i])) {
                 return false;
             }
         }
@@ -207,7 +212,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         return true;
     }
 
-    function _validateOp(Op calldata op) internal view returns (bool) {
+    function _validateBaseOp(BaseOp calldata op) internal view returns (bool) {
         address target = op.target;
         uint256 value = op.value;
 
@@ -251,7 +256,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         return true;
     }
 
-    function messageFromOps(Op[] calldata ops) public view returns (bytes32) {
+    function messageFromOps(BaseOp[] calldata ops) public view returns (bytes32) {
         bytes memory combinedData = new bytes(0);
 
         // add the chainId and msg.sender to the combinedData
@@ -267,7 +272,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
     }
 
     function messageFromOp(Op calldata op) public view returns (bytes32) {
-        return keccak256(abi.encodePacked(block.chainid, msg.sender, op.target, op.value, op.data))
+        return keccak256(abi.encodePacked(block.chainid, msg.sender, op.base.target, op.base.value, op.base.data))
             .toEthSignedMessageHash();
     }
 }
