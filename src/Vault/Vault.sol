@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GNU AGPL v3.0
 pragma solidity ^0.8.28;
 
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ERC4626, ERC20} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {ERC4626Fees} from "./ERC4626Fees.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
@@ -34,6 +35,12 @@ contract LobsterVault is Modular, ERC4626Fees {
             _;
             _executingOps = false;
         }
+    }
+
+    modifier OnlyVaultOperations() {
+        require(msg.sender == address(vaultOperations), "Not allowed VaultOperations call");
+
+        _;
     }
 
     // todo: add initial fees
@@ -217,12 +224,12 @@ contract LobsterVault is Modular, ERC4626Fees {
     /* ------------------DEPOSIT & WITHDRAW MODULES------------------ */
     /**
      * Override of ERC4626._deposit
-     * Delegate call to the vaultOperations module
+     * Calls the vaultOperations module
      * If no vaultOperations module is set, use the "default" one (ERC4626._deposit)
      */
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
         if (address(vaultOperations) != address(0)) {
-            (bool success,) = address(vaultOperations).delegatecall(
+            (bool success,) = address(vaultOperations).call(
                 abi.encodeWithSelector(vaultOperations._deposit.selector, caller, receiver, assets, shares)
             );
 
@@ -237,7 +244,7 @@ contract LobsterVault is Modular, ERC4626Fees {
 
     /**
      * Override of ERC4626._withdraw
-     * Delegate call to the vaultOperations module
+     * Calls to the vaultOperations module
      * If no vaultOperations module is set, use the "default" one (ERC4626._withdraw)
      */
     function _withdraw(
@@ -262,5 +269,23 @@ contract LobsterVault is Modular, ERC4626Fees {
 
         // if no module set, backoff to default
         return super._withdraw(caller, receiver, owner, assets, shares);
+    }
+
+    function mintShares(address account, uint256 value) external OnlyVaultOperations {
+        return super._mint(account, value);
+    }
+
+    function burnShares(address account, uint256 value) external OnlyVaultOperations {
+        return super._burn(account, value);
+    }
+
+    function safeTransfer(IERC20 token, address to, uint256 amount) external OnlyVaultOperations {
+        // Use SafeERC20 to transfer tokens safely
+        SafeERC20.safeTransfer(token, to, amount);
+    }
+
+    function safeTransferFrom(IERC20 token, address from, address to, uint256 amount) external OnlyVaultOperations {
+        // Use SafeERC20 to transfer tokens safely
+        SafeERC20.safeTransferFrom(token, from, to, amount);
     }
 }
