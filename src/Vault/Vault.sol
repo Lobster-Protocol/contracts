@@ -39,7 +39,6 @@ contract LobsterVault is Modular, ERC4626Fees {
 
     modifier OnlyVaultOperations() {
         require(msg.sender == address(vaultOperations), "Not allowed VaultOperations call");
-
         _;
     }
 

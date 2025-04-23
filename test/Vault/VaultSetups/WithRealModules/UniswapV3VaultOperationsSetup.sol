@@ -9,18 +9,29 @@ import {IVaultOperations} from "../../../../src/interfaces/modules/IVaultOperati
 import {MockERC20} from "../../../Mocks/MockERC20.sol";
 import {LobsterVault} from "../../../../src/Vault/Vault.sol";
 import {UniswapV3VaultOperations} from "../../../../src/Modules/VaultOperations/UniswapV3.sol";
+import {IUniswapV3PoolMinimal} from "../../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
+import {INonfungiblePositionManager} from "../../../../src/interfaces/uniswapV3/INonfungiblePositionManager.sol";
 
 contract UniswapV3VaultOperationsSetup is VaultTestUtils {
+    IUniswapV3PoolMinimal pool;
+            INonfungiblePositionManager positionManager;
+
+
     function setUp() public {
         owner = makeAddr("owner");
         alice = makeAddr("alice");
         bob = makeAddr("bob");
         feeCollector = makeAddr("feeCollector");
 
+        ///////
+        pool = IUniswapV3PoolMinimal(address(0x2f5e87C9312fa29aed5c179E456625D79015299c)); // arbitrum1 WBTC/WETH pool
+        positionManager = INonfungiblePositionManager(address(0));
+        ///////
+
         // module instantiation
         IHook hook = IHook(address(0));
         IOpValidatorModule opValidator = IOpValidatorModule(address(0));
-        IVaultOperations vaultOperations = new UniswapV3VaultOperations();
+        IVaultOperations vaultOperations = new UniswapV3VaultOperations(pool, positionManager);
         INav navModule = INav(address(0));
 
         // Deploy contracts

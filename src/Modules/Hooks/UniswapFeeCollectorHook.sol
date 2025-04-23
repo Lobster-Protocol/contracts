@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {IHook} from "../../interfaces/modules/IHook.sol";
-import {IUniswapV3PoolMinimal} from "../../interfaces/IUniswapV3PoolMinimal.sol";
+import {IUniswapV3PoolMinimal} from "../../interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {BaseOp, Op} from "../../interfaces/modules/IOpValidatorModule.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";

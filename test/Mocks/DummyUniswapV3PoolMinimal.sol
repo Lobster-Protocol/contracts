@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GNU AGPL v3.0
 pragma solidity ^0.8.28;
 
-import {IUniswapV3PoolMinimal} from "../../src/interfaces/IUniswapV3PoolMinimal.sol";
+import {IUniswapV3PoolMinimal} from "../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {MockERC20} from "./MockERC20.sol";
 
 contract DummyUniswapV3PoolMinimal is IUniswapV3PoolMinimal {
@@ -13,16 +13,20 @@ contract DummyUniswapV3PoolMinimal is IUniswapV3PoolMinimal {
         token1_ = new MockERC20();
     }
 
+    function factory() external pure returns (address) {
+        revert("factory: Not implemented");
+    }
+
     function slot0()
         external
         pure
         returns (
-            uint160, /* sqrtPriceX96 */
-            int24, /* tick */
-            uint16, /* observationIndex */
-            uint16, /* observationCardinality */
-            uint16, /* observationCardinalityNext */
-            uint8, /* feeProtocol */
+            uint160 /* sqrtPriceX96 */,
+            int24 /* tick */,
+            uint16 /* observationIndex */,
+            uint16 /* observationCardinality */,
+            uint16 /* observationCardinalityNext */,
+            uint8 /* feeProtocol */,
             bool /* unlocked */
         )
     {
@@ -39,19 +43,22 @@ contract DummyUniswapV3PoolMinimal is IUniswapV3PoolMinimal {
 
     function collect(
         address recipient,
-        int24, /* tickLower */
-        int24, /* tickUpper */
+        int24 /* tickLower */,
+        int24 /* tickUpper */,
         uint128 amount0Requested,
         uint128 amount1Requested
-    )
-        external
-        returns (uint128 amount0, uint128 amount1)
-    {
+    ) external returns (uint128 amount0, uint128 amount1) {
         amount0 = amount0Requested;
         amount1 = amount1Requested;
 
         // Mint a pseudo random amount of tokens 0 & 1 to the recipient
         token0_.mint(recipient, amount0);
         token1_.mint(recipient, amount1);
+    }
+
+    function observe(
+        uint32[] memory
+    ) external pure returns (int56[] memory, uint160[] memory) {
+        revert("observe not implemented");
     }
 }

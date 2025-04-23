@@ -9,7 +9,7 @@ import {INav} from "../../../../src/interfaces/modules/INav.sol";
 import {IOpValidatorModule} from "../../../../src/interfaces/modules/IOpValidatorModule.sol";
 import {VaultTestUtils} from "../VaultTestUtils.sol";
 import {UniswapFeeCollectorHook} from "../../../../src/Modules/Hooks/UniswapFeeCollectorHook.sol";
-import {IUniswapV3PoolMinimal} from "../../../../src/interfaces/IUniswapV3PoolMinimal.sol";
+import {IUniswapV3PoolMinimal} from "../../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {DummyValidator} from "../../../Mocks/modules/DummyValidator.sol";
 import {IVaultOperations} from "../../../../src/interfaces/modules/IVaultOperations.sol";
 import {DummyUniswapV3PoolMinimal} from "../../../Mocks/DummyUniswapV3PoolMinimal.sol";
