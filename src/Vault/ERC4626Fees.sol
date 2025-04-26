@@ -12,7 +12,7 @@ import {IERC4626FeesEvents, PendingFeeUpdate} from "./ERC4626FeesEvents.sol";
 /**
  * @title ERC4626Fees
  * @author Lobster
- * @dev ERC4626 vault with entry/exit and management fees
+ * @dev ERC4626 vault with entry/exit and management fees and modular functionalities
  * @notice This contract extends the standard ERC4626 with a comprehensive fee system
  * that includes entry fees (charged when depositing), exit fees (charged when withdrawing),
  * and management fees (charged over time based on assets under management).
