@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPLv3
 pragma solidity ^0.8.0;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
@@ -56,31 +56,5 @@ library UniswapV3MathLib {
         amount1 = Math.mulDiv(liq, diff, Q96);
 
         return amount1;
-    }
-
-    // returns the token amount equivalent value in eth
-    function getQuote(address poolAddress, uint256 amount, address wethAddress) internal view returns (uint256) {
-        IUniswapV3PoolMinimal pool = IUniswapV3PoolMinimal(poolAddress);
-
-        // Get current sqrt price and tick
-        (uint160 sqrtPriceX96,,,,,,) = pool.slot0();
-
-        // Calculate the price from sqrtPriceX96
-        // price = (sqrtPriceX96 * sqrtPriceX96) / (2^192)
-        uint256 priceX96Squared = Math.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), Q96);
-
-        // Convert the amount to ETH based on the price
-        // If token is token0, then multiply by price
-        // If token is token1, then divide by price
-        uint256 amountInETH;
-        if (pool.token0() == wethAddress) {
-            // Token we're quoting is token1, divide by price
-            amountInETH = Math.mulDiv(amount, Q96, priceX96Squared);
-        } else {
-            // Token we're quoting is token0, multiply by price
-            amountInETH = Math.mulDiv(amount, priceX96Squared, Q96);
-        }
-
-        return amountInETH;
     }
 }

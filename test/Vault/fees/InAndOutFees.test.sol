@@ -14,7 +14,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
     // todo
     /* -----------------------TEST DEPOSIT / MINT / WITHDRAW / REDEEM----------------------- */
     function testDepositWithFee() public {
-        uint256 fee = 100;
+        uint16 fee = 100;
         setEntryFeeBasisPoint(fee); // 1%
 
         // alice deposit 1000 assets
@@ -44,7 +44,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
     }
 
     function testMintWithFee() public {
-        uint256 fee = 100;
+        uint16 fee = 100;
         setEntryFeeBasisPoint(fee); // 1%
 
         // alice mint 1000 shares
@@ -74,7 +74,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
     }
 
     function testWithdrawWithFee() public {
-        uint256 fee = 100;
+        uint16 fee = 100;
         setExitFeeBasisPoint(fee); // 1%
 
         vm.startPrank(alice);
@@ -111,7 +111,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
     }
 
     function testRedeemWithFee() public {
-        uint256 fee = 100;
+        uint16 fee = 100;
         setExitFeeBasisPoint(fee); // 1%
 
         vm.startPrank(alice);

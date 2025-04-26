@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
-import {IVaultOperations} from "../../../src/interfaces/modules/IVaultOperations.sol";
+import {IVaultFlowModule} from "../../../src/interfaces/modules/IVaultFlowModule.sol";
 import {LobsterVault} from "../../../src/Vault/Vault.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 
@@ -12,7 +12,7 @@ address constant CALL_BURN_SHARES = address(14);
 address constant CALL_SAFE_TRANSFER = address(15);
 address constant CALL_SAFE_TRANSFER_FROM = address(16);
 
-contract DummyVaultOperations is IVaultOperations {
+contract DummyVaultFlow is IVaultFlowModule {
     LobsterVault public vault;
     IERC20 token;
 

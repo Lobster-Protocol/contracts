@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {VaultWithOperationModuleTestSetup} from "../VaultSetups/WithDummyModules/VaultWithOperationModuleTestSetup.sol";
-import {DummyVaultOperations, ACCEPTED_CALLER, PANIC_CALLER} from "../../Mocks/modules/DummyVaultOperations.sol";
+import {DummyVaultFlow, ACCEPTED_CALLER, PANIC_CALLER} from "../../Mocks/modules/DummyVaultFlow.sol";
 import {Modular} from "../../../src/Modules/Modular.sol";
 
 contract InAndOutWithVaultOperationModule is VaultWithOperationModuleTestSetup {
@@ -18,7 +18,7 @@ contract InAndOutWithVaultOperationModule is VaultWithOperationModuleTestSetup {
         vm.expectEmit(true, true, true, true);
 
         // Emit the same event with the expected values
-        emit DummyVaultOperations.DepositHasBeenCalled(ACCEPTED_CALLER, receiver, assets, shares);
+        emit DummyVaultFlow.DepositHasBeenCalled(ACCEPTED_CALLER, receiver, assets, shares);
 
         vault.deposit(assets, receiver);
 
@@ -50,7 +50,7 @@ contract InAndOutWithVaultOperationModule is VaultWithOperationModuleTestSetup {
         vm.expectEmit(true, true, true, true);
 
         // Emit the same event with the expected values
-        emit DummyVaultOperations.DepositHasBeenCalled(ACCEPTED_CALLER, receiver, assets, shares);
+        emit DummyVaultFlow.DepositHasBeenCalled(ACCEPTED_CALLER, receiver, assets, shares);
 
         vault.mint(shares, receiver);
 
@@ -82,7 +82,7 @@ contract InAndOutWithVaultOperationModule is VaultWithOperationModuleTestSetup {
         vm.expectEmit(true, true, true, true);
 
         // Emit the same event with the expected values
-        emit DummyVaultOperations.WithdrawHasBeenCalled(ACCEPTED_CALLER, receiver, ACCEPTED_CALLER, assets, shares);
+        emit DummyVaultFlow.WithdrawHasBeenCalled(ACCEPTED_CALLER, receiver, ACCEPTED_CALLER, assets, shares);
 
         vault.withdraw(assets, receiver, ACCEPTED_CALLER);
 
@@ -100,7 +100,7 @@ contract InAndOutWithVaultOperationModule is VaultWithOperationModuleTestSetup {
         vm.expectEmit(true, true, true, true);
 
         // Emit the same event with the expected values
-        emit DummyVaultOperations.WithdrawHasBeenCalled(ACCEPTED_CALLER, receiver, ACCEPTED_CALLER, assets, shares);
+        emit DummyVaultFlow.WithdrawHasBeenCalled(ACCEPTED_CALLER, receiver, ACCEPTED_CALLER, assets, shares);
 
         vault.withdraw(shares, receiver, ACCEPTED_CALLER);
 
@@ -119,7 +119,7 @@ contract InAndOutWithVaultOperationModule is VaultWithOperationModuleTestSetup {
         vm.expectEmit(true, true, true, true);
 
         // Emit the same event with the expected values
-        emit DummyVaultOperations.WithdrawHasBeenCalled(ACCEPTED_CALLER, receiver, ACCEPTED_CALLER, assets, shares);
+        emit DummyVaultFlow.WithdrawHasBeenCalled(ACCEPTED_CALLER, receiver, ACCEPTED_CALLER, assets, shares);
 
         vault.redeem(shares, receiver, ACCEPTED_CALLER);
 
@@ -137,7 +137,7 @@ contract InAndOutWithVaultOperationModule is VaultWithOperationModuleTestSetup {
         vm.expectEmit(true, true, true, true);
 
         // Emit the same event with the expected values
-        emit DummyVaultOperations.WithdrawHasBeenCalled(ACCEPTED_CALLER, receiver, ACCEPTED_CALLER, assets, shares);
+        emit DummyVaultFlow.WithdrawHasBeenCalled(ACCEPTED_CALLER, receiver, ACCEPTED_CALLER, assets, shares);
 
         vault.redeem(assets, receiver, ACCEPTED_CALLER);
 

@@ -8,24 +8,24 @@ import {
     CALL_BURN_SHARES,
     CALL_SAFE_TRANSFER,
     CALL_SAFE_TRANSFER_FROM
-} from "../Mocks/modules/DummyVaultOperations.sol";
+} from "../Mocks/modules/DummyVaultFlow.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
-import {IVaultOperations} from "../../src/interfaces/modules/IVaultOperations.sol";
-import {DummyVaultOperations} from "../Mocks/modules/DummyVaultOperations.sol";
+import {IVaultFlowModule} from "../../src/interfaces/modules/IVaultFlowModule.sol";
+import {DummyVaultFlow} from "../Mocks/modules/DummyVaultFlow.sol";
 import {MockERC20} from "../Mocks/MockERC20.sol";
 
 contract VaultOperationSpecificFcts is VaultWithOperationModuleTestSetup {
-    function testMintSharesAsVaultOperations() public {
+    function testMintSharesAsVaultFlow() public {
         uint256 initialTotalSharesSupply = vault.totalSupply();
 
         uint256 initialAliceSharesBalance = vault.balanceOf(alice);
         uint256 mintedShares = 1 ether;
         uint256 depositedAssets = vault.convertToAssets(mintedShares);
 
-        IVaultOperations vaultOps = IVaultOperations(address(vault.vaultOperations()));
+        IVaultFlowModule vaultOps = IVaultFlowModule(address(vault.vaultFlow()));
 
         // setup the vault address in operations contract
-        DummyVaultOperations(address(vaultOps)).setVault(address(vault));
+        DummyVaultFlow(address(vaultOps)).setVault(address(vault));
 
         vaultOps._deposit(CALL_MINT_SHARES, alice, depositedAssets, mintedShares);
 
@@ -35,25 +35,25 @@ contract VaultOperationSpecificFcts is VaultWithOperationModuleTestSetup {
         vm.assertEq(vault.totalSupply(), initialTotalSharesSupply + mintedShares);
     }
 
-    function testMintSharesAsNotVaultOperations() public {
+    function testMintSharesAsNotVaultFlow() public {
         vm.startPrank(alice); // not the vault operations contract
         uint256 mintedShares = 1 ether;
 
-        vm.expectRevert("Not allowed VaultOperations call");
+        vm.expectRevert("Not allowed vaultFlow call");
         vault.mintShares(alice, mintedShares);
 
         vm.stopPrank();
     }
 
-    function testBurnSharesAsVaultOperations() public {
+    function testBurnSharesAsVaultFlow() public {
         // mint assets
         uint256 mintedShares = 1 ether;
         uint256 depositedAssets = vault.convertToAssets(mintedShares);
 
-        IVaultOperations vaultOps = IVaultOperations(address(vault.vaultOperations()));
+        IVaultFlowModule vaultOps = IVaultFlowModule(address(vault.vaultFlow()));
 
         // setup the vault address in operations contract
-        DummyVaultOperations(address(vaultOps)).setVault(address(vault));
+        DummyVaultFlow(address(vaultOps)).setVault(address(vault));
 
         vaultOps._deposit(CALL_MINT_SHARES, alice, depositedAssets, mintedShares);
 
@@ -72,27 +72,27 @@ contract VaultOperationSpecificFcts is VaultWithOperationModuleTestSetup {
         vm.stopPrank();
     }
 
-    function testBurnSharesAsNotVaultOperations() public {
+    function testBurnSharesAsNotVaultFlow() public {
         vm.startPrank(alice); // not the vault operations contract
         uint256 burnedShares = 1 ether;
 
-        vm.expectRevert("Not allowed VaultOperations call");
+        vm.expectRevert("Not allowed vaultFlow call");
         vault.burnShares(alice, burnedShares);
 
         vm.stopPrank();
     }
 
-    function testSafeTransferAsVaultOperations() public {
+    function testSafeTransferAsVaultFlow() public {
         // mint some tokens to the vault
         MockERC20 token = new MockERC20();
         uint256 initialVaultTokens = 100 ether;
         token.mint(address(vault), initialVaultTokens);
 
-        IVaultOperations vaultOps = IVaultOperations(address(vault.vaultOperations()));
+        IVaultFlowModule vaultOps = IVaultFlowModule(address(vault.vaultFlow()));
 
         // setup the vault address in operations contract
-        DummyVaultOperations(address(vaultOps)).setVault(address(vault));
-        DummyVaultOperations(address(vaultOps)).setToken(address(token));
+        DummyVaultFlow(address(vaultOps)).setVault(address(vault));
+        DummyVaultFlow(address(vaultOps)).setToken(address(token));
 
         // transfer tokens from vault to alice
         uint256 initialAliceBalance = token.balanceOf(alice);
@@ -104,7 +104,7 @@ contract VaultOperationSpecificFcts is VaultWithOperationModuleTestSetup {
         vm.assertEq(token.balanceOf(address(vault)), initialVaultTokens - transferAmount);
     }
 
-    function testSafeTransferAsNotVaultOperations() public {
+    function testSafeTransferAsNotVaultFlow() public {
         // mint some tokens to the vault
         MockERC20 token = new MockERC20();
         uint256 initialVaultTokens = 100 ether;
@@ -113,13 +113,13 @@ contract VaultOperationSpecificFcts is VaultWithOperationModuleTestSetup {
         vm.startPrank(alice); // not the vault operations contract
         uint256 transferAmount = 10 ether;
 
-        vm.expectRevert("Not allowed VaultOperations call");
+        vm.expectRevert("Not allowed vaultFlow call");
         vault.safeTransfer(token, alice, transferAmount);
 
         vm.stopPrank();
     }
 
-    function testSafeTransferFromAsVaultOperations() public {
+    function testSafeTransferFromAsVaultFlow() public {
         // mint some tokens to the vault
         MockERC20 token = new MockERC20();
         uint256 initialVaultTokens = 100 ether;
@@ -133,11 +133,11 @@ contract VaultOperationSpecificFcts is VaultWithOperationModuleTestSetup {
         token.approve(address(vault), type(uint256).max);
         vm.stopPrank();
 
-        IVaultOperations vaultOps = IVaultOperations(address(vault.vaultOperations()));
+        IVaultFlowModule vaultOps = IVaultFlowModule(address(vault.vaultFlow()));
 
         // setup the vault address in operations contract
-        DummyVaultOperations(address(vaultOps)).setVault(address(vault));
-        DummyVaultOperations(address(vaultOps)).setToken(address(token));
+        DummyVaultFlow(address(vaultOps)).setVault(address(vault));
+        DummyVaultFlow(address(vaultOps)).setToken(address(token));
 
         // transfer tokens from CALL_SAFE_TRANSFER_FROM to alice
         vm.startPrank(alice);
@@ -162,7 +162,7 @@ contract VaultOperationSpecificFcts is VaultWithOperationModuleTestSetup {
         vm.stopPrank();
     }
 
-    function testSafeTransferFromAsNotVaultOperations() public {
+    function testSafeTransferFromAsNotVaultFlow() public {
         // mint some tokens to the vault
         MockERC20 token = new MockERC20();
         uint256 initialVaultTokens = 100 ether;
@@ -176,7 +176,7 @@ contract VaultOperationSpecificFcts is VaultWithOperationModuleTestSetup {
         vm.startPrank(alice); // not the vault operations contract
         uint256 transferAmount = 10 ether;
 
-        vm.expectRevert("Not allowed VaultOperations call");
+        vm.expectRevert("Not allowed vaultFlow call");
         vault.safeTransferFrom(token, alice, address(vault), transferAmount);
 
         vm.stopPrank();

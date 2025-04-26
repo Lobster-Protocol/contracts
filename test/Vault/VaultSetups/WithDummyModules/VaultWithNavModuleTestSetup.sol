@@ -11,7 +11,7 @@ import {DummyHook} from "../../../Mocks/modules/DummyHook.sol";
 import {DummyValidator} from "../../../Mocks/modules/DummyValidator.sol";
 import {INav} from "../../../../src/interfaces/modules/INav.sol";
 import {DummyNav} from "../../../Mocks/modules/DummyNav.sol";
-import {IVaultOperations} from "../../../../src/interfaces/modules/IVaultOperations.sol";
+import {IVaultFlowModule} from "../../../../src/interfaces/modules/IVaultFlowModule.sol";
 
 // Vault base setup with validator function to be used in other test files
 contract VaultWithNavModuleTestSetup is VaultTestUtils {
@@ -23,7 +23,7 @@ contract VaultWithNavModuleTestSetup is VaultTestUtils {
 
         IHook hook = IHook(address(0));
         IOpValidatorModule opValidator = IOpValidatorModule(address(0));
-        IVaultOperations vaultOperations = IVaultOperations(address(0));
+        IVaultFlowModule vaultOperations = IVaultFlowModule(address(0));
         INav navModule = new DummyNav();
 
         // Deploy contracts
@@ -31,7 +31,7 @@ contract VaultWithNavModuleTestSetup is VaultTestUtils {
         counter = new Counter();
 
         vault = new LobsterVault(
-            owner, asset, "Vault Token", "vTKN", feeCollector, opValidator, hook, navModule, vaultOperations
+            owner, asset, "Vault Token", "vTKN", feeCollector, opValidator, hook, navModule, vaultOperations, 0, 0, 0
         );
 
         // Setup initial state

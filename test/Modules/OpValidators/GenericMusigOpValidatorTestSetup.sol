@@ -3,9 +3,7 @@ pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
 import {GenericMusigOpValidator} from "../../../src/Modules/OpValidators/GenericMusigOpValidator.sol";
-import {
-    WhitelistedCall, SelectorAndChecker, Signers, Op
-} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
+import {WhitelistedCall, SelectorAndChecker, Signer, Op} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
 import {SEND_ETH, CALL_FUNCTIONS, NO_PARAMS_CHECKS_ADDRESS} from "../../../src/Modules/OpValidators/constants.sol";
 import {Counter} from "../../Mocks/Counter.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
@@ -20,17 +18,17 @@ contract GenericMusigOpValidatorTestSetup is Test {
     uint256 public signer2 = 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
     uint256 public signer3 = 0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a;
     uint256 public notValidatorSigner = 0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6;
-    Signers[] private signers;
+    Signer[] private signers;
 
     function setUp() public {
         // Deploy a test contract
         counter = new Counter();
 
         // Create a list of signers
-        signers = new Signers[](3);
-        signers[0] = Signers({signer: vm.addr(signer1), weight: 1});
-        signers[1] = Signers({signer: vm.addr(signer2), weight: 1});
-        signers[2] = Signers({signer: vm.addr(signer3), weight: 2});
+        signers = new Signer[](3);
+        signers[0] = Signer({signer: vm.addr(signer1), weight: 1});
+        signers[1] = Signer({signer: vm.addr(signer2), weight: 1});
+        signers[2] = Signer({signer: vm.addr(signer3), weight: 2});
     }
 
     function setupValidator(

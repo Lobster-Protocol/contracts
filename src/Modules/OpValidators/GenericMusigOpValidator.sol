@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GNUv3
+// SPDX-License-Identifier: GPLv3
 pragma solidity ^0.8.28;
 
 import {
@@ -7,69 +7,129 @@ import {
     BatchOp,
     IOpValidatorModule,
     WhitelistedCall,
-    Signers
+    Signer
 } from "../../interfaces/modules/IOpValidatorModule.sol";
 import {IParameterValidator} from "../../interfaces/modules/IParameterValidator.sol";
 import {NO_PARAMS_CHECKS_ADDRESS, SEND_ETH, CALL_FUNCTIONS} from "./constants.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-uint256 constant NONCE_OFFSET = 32; // Offset for the nonce in the validation data
+// Offset for the nonce in the validation data
+uint256 constant NONCE_OFFSET = 32;
 
+/**
+ * @title GenericMusigOpValidator
+ * @author Lobster
+ * @notice An operation validator module that uses multi-signature (musig) validation with quorum-based approval
+ * @dev This validator implements whitelist-based operation validation with parameter verification
+ *      and multi-signature authorization with customizable signer weights and quorum requirements
+ */
 contract GenericMusigOpValidator is IOpValidatorModule {
     // todo: support eip-712 signatures & message signing that are not vault transactions
     using MessageHashUtils for bytes32;
 
+    /// @notice The vault address this validator is associated with
     address public vault;
 
     /* -------------MUSIG VARIABLES------------- */
-    // Sum of all the signer's weight
+    /// @notice Sum of all signers' weights
     uint256 public totalWeight = 0;
-    // Sum of all signer's weight needed to
+
+    /// @notice Minimum signature weight required to approve operations
     uint256 public quorum = 0;
-    // Nonce for the next operation
+
+    /// @notice Nonce for the next operation (prevents replay attacks)
     uint256 public nextNonce = 0;
 
-    // Mapping to store the signers and their weight in the musig
+    /// @notice Mapping to store the signers and their weight in the musig
     mapping(address => uint256) public signers;
 
     /* -------------CALL WHITELISTS------------- */
-    // Mapping to store whitelisted target addresses
+    /// @notice Mapping to store whitelisted target addresses and their permissions
     mapping(address => bytes1) public whitelistedAddresses;
 
-    // Mapping to store max ETH allowance per target
-    // MAX VALUE SENDABLE TO THE TARGET IN 1 OP. CAN BE CALLED MULTIPLE TIMES
-    // todo: add frequency / 1 time checks
+    /// @notice Mapping to store max ETH allowance per target
+    /// @dev MAX VALUE SENDABLE TO THE TARGET IN 1 OP. CAN BE CALLED MULTIPLE TIMES
+    /// todo: add frequency / 1 time checks
     mapping(address => uint256) public maxAllowance;
 
-    // Mapping to store whitelisted function selectors per target
+    /// @notice Mapping to store whitelisted function selectors per target with their parameter validators
     mapping(address => mapping(bytes4 => address)) public whitelistedSelectors;
 
-    // Events
+    /**
+     * @notice Emitted when a target address is whitelisted
+     * @param target The whitelisted address
+     * @param allowance The maximum ETH value that can be sent to this target
+     */
     event TargetWhitelisted(address indexed target, uint256 allowance);
+
+    /**
+     * @notice Emitted when a target is removed from the whitelist
+     * @param target The removed address
+     */
     event TargetRemoved(address indexed target);
+
+    /**
+     * @notice Emitted when a function selector is whitelisted for a target
+     * @param target The target address
+     * @param selector The function selector
+     */
     event SelectorWhitelisted(address indexed target, bytes4 indexed selector);
+
+    /**
+     * @notice Emitted when a function selector is removed from the whitelist
+     * @param target The target address
+     * @param selector The removed function selector
+     */
     event SelectorRemoved(address indexed target, bytes4 indexed selector);
 
-    // Errors
+    /**
+     * @notice Emitted when signers configuration is updated
+     * @param newQuorum The new quorum value
+     * @param newTotalWeight The new total weight of all signers
+     */
+    event SignersUpdated(uint256 newQuorum, uint256 newTotalWeight);
+
+    /// @notice Thrown when an operation targets a non-whitelisted address
     error TargetNotWhitelisted(address target);
+    /// @notice Thrown when a function selector is not whitelisted for the target
     error SelectorNotWhitelisted(bytes4 selector);
+    /// @notice Thrown when an operation exceeds the maximum allowance for a target
     error ExceedsAllowance(uint256 allowance, uint256 value);
+    /// @notice Thrown when parameter validation fails
     error ParameterValidationFailed();
+    /// @notice Thrown when a signature is invalid
     error InvalidSignature();
+    /// @notice Thrown when a signer is not in the signers list
     error InvalidSigner(address signer);
+    /// @notice Thrown when a zero address is provided where not allowed
     error ZeroAddress();
+    /// @notice Thrown when invalid permissions are set
     error InvalidPermissions();
+    /// @notice Thrown when a signer has an invalid weight
     error InvalidSignerWeight();
+    /// @notice Thrown when the whitelist or signers list is empty
     error EmptyWhitelistOrSigners();
+    /// @notice Thrown when a signer appears multiple times in signatures
     error DuplicateSigner(address signer);
+    /// @notice Thrown when signatures don't meet the required quorum
     error QuorumNotMet(uint256 totalSigWeight, uint256 quorum);
+    /// @notice Thrown when an empty operation is submitted
     error EmptyOperation();
+    /// @notice Thrown when data field is too short to extract a selector
     error DataFieldTooShort();
+    /// @notice Thrown when an incorrect nonce is provided
     error InvalidNonce(uint256 nonce, uint256 nextNonce);
+    /// @notice Thrown when a function is called by an address other than the vault
     error NotVault();
+    /// @notice Thrown when the vault is not initialized
     error VaultNotInitialized();
+    /// @notice Thrown when trying to set the vault after it's already set
     error VaultAlreadySet();
 
+    /**
+     * @notice Restricts function access to the vault address
+     * @dev Reverts if the caller is not the vault or if vault is not set
+     */
     modifier onlyVault() {
         if (msg.sender != vault) {
             if (vault == address(0)) revert VaultNotInitialized();
@@ -78,7 +138,14 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         _;
     }
 
-    constructor(WhitelistedCall[] memory whitelist, Signers[] memory signers_, uint256 quorum_) {
+    /**
+     * @notice Constructs a new GenericMusigOpValidator
+     * @param whitelist Array of whitelisted calls with their targets, permissions, and selectors
+     * @param signers_ Array of signers with their weights
+     * @param quorum_ Minimum signature weight required to approve operations
+     * @dev This sets up the initial whitelist and signer configuration
+     */
+    constructor(WhitelistedCall[] memory whitelist, Signer[] memory signers_, uint256 quorum_) {
         if (whitelist.length == 0 || signers_.length == 0) {
             revert EmptyWhitelistOrSigners();
         }
@@ -108,13 +175,22 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         }
     }
 
+    /**
+     * @dev See {IOpValidatorModule-validateOp}.
+     */
     function validateOp(Op calldata op) public onlyVault returns (bool result) {
         result = validateOpView(op);
         // Increment the nonce after the operation is validated
         nextNonce++;
     }
 
-    // same as validateOp but does not increment the nonce (used to preview op verification)
+    /**
+     * @notice Validates an operation without incrementing the nonce
+     * It is used to preview the operation verification without changing state
+     * @param op The operation to validate
+     * @return result True if the operation is valid
+     * @dev Used to preview operation verification without changing state
+     */
     function validateOpView(Op calldata op) public view returns (bool result) {
         // Ensure nonce validity
         checkNonce(uint256(bytes32(op.validationData[:NONCE_OFFSET])));
@@ -128,6 +204,9 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         result = _validateBaseOp(op.base);
     }
 
+    /**
+     * @dev See {IOpValidatorModule-validateBatchedOp}.
+     */
     function validateBatchedOp(BatchOp calldata batch) external onlyVault returns (bool result) {
         result = validateBatchedOpView(batch);
         // Increment the nonce after all operations are validated
@@ -136,7 +215,13 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         return true;
     }
 
-    // same as validateBatchedOp but does not increment the nonce (used to preview op verification)
+    /**
+     * @notice Validates a batch of operations without incrementing the nonce
+     * It is used to preview the operation verification without changing state
+     * @param batch The batch operation to validate
+     * @return True if all operations in the batch are valid
+     * @dev Used to preview batch operation verification without changing state
+     */
     function validateBatchedOpView(BatchOp calldata batch) public view returns (bool) {
         // Ensure nonce validity
         checkNonce(uint256(bytes32(batch.validationData[:NONCE_OFFSET])));
@@ -155,7 +240,11 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         return true;
     }
 
-    // whitelist a call
+    /**
+     * @notice Whitelists a call configuration
+     * @param call The call configuration to whitelist
+     * @dev Internal function to add a target, its permissions, and selectors to the whitelist
+     */
     function _whitelist(WhitelistedCall memory call) private {
         if (call.target == address(0)) revert ZeroAddress();
         if (call.permissions == 0) revert InvalidPermissions();
@@ -184,7 +273,14 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         }
     }
 
-    // todo: use bls signatures for better gas efficiency
+    /**
+     * @notice Verifies if a set of signatures is valid for a message
+     * @param message The message hash that was signed
+     * @param signatures Concatenated signatures (65 bytes each)
+     * @return True if the signatures are valid and meet the quorum
+     * @dev Verifies each signature, checks signer validity, and calculates total weight
+     * @dev todo: use bls signatures for better gas efficiency
+     */
     function isValidSignature(bytes32 message, bytes memory signatures) public view returns (bool) {
         uint256 allSignaturesLen = signatures.length;
 
@@ -252,6 +348,12 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         return true;
     }
 
+    /**
+     * @notice Validates a base operation
+     * @param op The base operation to validate
+     * @return True if the operation is valid
+     * @dev Checks target whitelist, value allowance, function selector whitelist, and parameters
+     */
     function _validateBaseOp(BaseOp calldata op) internal view returns (bool) {
         address target = op.target;
         uint256 value = op.value;
@@ -296,6 +398,12 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         return true;
     }
 
+    /**
+     * @notice Creates a message hash from an array of base operations
+     * @param ops The array of base operations
+     * @return The Ethereum signed message hash
+     * @dev Used for batch operation signature verification
+     */
     function messageFromOps(BaseOp[] calldata ops) public view returns (bytes32) {
         bytes memory combinedData = new bytes(0);
 
@@ -311,6 +419,12 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         return keccak256(combinedData).toEthSignedMessageHash();
     }
 
+    /**
+     * @notice Creates a message hash from a single operation
+     * @param op The operation
+     * @return The Ethereum signed message hash
+     * @dev Used for operation signature verification
+     */
     function messageFromOp(Op calldata op) public view returns (bytes32) {
         return keccak256(
             abi.encodePacked(
@@ -319,13 +433,23 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         ).toEthSignedMessageHash(); // nonce
     }
 
+    /**
+     * @notice Verifies that the provided nonce matches the expected next nonce
+     * @param nonce The nonce to check
+     * @dev Prevents replay attacks by ensuring operations are processed in order
+     */
     function checkNonce(uint256 nonce) internal view {
         if (nonce != nextNonce) {
             revert InvalidNonce(nonce, nextNonce);
         }
     }
 
-    // Set vault using a signed message from the signers
+    /**
+     * @notice Sets the vault address for this validator
+     * @param _vault The vault address to set
+     * @param signatures Signatures from authorized signers
+     * @dev Can only be called once, requires signatures meeting the quorum
+     */
     function setVault(address _vault, bytes calldata signatures) external {
         require(vault == address(0), VaultAlreadySet());
         require(_vault != address(0), ZeroAddress());
@@ -340,5 +464,54 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         }
 
         vault = _vault;
+    }
+
+    /**
+     * @notice Updates the signers, their weights, and the quorum requirement
+     * @param newSigner new signer or signer to update with weight
+     * @param newQuorum New minimum signature weight required to approve operations
+     * @param signatures Signatures from authorized signers meeting the current quorum
+     * @dev This function allows for updating the multisig configuration with proper authorization
+     * @dev Replaces all existing signers with the new set
+     */
+    function updateSigner(Signer calldata newSigner, uint256 newQuorum, bytes calldata signatures) external {
+        // Verify new configuration is valid
+        if (newQuorum == 0) revert("Quorum cannot be zero");
+
+        // Create a message hash for signers to sign
+        bytes32 messageHash = _hashSignersData(newSigner, newQuorum);
+
+        // Verify the signatures meet the current quorum
+        if (!isValidSignature(messageHash, signatures)) {
+            revert InvalidSignature();
+        }
+
+        uint256 currentSignerWeight = signers[newSigner.signer];
+
+        if (currentSignerWeight == 0) {
+            if (newSigner.weight == 0) revert InvalidSignerWeight();
+            signers[newSigner.signer] = newSigner.weight;
+            totalWeight += newSigner.weight;
+        } else {
+            if (newSigner.weight == 0) {
+                totalWeight -= currentSignerWeight;
+                delete signers[newSigner.signer];
+            } else {
+                totalWeight = totalWeight - currentSignerWeight + newSigner.weight;
+                signers[newSigner.signer] = newSigner.weight;
+            }
+        }
+    }
+
+    /**
+     * @dev Helper function to hash signers data for signature verification
+     * @param signer Array of signers with their weights
+     * @param newQuorum New minimum signature weight required to approve operations
+     * @return Hash of the signers data
+     */
+    function _hashSignersData(Signer calldata signer, uint256 newQuorum) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encodePacked("GenericMusigOpValidator_UPDATE_SIGNERS", signer.signer, signer.weight, newQuorum)
+        ).toEthSignedMessageHash();
     }
 }

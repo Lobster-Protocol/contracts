@@ -29,7 +29,7 @@ contract VaultTestUtils is Test {
     uint256 public entryFeeBasisPoints = 0;
     uint256 public exitFeeBasisPoints = 0;
 
-    function setEntryFeeBasisPoint(uint256 fee) public returns (bool) {
+    function setEntryFeeBasisPoint(uint16 fee) public returns (bool) {
         vm.startPrank(owner);
         vault.setEntryFee(fee);
         // wait for the fee to be activated
@@ -41,7 +41,7 @@ contract VaultTestUtils is Test {
         return true;
     }
 
-    function setExitFeeBasisPoint(uint256 fee) public returns (bool) {
+    function setExitFeeBasisPoint(uint16 fee) public returns (bool) {
         vm.startPrank(owner);
         vault.setExitFee(fee);
         // wait for the fee to be activated
@@ -53,25 +53,13 @@ contract VaultTestUtils is Test {
         return true;
     }
 
-    function setManagementFeeBasisPoint(uint256 fee) public returns (bool) {
+    function setManagementFeeBasisPoint(uint16 fee) public returns (bool) {
         vm.startPrank(owner);
         vault.setManagementFee(fee);
         // wait for the fee to be activated
         vm.warp(block.timestamp + vault.FEE_UPDATE_DELAY());
         // enforce the fee
         vault.enforceNewManagementFee();
-        vm.stopPrank();
-
-        return true;
-    }
-
-    function setPerformanceFeeBasisPoint(uint256 fee) public returns (bool) {
-        vm.startPrank(owner);
-        vault.setPerformanceFee(fee);
-        // wait for the fee to be activated
-        vm.warp(block.timestamp + vault.FEE_UPDATE_DELAY());
-        // enforce the fee
-        vault.enforceNewPerformanceFee();
         vm.stopPrank();
 
         return true;

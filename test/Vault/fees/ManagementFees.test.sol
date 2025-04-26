@@ -13,7 +13,8 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
     // todo
     /* -----------------------TEST MANUAL COLLECTION----------------------- */
     function testCollectFeesAsOwner() public {
-        uint256 fee = 100;
+        uint256 blockTimestamp = block.timestamp;
+        uint16 fee = 100;
         setManagementFeeBasisPoint(fee); // 1%
 
         // alice deposit 1000 assets
@@ -28,7 +29,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         uint256 expectedFee = computeManagementFees(depositAmount, fee, duration);
 
         // wait for 1 year
-        vm.warp(duration);
+        vm.warp(blockTimestamp + duration);
 
         // collect the fees
         vm.startPrank(owner);
@@ -75,7 +76,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         uint256 shares = vault.deposit(depositAmount, alice);
         vm.stopPrank();
 
-        uint256 fee = 100;
+        uint16 fee = 100;
         setManagementFeeBasisPoint(fee); // 1%
 
         uint256 feeInforcementTimestamp = block.timestamp;
@@ -117,7 +118,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         uint256 assets = vault.mint(mintAmount, alice);
         vm.stopPrank();
 
-        uint256 fee = 100;
+        uint16 fee = 100;
         setManagementFeeBasisPoint(fee); // 1%
 
         uint256 feeInforcementTimestamp = block.timestamp;

@@ -49,7 +49,7 @@ contract VaultDepositTest is SimpleVaultTestSetup {
     }
 
     function testPreviewDepositFee() public {
-        uint256 entryFeeBasisPoints = 100; // 1%
+        uint16 entryFeeBasisPoints = 100; // 1%
         setEntryFeeBasisPoint(entryFeeBasisPoints);
 
         // deposit 1000

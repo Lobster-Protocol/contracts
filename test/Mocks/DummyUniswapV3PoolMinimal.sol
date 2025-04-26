@@ -21,12 +21,12 @@ contract DummyUniswapV3PoolMinimal is IUniswapV3PoolMinimal {
         external
         pure
         returns (
-            uint160 /* sqrtPriceX96 */,
-            int24 /* tick */,
-            uint16 /* observationIndex */,
-            uint16 /* observationCardinality */,
-            uint16 /* observationCardinalityNext */,
-            uint8 /* feeProtocol */,
+            uint160, /* sqrtPriceX96 */
+            int24, /* tick */
+            uint16, /* observationIndex */
+            uint16, /* observationCardinality */
+            uint16, /* observationCardinalityNext */
+            uint8, /* feeProtocol */
             bool /* unlocked */
         )
     {
@@ -43,11 +43,14 @@ contract DummyUniswapV3PoolMinimal is IUniswapV3PoolMinimal {
 
     function collect(
         address recipient,
-        int24 /* tickLower */,
-        int24 /* tickUpper */,
+        int24, /* tickLower */
+        int24, /* tickUpper */
         uint128 amount0Requested,
         uint128 amount1Requested
-    ) external returns (uint128 amount0, uint128 amount1) {
+    )
+        external
+        returns (uint128 amount0, uint128 amount1)
+    {
         amount0 = amount0Requested;
         amount1 = amount1Requested;
 
@@ -56,9 +59,7 @@ contract DummyUniswapV3PoolMinimal is IUniswapV3PoolMinimal {
         token1_.mint(recipient, amount1);
     }
 
-    function observe(
-        uint32[] memory
-    ) external pure returns (int56[] memory, uint160[] memory) {
+    function observe(uint32[] memory) external pure returns (int56[] memory, uint160[] memory) {
         revert("observe not implemented");
     }
 }

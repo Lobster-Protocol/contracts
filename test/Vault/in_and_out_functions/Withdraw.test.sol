@@ -33,7 +33,7 @@ contract VaultMintTest is SimpleVaultTestSetup {
     }
 
     function testPreviewWithdrawFee() public {
-        uint256 exitFeeBasisPoints = 100; // 1%
+        uint16 exitFeeBasisPoints = 100; // 1%
         setExitFeeBasisPoint(exitFeeBasisPoints);
 
         // deposit 1000

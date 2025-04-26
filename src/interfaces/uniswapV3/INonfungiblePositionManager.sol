@@ -1,11 +1,12 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPLv3
 pragma solidity ^0.8.0;
 
 /**
  * Uniswap V3 Nonfungible Position Manager interface
- * @dev this is a subset of the full interface. For the full interface, see: https://github.com/Uniswap/v3-periphery/blob/main/contracts/interfaces/INonfungiblePositionManager.sol
+ * @dev this is a subset of the full interface. For the full interface,
+ * see: https://github.com/Uniswap/v3-periphery/blob/main/contracts/interfaces/INonFungiblePositionManager.sol
  */
-interface INonfungiblePositionManager {
+interface INonFungiblePositionManager {
     function balanceOf(address owner) external view returns (uint256);
 
     function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256);
