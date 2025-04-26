@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
-import "forge-std/Test.sol";
 import {GenericMusigOpValidator} from "../../../src/Modules/OpValidators/GenericMusigOpValidator.sol";
 import {
     WhitelistedCall,
     SelectorAndChecker,
-    Signers,
+    Signer,
     BaseOp,
     Op,
     BatchOp
@@ -42,11 +41,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         Op memory op = Op(BaseOp({target: makeAddr("alice"), value: 1 ether, data: ""}), abi.encodePacked(nonce));
 
         bytes32 message = validator.messageFromOp(op);
-        uint256[] memory opSigners = new uint256[](2);
-        opSigners[0] = signer1;
-        opSigners[1] = signer2;
+        uint256[] memory opSigner = new uint256[](2);
+        opSigner[0] = signer1;
+        opSigner[1] = signer2;
 
-        bytes memory signatures = multiSign(opSigners, message);
+        bytes memory signatures = multiSign(opSigner, message);
 
         op.validationData = abi.encodePacked(nonce, signatures);
 
@@ -85,11 +84,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         batchOp.ops[1] = op2;
 
         bytes32 message = validator.messageFromOps(batchOp.ops);
-        uint256[] memory opSigners = new uint256[](2);
-        opSigners[0] = signer1;
-        opSigners[1] = signer2;
+        uint256[] memory opSigner = new uint256[](2);
+        opSigner[0] = signer1;
+        opSigner[1] = signer2;
 
-        bytes memory signatures = multiSign(opSigners, message);
+        bytes memory signatures = multiSign(opSigner, message);
 
         batchOp.validationData = abi.encodePacked(nonce, signatures);
 
@@ -119,11 +118,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message = keccak256("this is a message");
-        uint256[] memory opSigners = new uint256[](2);
-        opSigners[0] = signer1;
-        opSigners[1] = signer2;
+        uint256[] memory opSigner = new uint256[](2);
+        opSigner[0] = signer1;
+        opSigner[1] = signer2;
 
-        bytes memory signatures = multiSign(opSigners, message);
+        bytes memory signatures = multiSign(opSigner, message);
 
         // Ensure the signatures are valid
         assertEq(true, validator.isValidSignature(message, signatures));
@@ -148,10 +147,10 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message = keccak256("this is a message");
-        uint256[] memory opSigners = new uint256[](1);
-        opSigners[0] = signer1;
+        uint256[] memory opSigner = new uint256[](1);
+        opSigner[0] = signer1;
 
-        bytes memory signatures = multiSign(opSigners, message);
+        bytes memory signatures = multiSign(opSigner, message);
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -183,11 +182,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message = keccak256("this is a message");
-        uint256[] memory opSigners = new uint256[](2);
-        opSigners[0] = signer1;
-        opSigners[1] = notValidatorSigner;
+        uint256[] memory opSigner = new uint256[](2);
+        opSigner[0] = signer1;
+        opSigner[1] = notValidatorSigner;
 
-        bytes memory signatures = multiSign(opSigners, message);
+        bytes memory signatures = multiSign(opSigner, message);
 
         vm.expectRevert(
             abi.encodeWithSelector(GenericMusigOpValidator.InvalidSigner.selector, vm.addr(notValidatorSigner))
@@ -216,12 +215,12 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message = keccak256("this is a message");
-        uint256[] memory opSigners = new uint256[](2);
+        uint256[] memory opSigner = new uint256[](2);
         uint256 uniqueSigner = signer1;
-        opSigners[0] = uniqueSigner;
-        opSigners[1] = uniqueSigner;
+        opSigner[0] = uniqueSigner;
+        opSigner[1] = uniqueSigner;
 
-        bytes memory signatures = multiSign(opSigners, message);
+        bytes memory signatures = multiSign(opSigner, message);
 
         vm.expectRevert(abi.encodeWithSelector(GenericMusigOpValidator.DuplicateSigner.selector, vm.addr(uniqueSigner)));
 
@@ -248,11 +247,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message = keccak256("this is a message");
-        uint256[] memory opSigners = new uint256[](2);
-        opSigners[0] = signer1;
-        opSigners[1] = signer2;
+        uint256[] memory opSigner = new uint256[](2);
+        opSigner[0] = signer1;
+        opSigner[1] = signer2;
 
-        bytes memory signatures = multiSign(opSigners, message);
+        bytes memory signatures = multiSign(opSigner, message);
 
         // remove the last byte of the signature
         bytes memory invalidSignatures = new bytes(signatures.length - 1);
@@ -286,11 +285,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message = keccak256("this is a message");
-        uint256[] memory opSigners = new uint256[](2);
-        opSigners[0] = signer1;
-        opSigners[1] = signer2;
+        uint256[] memory opSigner = new uint256[](2);
+        opSigner[0] = signer1;
+        opSigner[1] = signer2;
 
-        bytes memory signatures = multiSign(opSigners, message);
+        bytes memory signatures = multiSign(opSigner, message);
 
         // remove the last byte of the signature
         bytes memory invalidSignatures = new bytes(signatures.length);
@@ -335,11 +334,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         });
 
         bytes32 message = validator.messageFromOp(op);
-        uint256[] memory opSigners = new uint256[](2);
-        opSigners[0] = signer1;
-        opSigners[1] = signer2;
+        uint256[] memory opSigner = new uint256[](2);
+        opSigner[0] = signer1;
+        opSigner[1] = signer2;
 
-        bytes memory signatures = multiSign(opSigners, message);
+        bytes memory signatures = multiSign(opSigner, message);
 
         op.validationData = abi.encodePacked(nonce, signatures);
 
@@ -371,11 +370,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         });
 
         bytes32 message = validator.messageFromOp(op);
-        uint256[] memory opSigners = new uint256[](2);
-        opSigners[0] = signer1;
-        opSigners[1] = signer2;
+        uint256[] memory opSigner = new uint256[](2);
+        opSigner[0] = signer1;
+        opSigner[1] = signer2;
 
-        bytes memory signatures = multiSign(opSigners, message);
+        bytes memory signatures = multiSign(opSigner, message);
 
         // concat nonce & signatures
         op.validationData = abi.encodePacked(nonce, signatures);
@@ -410,11 +409,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             validationData: abi.encodePacked(nonce)
         });
         bytes32 message = validator.messageFromOp(op);
-        uint256[] memory opSigners = new uint256[](2);
-        opSigners[0] = signer1;
-        opSigners[1] = signer2;
+        uint256[] memory opSigner = new uint256[](2);
+        opSigner[0] = signer1;
+        opSigner[1] = signer2;
 
-        bytes memory signatures = multiSign(opSigners, message);
+        bytes memory signatures = multiSign(opSigner, message);
 
         op.validationData = abi.encodePacked(nonce, signatures);
 
@@ -453,11 +452,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             validationData: abi.encodePacked(nonce)
         });
         bytes32 message = validator.messageFromOp(op);
-        uint256[] memory opSigners = new uint256[](2);
-        opSigners[0] = signer1;
-        opSigners[1] = signer2;
+        uint256[] memory opSigner = new uint256[](2);
+        opSigner[0] = signer1;
+        opSigner[1] = signer2;
 
-        bytes memory signatures = multiSign(opSigners, message);
+        bytes memory signatures = multiSign(opSigner, message);
 
         op.validationData = abi.encodePacked(nonce, signatures);
 
@@ -504,11 +503,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             validationData: abi.encodePacked(nonce)
         });
         bytes32 message = validator.messageFromOp(op);
-        uint256[] memory opSigners = new uint256[](2);
-        opSigners[0] = signer1;
-        opSigners[1] = signer2;
+        uint256[] memory opSigner = new uint256[](2);
+        opSigner[0] = signer1;
+        opSigner[1] = signer2;
 
-        bytes memory signatures = multiSign(opSigners, message);
+        bytes memory signatures = multiSign(opSigner, message);
 
         op.validationData = abi.encodePacked(nonce, signatures);
 
@@ -549,11 +548,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         });
 
         bytes32 message = validator.messageFromOp(op);
-        uint256[] memory opSigners = new uint256[](2);
-        opSigners[0] = signer1;
-        opSigners[1] = signer2;
+        uint256[] memory opSigner = new uint256[](2);
+        opSigner[0] = signer1;
+        opSigner[1] = signer2;
 
-        bytes memory signatures = multiSign(opSigners, message);
+        bytes memory signatures = multiSign(opSigner, message);
 
         op.validationData = abi.encodePacked(nonce, signatures);
 
@@ -596,11 +595,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         });
 
         bytes32 message = validator.messageFromOp(op);
-        uint256[] memory opSigners = new uint256[](2);
-        opSigners[0] = signer1;
-        opSigners[1] = signer2;
+        uint256[] memory opSigner = new uint256[](2);
+        opSigner[0] = signer1;
+        opSigner[1] = signer2;
 
-        bytes memory signatures = multiSign(opSigners, message);
+        bytes memory signatures = multiSign(opSigner, message);
 
         op.validationData = abi.encodePacked(nonce, signatures);
 
@@ -643,11 +642,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             validationData: abi.encodePacked(nonce)
         });
         bytes32 message = validator.messageFromOp(op);
-        uint256[] memory opSigners = new uint256[](2);
-        opSigners[0] = signer1;
-        opSigners[1] = signer2;
+        uint256[] memory opSigner = new uint256[](2);
+        opSigner[0] = signer1;
+        opSigner[1] = signer2;
 
-        bytes memory signatures = multiSign(opSigners, message);
+        bytes memory signatures = multiSign(opSigner, message);
 
         op.validationData = abi.encodePacked(nonce, signatures);
 
@@ -684,11 +683,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             validationData: abi.encodePacked(nonce)
         });
         bytes32 message = validator.messageFromOp(op);
-        uint256[] memory opSigners = new uint256[](2);
-        opSigners[0] = signer1;
-        opSigners[1] = signer2;
+        uint256[] memory opSigner = new uint256[](2);
+        opSigner[0] = signer1;
+        opSigner[1] = signer2;
 
-        bytes memory signatures = multiSign(opSigners, message);
+        bytes memory signatures = multiSign(opSigner, message);
 
         op.validationData = abi.encodePacked(nonce, signatures);
 
@@ -721,11 +720,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         bytes32 message =
             keccak256(abi.encodePacked("GenericMusigOpValidator_SET_VAULT", alice)).toEthSignedMessageHash();
 
-        uint256[] memory opSigners = new uint256[](2);
-        opSigners[0] = signer1;
-        opSigners[1] = signer2;
+        uint256[] memory opSigner = new uint256[](2);
+        opSigner[0] = signer1;
+        opSigner[1] = signer2;
 
-        bytes memory signatures = multiSign(opSigners, message);
+        bytes memory signatures = multiSign(opSigner, message);
 
         vm.expectRevert(abi.encodeWithSelector(GenericMusigOpValidator.VaultAlreadySet.selector));
 
@@ -751,11 +750,11 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         bytes32 message =
             keccak256(abi.encodePacked("GenericMusigOpValidator_SET_VAULT", alice)).toEthSignedMessageHash();
 
-        uint256[] memory opSigners = new uint256[](2);
-        opSigners[0] = signer1;
-        opSigners[1] = signer2;
+        uint256[] memory opSigner = new uint256[](2);
+        opSigner[0] = signer1;
+        opSigner[1] = signer2;
 
-        bytes memory signatures = multiSign(opSigners, message);
+        bytes memory signatures = multiSign(opSigner, message);
 
         address bob = makeAddr("bob"); // Not the vault
         vm.startPrank(bob);
@@ -768,4 +767,6 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         vm.stopPrank();
     }
+
+    // todo: test updateSigner fct
 }

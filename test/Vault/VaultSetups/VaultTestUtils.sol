@@ -10,6 +10,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {BASIS_POINT_SCALE, SECONDS_PER_YEAR} from "../../../src/Vault/Constants.sol";
 import {IHook} from "../../../src/interfaces/modules/IHook.sol";
 import {IOpValidatorModule} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
+import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 
 // Vault base setup & utils function to be used in other test files
 contract VaultTestUtils is Test {
@@ -28,38 +29,7 @@ contract VaultTestUtils is Test {
     uint256 public entryFeeBasisPoints = 0;
     uint256 public exitFeeBasisPoints = 0;
 
-    // /* -------------- Helper Functions -------------- */
-    // function getValidRebaseData(
-    //     address vault_,
-    //     uint256 valueOutsideVault,
-    //     uint256 expirationBlock,
-    //     uint256 minEthAmountToRetrieve,
-    //     RebaseType rebaseType,
-    //     bytes memory withdrawOperations
-    // )
-    //     public
-    //     view
-    //     returns (bytes memory)
-    // {
-    //     bytes32 messageToBeSigned = MessageHashUtils.toEthSignedMessageHash(
-    //         keccak256(abi.encode(valueOutsideVault, expirationBlock, withdrawOperations, block.chainid, vault))
-    //     );
-
-    //     // sign the data using the private key of the rebaser
-    //     (uint8 v, bytes32 r, bytes32 s) = vm.sign(lobsterRebaserPrivateKey, messageToBeSigned);
-
-    //     // Concatenate the signature components
-    //     bytes memory signature = abi.encodePacked(r, s, v);
-
-    //     return abi.encodePacked(
-    //         rebaseType == RebaseType.DEPOSIT || rebaseType == RebaseType.MINT ? hex"00" : hex"01",
-    //         minEthAmountToRetrieve,
-    //         vault_,
-    //         abi.encode(valueOutsideVault, expirationBlock, withdrawOperations, signature)
-    //     );
-    // }
-
-    function setEntryFeeBasisPoint(uint256 fee) public returns (bool) {
+    function setEntryFeeBasisPoint(uint16 fee) public returns (bool) {
         vm.startPrank(owner);
         vault.setEntryFee(fee);
         // wait for the fee to be activated
@@ -71,7 +41,7 @@ contract VaultTestUtils is Test {
         return true;
     }
 
-    function setExitFeeBasisPoint(uint256 fee) public returns (bool) {
+    function setExitFeeBasisPoint(uint16 fee) public returns (bool) {
         vm.startPrank(owner);
         vault.setExitFee(fee);
         // wait for the fee to be activated
@@ -83,25 +53,13 @@ contract VaultTestUtils is Test {
         return true;
     }
 
-    function setManagementFeeBasisPoint(uint256 fee) public returns (bool) {
+    function setManagementFeeBasisPoint(uint16 fee) public returns (bool) {
         vm.startPrank(owner);
         vault.setManagementFee(fee);
         // wait for the fee to be activated
         vm.warp(block.timestamp + vault.FEE_UPDATE_DELAY());
         // enforce the fee
         vault.enforceNewManagementFee();
-        vm.stopPrank();
-
-        return true;
-    }
-
-    function setPerformanceFeeBasisPoint(uint256 fee) public returns (bool) {
-        vm.startPrank(owner);
-        vault.setPerformanceFee(fee);
-        // wait for the fee to be activated
-        vm.warp(block.timestamp + vault.FEE_UPDATE_DELAY());
-        // enforce the fee
-        vault.enforceNewPerformanceFee();
         vm.stopPrank();
 
         return true;

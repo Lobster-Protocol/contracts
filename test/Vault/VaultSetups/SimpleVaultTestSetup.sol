@@ -5,7 +5,7 @@ import {LobsterVault} from "../../../src/Vault/Vault.sol";
 import {Counter} from "../../Mocks/Counter.sol";
 import {MockERC20} from "../../Mocks/MockERC20.sol";
 import {IHook} from "../../../src/interfaces/modules/IHook.sol";
-import {IVaultOperations} from "../../../src/interfaces/modules/IVaultOperations.sol";
+import {IVaultFlowModule} from "../../../src/interfaces/modules/IVaultFlowModule.sol";
 import {INav} from "../../../src/interfaces/modules/INav.sol";
 import {IOpValidatorModule} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
 import {VaultTestUtils} from "./VaultTestUtils.sol";
@@ -32,7 +32,10 @@ contract SimpleVaultTestSetup is VaultTestUtils {
             IOpValidatorModule(address(0)),
             IHook(address(0)),
             INav(address(0)),
-            IVaultOperations(address(0))
+            IVaultFlowModule(address(0)),
+            0,
+            0,
+            0
         );
 
         // Setup initial state

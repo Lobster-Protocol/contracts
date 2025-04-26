@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {VaultWithUniswapFeeCollectorHookSetup} from
     "../../Vault/VaultSetups/WithRealModules/VaultWithUniswapFeeCollectorHookSetup.sol";
 import {UniswapFeeCollectorHook, BASIS_POINT_SCALE} from "../../../src/Modules/Hooks/UniswapFeeCollectorHook.sol";
-import {IUniswapV3PoolMinimal} from "../../../src/interfaces/IUniswapV3PoolMinimal.sol";
+import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {BaseOp, Op} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
 import {MockERC20} from "../../Mocks/MockERC20.sol";
 import {DummyUniswapV3PoolMinimal} from "../../Mocks/DummyUniswapV3PoolMinimal.sol";

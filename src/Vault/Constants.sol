@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPLv3
 pragma solidity ^0.8.28;
 
 uint256 constant BASIS_POINT_SCALE = 1e4;

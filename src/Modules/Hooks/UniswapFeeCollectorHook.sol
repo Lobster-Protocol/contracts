@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: GNUv3
+// SPDX-License-Identifier: GPLv3
 pragma solidity ^0.8.28;
 
 import {IHook} from "../../interfaces/modules/IHook.sol";
-import {IUniswapV3PoolMinimal} from "../../interfaces/IUniswapV3PoolMinimal.sol";
+import {IUniswapV3PoolMinimal} from "../../interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {BaseOp, Op} from "../../interfaces/modules/IOpValidatorModule.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -10,6 +10,16 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {LobsterVault} from "../../../src/Vault/Vault.sol";
 
+/**
+ * @title UniswapFeeCollectorHook
+ * @author Lobster
+ * @notice A hook that takes a fee when a vault collects fees from a Uniswap V3 pool
+ * @dev This hook monitors Uniswap collect operations and takes a percentage of
+ *      collected tokens as a performance fee. It is designed to work with the
+ *      LobsterVault system's hook mechanism.
+ */
+
+/// @dev Denominator for basis point calculations (100% = 10,000 basis points)
 uint256 constant BASIS_POINT_SCALE = 10_000;
 
 // Hook used to take a fee when the vault collect its fees from a uniswap pool
@@ -17,20 +27,43 @@ contract UniswapFeeCollectorHook is IHook, Ownable {
     using Math for uint256;
     using SafeERC20 for IERC20;
 
+    /// @notice The Uniswap V3 pool that this hook is monitoring
     IUniswapV3PoolMinimal public pool;
+    /// @notice The token0 of the Uniswap pool
     IERC20 public token0;
+    /// @notice The token1 of the Uniswap pool
     IERC20 public token1;
 
+    /// @notice The address that receives the collected fees
     address public feeReceiver;
 
-    uint256 public feeBasisPoint;
+    /// @notice The fee percentage in basis points (e.g., 300 = 3%)
+    uint16 public feeBasisPoint;
+    /// @notice The pending fee percentage in basis points (e.g., 300 = 3%)
+    uint16 public pendingFeeBasisPoint = 0;
+    uint160 public feeUpdateTimestamp = 0;
+    /// @notice The minimal duration between a fee change and its application
+    uint256 public constant MIN_FEE_CHANGE_DELAY = 2 weeks;
 
+    /**
+     * @notice Emitted when a performance fee is collected
+     * @param receiver The address receiving the fee
+     * @param feeToken0 The amount of token0 collected as fee
+     * @param feeToken1 The amount of token1 collected as fee
+     */
     event UniswapPositionPerformanceFee(address indexed receiver, uint256 indexed feeToken0, uint256 indexed feeToken1);
 
+    /**
+     * @notice Constructs a new UniswapFeeCollectorHook
+     * @param pool_ The Uniswap V3 pool to monitor
+     * @param initialOwner The address that will own this contract
+     * @param initialFee The initial fee percentage in basis points
+     * @param initialFeeReceiver The initial address to receive collected fees
+     */
     constructor(
         IUniswapV3PoolMinimal pool_,
         address initialOwner,
-        uint256 initialFee,
+        uint16 initialFee,
         address initialFeeReceiver
     )
         Ownable(initialOwner)
@@ -42,6 +75,9 @@ contract UniswapFeeCollectorHook is IHook, Ownable {
         feeReceiver = initialFeeReceiver;
     }
 
+    /**
+     * @dev See {IHook-preCheck}.
+     */
     function preCheck(BaseOp calldata op, address) external view returns (bytes memory context) {
         // check if we are collecting fees for the pool
         if (op.target == address(pool) && op.data.length >= 4) {
@@ -57,6 +93,9 @@ contract UniswapFeeCollectorHook is IHook, Ownable {
         return "";
     }
 
+    /**
+     * @dev See {IHook-postCheck}.
+     */
     function postCheck(bytes memory ctx) external returns (bool success) {
         if (ctx.length == 0) return true;
 
@@ -103,5 +142,38 @@ contract UniswapFeeCollectorHook is IHook, Ownable {
         if (feeCollected) {
             emit UniswapPositionPerformanceFee(feeReceiver, token0Fee, token1Fee);
         }
+
+        return true;
+    }
+
+    /**
+     * @notice Sets the fee percentage
+     * @param newFeeBasisPoint The new fee percentage in basis points
+     */
+    function setFeeBasisPoint(uint16 newFeeBasisPoint) external onlyOwner {
+        require(newFeeBasisPoint <= BASIS_POINT_SCALE, "Fee too high");
+        pendingFeeBasisPoint = newFeeBasisPoint;
+        feeUpdateTimestamp = uint160(block.timestamp);
+    }
+
+    /**
+     * @notice Sets the fee receiver address
+     * @param newFeeReceiver The new address to receive collected fees
+     */
+    function setFeeReceiver(address newFeeReceiver) external onlyOwner {
+        require(newFeeReceiver != address(0), "Zero address");
+        feeReceiver = newFeeReceiver;
+    }
+
+    /**
+     * @notice Applies the pending fee change after the delay period
+     */
+    function applyPendingFeeChange() external onlyOwner {
+        require(pendingFeeBasisPoint != 0, "No pending fee change");
+        require(block.timestamp >= feeUpdateTimestamp + MIN_FEE_CHANGE_DELAY, "Delay not passed");
+
+        feeBasisPoint = pendingFeeBasisPoint;
+        pendingFeeBasisPoint = 0;
+        feeUpdateTimestamp = 0;
     }
 }
