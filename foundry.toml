@@ -30,6 +30,5 @@ ignore = ["src/console.sol", "src/console2.sol"]
 
 [profile.remapping]
 "@openzeppelin/contracts/" = "lib/openzeppelin-contracts/contracts/"
-"@uni-v3-core/contracts/" = "lib/v3-core/contracts/"
 "forge-std" = "lib/forge-std/src/"
 
