@@ -57,24 +57,11 @@ contract GenericMusigOpValidator is IOpValidatorModule {
     event TargetWhitelisted(address indexed target, uint256 allowance);
 
     /**
-     * @notice Emitted when a target is removed from the whitelist
-     * @param target The removed address
-     */
-    event TargetRemoved(address indexed target);
-
-    /**
      * @notice Emitted when a function selector is whitelisted for a target
      * @param target The target address
      * @param selector The function selector
      */
     event SelectorWhitelisted(address indexed target, bytes4 indexed selector);
-
-    /**
-     * @notice Emitted when a function selector is removed from the whitelist
-     * @param target The target address
-     * @param selector The removed function selector
-     */
-    event SelectorRemoved(address indexed target, bytes4 indexed selector);
 
     /**
      * @notice Emitted when signers configuration is updated
