@@ -22,6 +22,7 @@ uint256 constant NONCE_OFFSET = 32;
  * @notice An operation validator module that uses multi-signature (musig) validation with quorum-based approval
  * @dev This validator implements whitelist-based operation validation with parameter verification
  *      and multi-signature authorization with customizable signer weights and quorum requirements
+ * @dev Once deployed, it is no longer possible to update the call whitelist but you can still update the signers.
  */
 contract GenericMusigOpValidator is IOpValidatorModule {
     // todo: support eip-712 signatures & message signing that are not vault transactions
