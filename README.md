@@ -59,7 +59,6 @@ git clone https://github.com/Lobster-Protocol/contracts.git
 ```
 cd contracts && forge install
 ```
-
 ```
 # Build the contracts
 forge build
