@@ -5,7 +5,6 @@ import {IOpValidatorModule} from "../interfaces/modules/IOpValidatorModule.sol";
 import {IVaultFlowModule} from "../interfaces/modules/IVaultFlowModule.sol";
 import {IHook} from "../interfaces/modules/IHook.sol";
 import {INav} from "../interfaces/modules/INav.sol";
-import {IVaultFlowModule} from "../../src/interfaces/modules/IVaultFlowModule.sol";
 
 /**
  * @title Modular Base Contract
