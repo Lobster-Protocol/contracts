@@ -357,17 +357,6 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
     /* ================== SHARE VALUE ================== */
 
     /**
-     * @dev Calculate current share value
-     * @return The value of one share in terms of the underlying asset
-     * @notice Returns 0 if there is no supply
-     */
-    function _calculateShareValue() internal view returns (uint256) {
-        uint256 supply = totalSupply();
-        if (supply == 0) return 0;
-        return totalAssets().mulDiv(10 ** decimals(), supply, Math.Rounding.Floor);
-    }
-
-    /**
      * @dev Calculates the fees that should be added to an amount `assets` that does not already include fees
      * @param amount The base amount to calculate fees on
      * @param feeBasisPoints The fee rate in basis points
