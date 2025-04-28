@@ -117,7 +117,7 @@ contract UniswapFeeCollectorHook is IHook, Ownable {
 
             // Setup the vault op to extract the fees
             Op memory collectLobsterFee = Op(
-                BaseOp(address(token0), 0, abi.encodeWithSelector(token0.transfer.selector, feeReceiver, token0Fee)),
+                BaseOp(address(token0), 0, abi.encodeCall(token0.transfer, (feeReceiver, token0Fee))),
                 "" // no need for validation data, msg.sender will be the hook
             );
 
@@ -131,7 +131,7 @@ contract UniswapFeeCollectorHook is IHook, Ownable {
             token1Fee = (token1Balance - oldBalanceToken1).mulDiv(feeBasisPoint, BASIS_POINT_SCALE, Math.Rounding.Floor);
             // Setup the vault op to extract the fees
             Op memory collectLobsterFee = Op(
-                BaseOp(address(token1), 0, abi.encodeWithSelector(token1.transfer.selector, feeReceiver, token1Fee)),
+                BaseOp(address(token1), 0, abi.encodeCall(token1.transfer, (feeReceiver, token1Fee))),
                 "" // no need for validation data, msg.sender will be the hook
             );
 
