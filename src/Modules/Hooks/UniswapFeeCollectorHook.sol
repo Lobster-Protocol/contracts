@@ -17,6 +17,7 @@ import {LobsterVault} from "../../../src/Vault/Vault.sol";
  * @dev This hook monitors Uniswap collect operations and takes a percentage of
  *      collected tokens as a performance fee. It is designed to work with the
  *      LobsterVault system's hook mechanism.
+ * @dev This contract expect msg.sender to be the vault
  */
 
 /// @dev Denominator for basis point calculations (100% = 10,000 basis points)
