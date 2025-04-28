@@ -64,11 +64,18 @@ contract GenericMusigOpValidator is IOpValidatorModule {
     event SelectorWhitelisted(address indexed target, bytes4 indexed selector);
 
     /**
+     * @notice Emitted when a new signer is added to the multisig
+     * @param signer The address of the new signer
+     * @param weight The weight of the new signer
+     */
+    event SignerAdded(address indexed signer, uint256 weight);
+
+    /**
      * @notice Emitted when signers configuration is updated
      * @param newQuorum The new quorum value
      * @param newTotalWeight The new total weight of all signers
      */
-    event SignersUpdated(uint256 newQuorum, uint256 newTotalWeight);
+    event SignersUpdated(address indexed signer, uint256 weight, uint256 newQuorum, uint256 newTotalWeight);
 
     /// @notice Thrown when an operation targets a non-whitelisted address
     error TargetNotWhitelisted(address target);
@@ -152,6 +159,8 @@ contract GenericMusigOpValidator is IOpValidatorModule {
 
             signers[signer] = weight;
             totalWeight += weight;
+
+            emit SignerAdded(signer, weight);
         }
 
         // Set the whitelisted actions
@@ -537,6 +546,13 @@ contract GenericMusigOpValidator is IOpValidatorModule {
                 signers[newSigner.signer] = newSigner.weight;
             }
         }
+
+        emit SignersUpdated(
+            newSigner.signer,
+            newSigner.weight,
+            newQuorum,
+            totalWeight
+        );
     }
 
     /**
