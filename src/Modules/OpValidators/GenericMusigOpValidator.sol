@@ -156,7 +156,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         quorum = quorum_;
 
         // Set the signers and their weights
-        for (uint256 i = 0; i < signersLength; i++) {
+        for (uint256 i = 0; i < signersLength; ++i) {
             address signer = signers_[i].signer;
             uint256 weight = signers_[i].weight;
 
@@ -168,7 +168,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         }
 
         // Set the whitelisted actions
-        for (uint256 i = 0; i < whitelistLength; i++) {
+        for (uint256 i = 0; i < whitelistLength; ++i) {
             WhitelistedCall memory call = whitelist[i];
 
             // whitelist the call
@@ -239,7 +239,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
 
         uint256 batchLength = batch.ops.length;
 
-        for (uint256 i = 0; i < batchLength; i++) {
+        for (uint256 i = 0; i < batchLength; ++i) {
             if (!_validateBaseOp(batch.ops[i])) {
                 return false;
             }
@@ -272,7 +272,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         }
         whitelistedAddresses[call.target] = call.permissions;
 
-        for (uint256 i = 0; i < callSelectorAndCheckerLength; i++) {
+        for (uint256 i = 0; i < callSelectorAndCheckerLength; ++i) {
             bytes4 selector = call.selectorAndChecker[i].selector;
             address paramsValidator = call
                 .selectorAndChecker[i]
@@ -312,7 +312,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         address[] memory signersList = new address[](sigCount);
 
         // Process each signature
-        for (uint256 i = 0; i < sigCount; i++) {
+        for (uint256 i = 0; i < sigCount; ++i) {
             uint256 offset = i * 65;
 
             // Extract r, s, v components
@@ -443,7 +443,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         uint256 opsLength = ops.length;
 
         // Concatenate the encoding of each operation
-        for (uint256 i = 0; i < opsLength; i++) {
+        for (uint256 i = 0; i < opsLength; ++i) {
             combinedData = abi.encodePacked(
                 combinedData,
                 abi.encodePacked(ops[i].target, ops[i].value, ops[i].data)
