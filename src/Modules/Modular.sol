@@ -56,11 +56,6 @@ contract Modular {
     error OpNotApproved();
 
     /**
-     * @notice Thrown when an invalid vault is referenced
-     */
-    error InvalidVault();
-
-    /**
      * @notice Thrown when the deposit module fails to process a deposit
      */
     error DepositModuleFailed();
