@@ -322,6 +322,11 @@ contract GenericMusigOpValidator is IOpValidatorModule {
             // Verify the signature
             address signer = ecrecover(message, v, r, s);
 
+            // Ensure signer is not zero
+            if (signer == address(0)) {
+                revert InvalidSignature();
+            }
+
             uint256 weight = signers[signer];
             if (weight == 0) {
                 revert InvalidSigner(signer);
