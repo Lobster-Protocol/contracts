@@ -1,14 +1,7 @@
 // SPDX-License-Identifier: GPLv3
 pragma solidity ^0.8.28;
 
-import {
-    BaseOp,
-    Op,
-    BatchOp,
-    IOpValidatorModule,
-    WhitelistedCall,
-    Signer
-} from "../../interfaces/modules/IOpValidatorModule.sol";
+import {BaseOp, Op, BatchOp, IOpValidatorModule, WhitelistedCall, Signer} from "../../interfaces/modules/IOpValidatorModule.sol";
 import {IParameterValidator} from "../../interfaces/modules/IParameterValidator.sol";
 import {NO_PARAMS_CHECKS_ADDRESS, SEND_ETH, CALL_FUNCTIONS} from "./constants.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
@@ -146,8 +139,15 @@ contract GenericMusigOpValidator is IOpValidatorModule {
      * @param quorum_ Minimum signature weight required to approve operations
      * @dev This sets up the initial whitelist and signer configuration
      */
-    constructor(WhitelistedCall[] memory whitelist, Signer[] memory signers_, uint256 quorum_) {
-        if (whitelist.length == 0 || signers_.length == 0) {
+    constructor(
+        WhitelistedCall[] memory whitelist,
+        Signer[] memory signers_,
+        uint256 quorum_
+    ) {
+        uint256 whitelistLength = whitelist.length;
+        uint256 signersLength = signers_.length;
+
+        if (whitelistLength == 0 || signersLength == 0) {
             revert EmptyWhitelistOrSigners();
         }
 
@@ -156,7 +156,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         quorum = quorum_;
 
         // Set the signers and their weights
-        for (uint256 i = 0; i < signers_.length; i++) {
+        for (uint256 i = 0; i < signersLength; i++) {
             address signer = signers_[i].signer;
             uint256 weight = signers_[i].weight;
 
@@ -168,7 +168,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         }
 
         // Set the whitelisted actions
-        for (uint256 i = 0; i < whitelist.length; i++) {
+        for (uint256 i = 0; i < whitelistLength; i++) {
             WhitelistedCall memory call = whitelist[i];
 
             // whitelist the call
@@ -208,7 +208,9 @@ contract GenericMusigOpValidator is IOpValidatorModule {
     /**
      * @dev See {IOpValidatorModule-validateBatchedOp}.
      */
-    function validateBatchedOp(BatchOp calldata batch) external onlyVault returns (bool result) {
+    function validateBatchedOp(
+        BatchOp calldata batch
+    ) external onlyVault returns (bool result) {
         result = validateBatchedOpView(batch);
         // Increment the nonce after all operations are validated
         nextNonce++;
@@ -223,7 +225,9 @@ contract GenericMusigOpValidator is IOpValidatorModule {
      * @return True if all operations in the batch are valid
      * @dev Used to preview batch operation verification without changing state
      */
-    function validateBatchedOpView(BatchOp calldata batch) public view returns (bool) {
+    function validateBatchedOpView(
+        BatchOp calldata batch
+    ) public view returns (bool) {
         // Ensure nonce validity
         checkNonce(uint256(bytes32(batch.validationData[:NONCE_OFFSET])));
 
@@ -233,7 +237,9 @@ contract GenericMusigOpValidator is IOpValidatorModule {
             revert InvalidSignature();
         }
 
-        for (uint256 i = 0; i < batch.ops.length; i++) {
+        uint256 batchLength = batch.ops.length;
+
+        for (uint256 i = 0; i < batchLength; i++) {
             if (!_validateBaseOp(batch.ops[i])) {
                 return false;
             }
@@ -250,8 +256,13 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         if (call.target == address(0)) revert ZeroAddress();
         if (call.permissions == 0) revert InvalidPermissions();
 
+        uint256 callSelectorAndCheckerLength = call.selectorAndChecker.length;
+
         // if call is allowed, ensure there is at least 1 selector allowed
-        if ((call.permissions & bytes1(CALL_FUNCTIONS)) != 0 && call.selectorAndChecker.length == 0) {
+        if (
+            (call.permissions & bytes1(CALL_FUNCTIONS)) != 0 &&
+            callSelectorAndCheckerLength == 0
+        ) {
             revert InvalidPermissions();
         }
 
@@ -261,9 +272,11 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         }
         whitelistedAddresses[call.target] = call.permissions;
 
-        for (uint256 i = 0; i < call.selectorAndChecker.length; i++) {
+        for (uint256 i = 0; i < callSelectorAndCheckerLength; i++) {
             bytes4 selector = call.selectorAndChecker[i].selector;
-            address paramsValidator = call.selectorAndChecker[i].paramsValidator;
+            address paramsValidator = call
+                .selectorAndChecker[i]
+                .paramsValidator;
 
             if (paramsValidator == address(0)) {
                 revert ZeroAddress();
@@ -282,16 +295,19 @@ contract GenericMusigOpValidator is IOpValidatorModule {
      * @dev Verifies each signature, checks signer validity, and calculates total weight
      * @dev todo: use bls signatures for better gas efficiency
      */
-    function isValidSignature(bytes32 message, bytes memory signatures) public view returns (bool) {
-        uint256 allSignaturesLen = signatures.length;
+    function isValidSignature(
+        bytes32 message,
+        bytes memory signatures
+    ) public view returns (bool) {
+        uint256 allSignaturesLength = signatures.length;
 
         // ensure the data length is correct
-        if (allSignaturesLen % 65 != 0) {
+        if (allSignaturesLength % 65 != 0) {
             revert InvalidSignature();
         }
 
         // decode the signatures
-        uint256 sigCount = allSignaturesLen / 65;
+        uint256 sigCount = allSignaturesLength / 65;
         uint256 totalSigWeight = 0;
         address[] memory signersList = new address[](sigCount);
 
@@ -334,7 +350,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
             }
 
             // Ensure each signature is from a unique signer
-            for (uint256 j = 0; j < signersList.length; j++) {
+            for (uint256 j = 0; j < sigCount; j++) {
                 if (signersList[j] == signer) {
                     revert DuplicateSigner(signer);
                 }
@@ -368,33 +384,39 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         uint8 authorization = uint8(whitelistedAddresses[target]);
         if (authorization == 0) revert TargetNotWhitelisted(target);
 
+        uint256 dataLength = op.data.length;
+
         // Block empty operations (this is a no-op but can still trigger the fallback leading to unexpected behavior)
-        if (value == 0 && op.data.length == 0) {
+        if (value == 0 && dataLength == 0) {
             revert EmptyOperation();
         }
 
-        if ((value > 0 && (authorization & SEND_ETH) == 0) || (value > maxAllowance[target])) {
+        if (
+            (value > 0 && (authorization & SEND_ETH) == 0) ||
+            (value > maxAllowance[target])
+        ) {
             revert ExceedsAllowance(maxAllowance[target], value);
         }
 
-        uint256 dataLen = op.data.length;
-        if (dataLen > 0 && dataLen < 4) revert DataFieldTooShort();
+        if (dataLength > 0 && dataLength < 4) revert DataFieldTooShort();
 
-        if (dataLen > 0 && (authorization & CALL_FUNCTIONS) == 0) {
+        if (dataLength > 0 && (authorization & CALL_FUNCTIONS) == 0) {
             revert TargetNotWhitelisted(target);
         }
 
         // Ensure function selector is whitelisted
-        if (dataLen >= 4) {
+        if (dataLength >= 4) {
             bytes4 selector = bytes4(op.data[:4]);
             address paramsValidator = whitelistedSelectors[target][selector];
             if (paramsValidator == address(0)) {
                 revert SelectorNotWhitelisted(selector);
             }
-            if (paramsValidator != NO_PARAMS_CHECKS_ADDRESS && dataLen > 4) {
+            if (paramsValidator != NO_PARAMS_CHECKS_ADDRESS && dataLength > 4) {
                 bytes memory data = op.data[4:];
                 // Validate parameters
-                IParameterValidator validator = IParameterValidator(paramsValidator);
+                IParameterValidator validator = IParameterValidator(
+                    paramsValidator
+                );
                 if (!validator.validateParameters(data)) {
                     revert ParameterValidationFailed();
                 }
@@ -410,15 +432,22 @@ contract GenericMusigOpValidator is IOpValidatorModule {
      * @return The Ethereum signed message hash
      * @dev Used for batch operation signature verification
      */
-    function messageFromOps(BaseOp[] calldata ops) public view returns (bytes32) {
+    function messageFromOps(
+        BaseOp[] calldata ops
+    ) public view returns (bytes32) {
         bytes memory combinedData = new bytes(0);
 
         // add the chainId and msg.sender to the combinedData
         combinedData = abi.encodePacked(block.chainid, msg.sender);
 
+        uint256 opsLength = ops.length;
+
         // Concatenate the encoding of each operation
-        for (uint256 i = 0; i < ops.length; i++) {
-            combinedData = abi.encodePacked(combinedData, abi.encodePacked(ops[i].target, ops[i].value, ops[i].data));
+        for (uint256 i = 0; i < opsLength; i++) {
+            combinedData = abi.encodePacked(
+                combinedData,
+                abi.encodePacked(ops[i].target, ops[i].value, ops[i].data)
+            );
         }
 
         // Create the hash in the Ethereum format
@@ -432,11 +461,17 @@ contract GenericMusigOpValidator is IOpValidatorModule {
      * @dev Used for operation signature verification
      */
     function messageFromOp(Op calldata op) public view returns (bytes32) {
-        return keccak256(
-            abi.encodePacked(
-                block.chainid, msg.sender, bytes32(op.validationData[:32]), op.base.target, op.base.value, op.base.data
-            )
-        ).toEthSignedMessageHash(); // nonce
+        return
+            keccak256(
+                abi.encodePacked(
+                    block.chainid,
+                    msg.sender,
+                    bytes32(op.validationData[:32]),
+                    op.base.target,
+                    op.base.value,
+                    op.base.data
+                )
+            ).toEthSignedMessageHash(); // nonce
     }
 
     /**
@@ -461,8 +496,9 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         require(_vault != address(0), ZeroAddress());
 
         // Create a message hash for signers to sign
-        bytes32 messageHash =
-            keccak256(abi.encodePacked("GenericMusigOpValidator_SET_VAULT", _vault)).toEthSignedMessageHash();
+        bytes32 messageHash = keccak256(
+            abi.encodePacked("GenericMusigOpValidator_SET_VAULT", _vault)
+        ).toEthSignedMessageHash();
 
         // Verify the signatures meet the quorum
         if (!isValidSignature(messageHash, signatures)) {
@@ -480,7 +516,11 @@ contract GenericMusigOpValidator is IOpValidatorModule {
      * @dev This function allows for updating the multisig configuration with proper authorization
      * @dev Replaces all existing signers with the new set
      */
-    function updateSigner(Signer calldata newSigner, uint256 newQuorum, bytes calldata signatures) external {
+    function updateSigner(
+        Signer calldata newSigner,
+        uint256 newQuorum,
+        bytes calldata signatures
+    ) external {
         // Verify new configuration is valid
         if (newQuorum == 0) revert("Quorum cannot be zero");
 
@@ -503,7 +543,10 @@ contract GenericMusigOpValidator is IOpValidatorModule {
                 totalWeight -= currentSignerWeight;
                 delete signers[newSigner.signer];
             } else {
-                totalWeight = totalWeight - currentSignerWeight + newSigner.weight;
+                totalWeight =
+                    totalWeight -
+                    currentSignerWeight +
+                    newSigner.weight;
                 signers[newSigner.signer] = newSigner.weight;
             }
         }
@@ -515,9 +558,18 @@ contract GenericMusigOpValidator is IOpValidatorModule {
      * @param newQuorum New minimum signature weight required to approve operations
      * @return Hash of the signers data
      */
-    function _hashSignersData(Signer calldata signer, uint256 newQuorum) internal pure returns (bytes32) {
-        return keccak256(
-            abi.encodePacked("GenericMusigOpValidator_UPDATE_SIGNERS", signer.signer, signer.weight, newQuorum)
-        ).toEthSignedMessageHash();
+    function _hashSignersData(
+        Signer calldata signer,
+        uint256 newQuorum
+    ) internal pure returns (bytes32) {
+        return
+            keccak256(
+                abi.encodePacked(
+                    "GenericMusigOpValidator_UPDATE_SIGNERS",
+                    signer.signer,
+                    signer.weight,
+                    newQuorum
+                )
+            ).toEthSignedMessageHash();
     }
 }

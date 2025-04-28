@@ -61,9 +61,11 @@ contract GenericMusigOpValidatorTestSetup is Test {
     }
 
     function multiSign(uint256[] memory privateKeys, bytes32 message) internal pure returns (bytes memory) {
-        bytes[] memory signatures = new bytes[](privateKeys.length);
+        uint256 privateKeysLength = privateKeys.length;
 
-        for (uint256 j = 0; j < privateKeys.length; j++) {
+        bytes[] memory signatures = new bytes[](privateKeysLength);
+
+        for (uint256 j = 0; j < privateKeysLength; j++) {
             // Sign the message with the private key
             (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKeys[j], message);
 
@@ -72,8 +74,9 @@ contract GenericMusigOpValidatorTestSetup is Test {
         }
 
         // Concatenate the signatures
+        uint256 sigLenth = signatures.length;
         bytes memory concatenatedSignatures;
-        for (uint256 i = 0; i < signatures.length; i++) {
+        for (uint256 i = 0; i < sigLenth; i++) {
             concatenatedSignatures = abi.encodePacked(concatenatedSignatures, signatures[i]);
         }
         return concatenatedSignatures;
