@@ -22,6 +22,7 @@ uint256 constant NONCE_OFFSET = 32;
  * @notice An operation validator module that uses multi-signature (musig) validation with quorum-based approval
  * @dev This validator implements whitelist-based operation validation with parameter verification
  *      and multi-signature authorization with customizable signer weights and quorum requirements
+ * @dev Once deployed, it is no longer possible to update the call whitelist but you can still update the signers.
  */
 contract GenericMusigOpValidator is IOpValidatorModule {
     // todo: support eip-712 signatures & message signing that are not vault transactions
@@ -63,12 +64,6 @@ contract GenericMusigOpValidator is IOpValidatorModule {
     event TargetWhitelisted(address indexed target, uint256 allowance);
 
     /**
-     * @notice Emitted when a target is removed from the whitelist
-     * @param target The removed address
-     */
-    event TargetRemoved(address indexed target);
-
-    /**
      * @notice Emitted when a function selector is whitelisted for a target
      * @param target The target address
      * @param selector The function selector
@@ -76,18 +71,18 @@ contract GenericMusigOpValidator is IOpValidatorModule {
     event SelectorWhitelisted(address indexed target, bytes4 indexed selector);
 
     /**
-     * @notice Emitted when a function selector is removed from the whitelist
-     * @param target The target address
-     * @param selector The removed function selector
+     * @notice Emitted when a new signer is added to the multisig
+     * @param signer The address of the new signer
+     * @param weight The weight of the new signer
      */
-    event SelectorRemoved(address indexed target, bytes4 indexed selector);
+    event SignerAdded(address indexed signer, uint256 weight);
 
     /**
      * @notice Emitted when signers configuration is updated
      * @param newQuorum The new quorum value
      * @param newTotalWeight The new total weight of all signers
      */
-    event SignersUpdated(uint256 newQuorum, uint256 newTotalWeight);
+    event SignersUpdated(address indexed signer, uint256 weight, uint256 newQuorum, uint256 newTotalWeight);
 
     /// @notice Thrown when an operation targets a non-whitelisted address
     error TargetNotWhitelisted(address target);
@@ -146,7 +141,10 @@ contract GenericMusigOpValidator is IOpValidatorModule {
      * @dev This sets up the initial whitelist and signer configuration
      */
     constructor(WhitelistedCall[] memory whitelist, Signer[] memory signers_, uint256 quorum_) {
-        if (whitelist.length == 0 || signers_.length == 0) {
+        uint256 whitelistLength = whitelist.length;
+        uint256 signersLength = signers_.length;
+
+        if (whitelistLength == 0 || signersLength == 0) {
             revert EmptyWhitelistOrSigners();
         }
 
@@ -155,7 +153,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         quorum = quorum_;
 
         // Set the signers and their weights
-        for (uint256 i = 0; i < signers_.length; i++) {
+        for (uint256 i = 0; i < signersLength; ++i) {
             address signer = signers_[i].signer;
             uint256 weight = signers_[i].weight;
 
@@ -164,10 +162,12 @@ contract GenericMusigOpValidator is IOpValidatorModule {
 
             signers[signer] = weight;
             totalWeight += weight;
+
+            emit SignerAdded(signer, weight);
         }
 
         // Set the whitelisted actions
-        for (uint256 i = 0; i < whitelist.length; i++) {
+        for (uint256 i = 0; i < whitelistLength; ++i) {
             WhitelistedCall memory call = whitelist[i];
 
             // whitelist the call
@@ -232,7 +232,9 @@ contract GenericMusigOpValidator is IOpValidatorModule {
             revert InvalidSignature();
         }
 
-        for (uint256 i = 0; i < batch.ops.length; i++) {
+        uint256 batchLength = batch.ops.length;
+
+        for (uint256 i = 0; i < batchLength; ++i) {
             if (!_validateBaseOp(batch.ops[i])) {
                 return false;
             }
@@ -249,8 +251,10 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         if (call.target == address(0)) revert ZeroAddress();
         if (call.permissions == 0) revert InvalidPermissions();
 
+        uint256 callSelectorAndCheckerLength = call.selectorAndChecker.length;
+
         // if call is allowed, ensure there is at least 1 selector allowed
-        if ((call.permissions & bytes1(CALL_FUNCTIONS)) != 0 && call.selectorAndChecker.length == 0) {
+        if ((call.permissions & bytes1(CALL_FUNCTIONS)) != 0 && callSelectorAndCheckerLength == 0) {
             revert InvalidPermissions();
         }
 
@@ -260,7 +264,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         }
         whitelistedAddresses[call.target] = call.permissions;
 
-        for (uint256 i = 0; i < call.selectorAndChecker.length; i++) {
+        for (uint256 i = 0; i < callSelectorAndCheckerLength; ++i) {
             bytes4 selector = call.selectorAndChecker[i].selector;
             address paramsValidator = call.selectorAndChecker[i].paramsValidator;
 
@@ -282,20 +286,20 @@ contract GenericMusigOpValidator is IOpValidatorModule {
      * @dev todo: use bls signatures for better gas efficiency
      */
     function isValidSignature(bytes32 message, bytes memory signatures) public view returns (bool) {
-        uint256 allSignaturesLen = signatures.length;
+        uint256 allSignaturesLength = signatures.length;
 
         // ensure the data length is correct
-        if (allSignaturesLen % 65 != 0) {
+        if (allSignaturesLength % 65 != 0) {
             revert InvalidSignature();
         }
 
         // decode the signatures
-        uint256 sigCount = allSignaturesLen / 65;
+        uint256 sigCount = allSignaturesLength / 65;
         uint256 totalSigWeight = 0;
         address[] memory signersList = new address[](sigCount);
 
         // Process each signature
-        for (uint256 i = 0; i < sigCount; i++) {
+        for (uint256 i = 0; i < sigCount; ++i) {
             uint256 offset = i * 65;
 
             // Extract r, s, v components
@@ -322,13 +326,18 @@ contract GenericMusigOpValidator is IOpValidatorModule {
             // Verify the signature
             address signer = ecrecover(message, v, r, s);
 
+            // Ensure signer is not zero
+            if (signer == address(0)) {
+                revert InvalidSignature();
+            }
+
             uint256 weight = signers[signer];
             if (weight == 0) {
                 revert InvalidSigner(signer);
             }
 
             // Ensure each signature is from a unique signer
-            for (uint256 j = 0; j < signersList.length; j++) {
+            for (uint256 j = 0; j < sigCount; j++) {
                 if (signersList[j] == signer) {
                     revert DuplicateSigner(signer);
                 }
@@ -362,8 +371,10 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         uint8 authorization = uint8(whitelistedAddresses[target]);
         if (authorization == 0) revert TargetNotWhitelisted(target);
 
+        uint256 dataLength = op.data.length;
+
         // Block empty operations (this is a no-op but can still trigger the fallback leading to unexpected behavior)
-        if (value == 0 && op.data.length == 0) {
+        if (value == 0 && dataLength == 0) {
             revert EmptyOperation();
         }
 
@@ -371,21 +382,20 @@ contract GenericMusigOpValidator is IOpValidatorModule {
             revert ExceedsAllowance(maxAllowance[target], value);
         }
 
-        uint256 dataLen = op.data.length;
-        if (dataLen > 0 && dataLen < 4) revert DataFieldTooShort();
+        if (dataLength > 0 && dataLength < 4) revert DataFieldTooShort();
 
-        if (dataLen > 0 && (authorization & CALL_FUNCTIONS) == 0) {
+        if (dataLength > 0 && (authorization & CALL_FUNCTIONS) == 0) {
             revert TargetNotWhitelisted(target);
         }
 
         // Ensure function selector is whitelisted
-        if (dataLen >= 4) {
+        if (dataLength >= 4) {
             bytes4 selector = bytes4(op.data[:4]);
             address paramsValidator = whitelistedSelectors[target][selector];
             if (paramsValidator == address(0)) {
                 revert SelectorNotWhitelisted(selector);
             }
-            if (paramsValidator != NO_PARAMS_CHECKS_ADDRESS && dataLen > 4) {
+            if (paramsValidator != NO_PARAMS_CHECKS_ADDRESS && dataLength > 4) {
                 bytes memory data = op.data[4:];
                 // Validate parameters
                 IParameterValidator validator = IParameterValidator(paramsValidator);
@@ -410,8 +420,10 @@ contract GenericMusigOpValidator is IOpValidatorModule {
         // add the chainId and msg.sender to the combinedData
         combinedData = abi.encodePacked(block.chainid, msg.sender);
 
+        uint256 opsLength = ops.length;
+
         // Concatenate the encoding of each operation
-        for (uint256 i = 0; i < ops.length; i++) {
+        for (uint256 i = 0; i < opsLength; ++i) {
             combinedData = abi.encodePacked(combinedData, abi.encodePacked(ops[i].target, ops[i].value, ops[i].data));
         }
 
@@ -501,6 +513,8 @@ contract GenericMusigOpValidator is IOpValidatorModule {
                 signers[newSigner.signer] = newSigner.weight;
             }
         }
+
+        emit SignersUpdated(newSigner.signer, newSigner.weight, newQuorum, totalWeight);
     }
 
     /**

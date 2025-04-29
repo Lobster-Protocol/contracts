@@ -14,10 +14,10 @@ contract GenericMusigOpValidatorTestSetup is Test {
     Counter public counter;
 
     // anvil private keys
-    uint256 public signer1 = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
-    uint256 public signer2 = 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
-    uint256 public signer3 = 0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a;
-    uint256 public notValidatorSigner = 0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6;
+    uint256 public constant signer1 = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
+    uint256 public constant signer2 = 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
+    uint256 public constant signer3 = 0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a;
+    uint256 public constant notValidatorSigner = 0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6;
     Signer[] private signers;
 
     function setUp() public {
@@ -61,9 +61,11 @@ contract GenericMusigOpValidatorTestSetup is Test {
     }
 
     function multiSign(uint256[] memory privateKeys, bytes32 message) internal pure returns (bytes memory) {
-        bytes[] memory signatures = new bytes[](privateKeys.length);
+        uint256 privateKeysLength = privateKeys.length;
 
-        for (uint256 j = 0; j < privateKeys.length; j++) {
+        bytes[] memory signatures = new bytes[](privateKeysLength);
+
+        for (uint256 j = 0; j < privateKeysLength; j++) {
             // Sign the message with the private key
             (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKeys[j], message);
 
@@ -72,8 +74,9 @@ contract GenericMusigOpValidatorTestSetup is Test {
         }
 
         // Concatenate the signatures
+        uint256 sigLenth = signatures.length;
         bytes memory concatenatedSignatures;
-        for (uint256 i = 0; i < signatures.length; i++) {
+        for (uint256 i = 0; i < sigLenth; i++) {
             concatenatedSignatures = abi.encodePacked(concatenatedSignatures, signatures[i]);
         }
         return concatenatedSignatures;

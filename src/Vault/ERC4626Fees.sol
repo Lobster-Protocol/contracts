@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPLv3
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
@@ -355,17 +355,6 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
     }
 
     /* ================== SHARE VALUE ================== */
-
-    /**
-     * @dev Calculate current share value
-     * @return The value of one share in terms of the underlying asset
-     * @notice Returns 0 if there is no supply
-     */
-    function _calculateShareValue() internal view returns (uint256) {
-        uint256 supply = totalSupply();
-        if (supply == 0) return 0;
-        return totalAssets().mulDiv(10 ** decimals(), supply, Math.Rounding.Floor);
-    }
 
     /**
      * @dev Calculates the fees that should be added to an amount `assets` that does not already include fees

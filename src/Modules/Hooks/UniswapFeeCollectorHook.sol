@@ -17,6 +17,7 @@ import {LobsterVault} from "../../../src/Vault/Vault.sol";
  * @dev This hook monitors Uniswap collect operations and takes a percentage of
  *      collected tokens as a performance fee. It is designed to work with the
  *      LobsterVault system's hook mechanism.
+ * @dev This contract expect msg.sender to be the vault
  */
 
 /// @dev Denominator for basis point calculations (100% = 10,000 basis points)
@@ -116,7 +117,7 @@ contract UniswapFeeCollectorHook is IHook, Ownable {
 
             // Setup the vault op to extract the fees
             Op memory collectLobsterFee = Op(
-                BaseOp(address(token0), 0, abi.encodeWithSelector(token0.transfer.selector, feeReceiver, token0Fee)),
+                BaseOp(address(token0), 0, abi.encodeCall(token0.transfer, (feeReceiver, token0Fee))),
                 "" // no need for validation data, msg.sender will be the hook
             );
 
@@ -130,7 +131,7 @@ contract UniswapFeeCollectorHook is IHook, Ownable {
             token1Fee = (token1Balance - oldBalanceToken1).mulDiv(feeBasisPoint, BASIS_POINT_SCALE, Math.Rounding.Floor);
             // Setup the vault op to extract the fees
             Op memory collectLobsterFee = Op(
-                BaseOp(address(token1), 0, abi.encodeWithSelector(token1.transfer.selector, feeReceiver, token1Fee)),
+                BaseOp(address(token1), 0, abi.encodeCall(token1.transfer, (feeReceiver, token1Fee))),
                 "" // no need for validation data, msg.sender will be the hook
             );
 

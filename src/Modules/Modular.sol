@@ -5,7 +5,6 @@ import {IOpValidatorModule} from "../interfaces/modules/IOpValidatorModule.sol";
 import {IVaultFlowModule} from "../interfaces/modules/IVaultFlowModule.sol";
 import {IHook} from "../interfaces/modules/IHook.sol";
 import {INav} from "../interfaces/modules/INav.sol";
-import {IVaultFlowModule} from "../../src/interfaces/modules/IVaultFlowModule.sol";
 
 /**
  * @title Modular Base Contract
@@ -55,11 +54,6 @@ contract Modular {
      * @notice Thrown when an operation is not approved by the opValidator
      */
     error OpNotApproved();
-
-    /**
-     * @notice Thrown when an invalid vault is referenced
-     */
-    error InvalidVault();
 
     /**
      * @notice Thrown when the deposit module fails to process a deposit
