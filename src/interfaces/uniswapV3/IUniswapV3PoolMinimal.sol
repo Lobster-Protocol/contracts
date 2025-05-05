@@ -5,9 +5,52 @@ pragma solidity ^0.8.0;
  * Minimal uniV3 Pool interface
  */
 interface IUniswapV3PoolMinimal {
+    /// @notice Sets the initial price for the pool
+    /// @dev Price is represented as a sqrt(amountToken1/amountToken0) Q64.96 value
+    /// @param sqrtPriceX96 the initial sqrt price of the pool as a Q64.96
+    function initialize(uint160 sqrtPriceX96) external;
+
     /// @notice The contract that deployed the pool, which must adhere to the IUniswapV3Factory interface
     /// @return The contract address
     function factory() external view returns (address);
+
+    /// @notice The fee growth as a Q128.128 fees of token0 collected per unit of liquidity for the entire life of the pool
+    /// @dev This value can overflow the uint256
+    function feeGrowthGlobal0X128() external view returns (uint256);
+
+    /// @notice The fee growth as a Q128.128 fees of token1 collected per unit of liquidity for the entire life of the pool
+    /// @dev This value can overflow the uint256
+    function feeGrowthGlobal1X128() external view returns (uint256);
+
+    /// @notice Look up information about a specific tick in the pool
+    /// @param tick The tick to look up
+    /// @return liquidityGross the total amount of position liquidity that uses the pool either as tick lower or
+    /// tick upper,
+    /// liquidityNet how much liquidity changes when the pool price crosses the tick,
+    /// feeGrowthOutside0X128 the fee growth on the other side of the tick from the current tick in token0,
+    /// feeGrowthOutside1X128 the fee growth on the other side of the tick from the current tick in token1,
+    /// tickCumulativeOutside the cumulative tick value on the other side of the tick from the current tick
+    /// secondsPerLiquidityOutsideX128 the seconds spent per liquidity on the other side of the tick from the current tick,
+    /// secondsOutside the seconds spent on the other side of the tick from the current tick,
+    /// initialized Set to true if the tick is initialized, i.e. liquidityGross is greater than 0, otherwise equal to false.
+    /// Outside values can only be used if the tick is initialized, i.e. if liquidityGross is greater than 0.
+    /// In addition, these values are only relative and must be used only in comparison to previous snapshots for
+    /// a specific position.
+    function ticks(
+        int24 tick
+    )
+        external
+        view
+        returns (
+            uint128 liquidityGross,
+            int128 liquidityNet,
+            uint256 feeGrowthOutside0X128,
+            uint256 feeGrowthOutside1X128,
+            int56 tickCumulativeOutside,
+            uint160 secondsPerLiquidityOutsideX128,
+            uint32 secondsOutside,
+            bool initialized
+        );
 
     /// @notice The 0th storage slot in the pool stores many values, and is exposed as a single method to save gas
     /// when accessed externally.
@@ -57,9 +100,7 @@ interface IUniswapV3PoolMinimal {
         int24 tickUpper,
         uint128 amount0Requested,
         uint128 amount1Requested
-    )
-        external
-        returns (uint128 amount0, uint128 amount1);
+    ) external returns (uint128 amount0, uint128 amount1);
 
     /// @notice Returns the cumulative tick and liquidity as of each timestamp `secondsAgo` from the current block timestamp
     /// @dev To get a time weighted average tick or liquidity-in-range, you must call this with two values, one representing
@@ -71,8 +112,13 @@ interface IUniswapV3PoolMinimal {
     /// @return tickCumulatives Cumulative tick values as of each `secondsAgos` from the current block timestamp
     /// @return secondsPerLiquidityCumulativeX128s Cumulative seconds per liquidity-in-range value as of each `secondsAgos` from the current block
     /// timestamp
-    function observe(uint32[] calldata secondsAgos)
+    function observe(
+        uint32[] calldata secondsAgos
+    )
         external
         view
-        returns (int56[] memory tickCumulatives, uint160[] memory secondsPerLiquidityCumulativeX128s);
+        returns (
+            int56[] memory tickCumulatives,
+            uint160[] memory secondsPerLiquidityCumulativeX128s
+        );
 }
