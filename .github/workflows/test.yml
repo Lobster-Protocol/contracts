@@ -5,8 +5,8 @@ on:
   pull_request:
   workflow_dispatch:
 
-# env:
-#   FOUNDRY_PROFILE: ci
+env:
+  FOUNDRY_PROFILE: ci
 
 jobs:
   check:
@@ -28,14 +28,6 @@ jobs:
       - name: Show Forge version
         run: |
           forge --version
-
-      - name: Debug environment
-        run: |
-          echo "Current directory: $(pwd)"
-          echo "File structure:"
-          find . -type f -name "*.sol" | grep -i NonFungiblePosition
-          echo "Git submodules:"
-          git submodule status
 
       - name: Run Forge fmt
         run: |
