@@ -89,14 +89,15 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
     }
 
     function _withdraw(
-        address caller,
-        address receiver,
-        address owner,
-        uint256 assets,
-        uint256 shares
+        address, /* caller */
+        address, /* receiver */
+        address, /* owner */
+        uint256, /* assets */
+        uint256 /* shares */
     )
         external
-        returns (bool success)
+        pure
+        returns (bool /* success */ )
     {
         revert("use PositionValue");
         // (uint256 twPrice, uint256 spotPrice) = getPrices();
@@ -246,11 +247,6 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
 
                 (uint256 amount0, uint256 fee0, uint256 amount1, uint256 fee1) =
                     PositionValue.total(positionManager, tokenId, sqrtPriceX96);
-
-                console.log("amount0", amount0);
-                console.log("fee0", fee0);
-                console.log("amount1", amount1);
-                console.log("fee1", fee1);
 
                 // Update the position values
                 position0.value += amount0 + fee0.mulDiv(BASIS_POINT_SCALE - feeCutBasisPoint, BASIS_POINT_SCALE);

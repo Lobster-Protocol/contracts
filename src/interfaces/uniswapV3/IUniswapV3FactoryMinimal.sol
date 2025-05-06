@@ -10,9 +10,13 @@ interface IUniswapV3FactoryMinimal {
     /// from the fee. The call will revert if the pool already exists, the fee is invalid, or the token arguments
     /// are invalid.
     /// @return pool The address of the newly created pool
-    function createPool(
-        address tokenA,
-        address tokenB,
-        uint24 fee
-    ) external returns (address pool);
+    function createPool(address tokenA, address tokenB, uint24 fee) external returns (address pool);
+
+    /// @notice Returns the pool address for a given pair of tokens and a fee, or address 0 if it does not exist
+    /// @dev tokenA and tokenB may be passed in either token0/token1 or token1/token0 order
+    /// @param tokenA The contract address of either token0 or token1
+    /// @param tokenB The contract address of the other token
+    /// @param fee The fee collected upon every swap in the pool, denominated in hundredths of a bip
+    /// @return pool The pool address
+    function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool);
 }

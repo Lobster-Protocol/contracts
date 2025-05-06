@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import "forge-std/Test.sol";
 import {SimpleVaultTestSetup} from "../VaultSetups/SimpleVaultTestSetup.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
@@ -128,7 +127,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         uint256 expectedFeeAsset = vault.convertToAssets(expectedFee);
         uint256 assetsRedeemed = vault.redeem(withdrawnAssets, alice, alice); // assetsRedeemed = alice assets in vault before redeem
         vm.stopPrank();
-        console2.log(assetsRedeemed);
+
         // check alice asset balance
         assertEq(asset.balanceOf(alice), initialAliceBalance - expectedFeeAsset);
 
@@ -143,8 +142,6 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
 
         // check fee collector asset balance did not change
         assertEq(asset.balanceOf(vault.feeCollector()), initialFeeCollectorBalance);
-
-        console2.log(vault.totalSupply());
 
         // check fee collector shares balance
         assertEq(vault.balanceOf(vault.feeCollector()), expectedFee);

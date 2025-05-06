@@ -36,9 +36,7 @@ interface IUniswapV3PoolMinimal {
     /// Outside values can only be used if the tick is initialized, i.e. if liquidityGross is greater than 0.
     /// In addition, these values are only relative and must be used only in comparison to previous snapshots for
     /// a specific position.
-    function ticks(
-        int24 tick
-    )
+    function ticks(int24 tick)
         external
         view
         returns (
@@ -100,7 +98,9 @@ interface IUniswapV3PoolMinimal {
         int24 tickUpper,
         uint128 amount0Requested,
         uint128 amount1Requested
-    ) external returns (uint128 amount0, uint128 amount1);
+    )
+        external
+        returns (uint128 amount0, uint128 amount1);
 
     /// @notice Returns the cumulative tick and liquidity as of each timestamp `secondsAgo` from the current block timestamp
     /// @dev To get a time weighted average tick or liquidity-in-range, you must call this with two values, one representing
@@ -112,13 +112,8 @@ interface IUniswapV3PoolMinimal {
     /// @return tickCumulatives Cumulative tick values as of each `secondsAgos` from the current block timestamp
     /// @return secondsPerLiquidityCumulativeX128s Cumulative seconds per liquidity-in-range value as of each `secondsAgos` from the current block
     /// timestamp
-    function observe(
-        uint32[] calldata secondsAgos
-    )
+    function observe(uint32[] calldata secondsAgos)
         external
         view
-        returns (
-            int56[] memory tickCumulatives,
-            uint160[] memory secondsPerLiquidityCumulativeX128s
-        );
+        returns (int56[] memory tickCumulatives, uint160[] memory secondsPerLiquidityCumulativeX128s);
 }

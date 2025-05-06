@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: GPLv3
 pragma solidity ^0.8.28;
 
-import "forge-std/Test.sol";
-
 import {IUniswapV3PoolMinimal} from "../../interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {INonFungiblePositionManager} from "../../interfaces/uniswapV3/INonFungiblePositionManager.sol";
 import {PoolAddress} from "./PoolAddress.sol";
@@ -100,7 +98,6 @@ library UniswapUtils {
         if (averageTick < MIN_TICK || averageTick > MAX_TICK) {
             revert UnexpectedTickValue(averageTick);
         }
-        console.log("averageTick", averageTick);
 
         require(averageTick >= MIN_TICK && averageTick <= MAX_TICK, "Tick out of range");
 

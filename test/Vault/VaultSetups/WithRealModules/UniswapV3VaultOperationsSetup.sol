@@ -12,10 +12,21 @@ import {LobsterVault} from "../../../../src/Vault/Vault.sol";
 import {UniswapV3VaultFlow} from "../../../../src/Modules/VaultFlow/UniswapV3WithTwap.sol";
 import {IUniswapV3PoolMinimal} from "../../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {INonFungiblePositionManager} from "../../../../src/interfaces/uniswapV3/INonFungiblePositionManager.sol";
+import {UniswapV3Infra} from "../../../Mocks/uniswapV3/UniswapV3Infra.sol";
+import {IUniswapV3FactoryMinimal} from "../../../../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
+import {IWETH} from "../../../../src/interfaces/IWETH.sol";
 
-contract UniswapV3VaultOperationsSetup is VaultTestUtils {
-    IUniswapV3PoolMinimal pool;
+struct UniswapV3Data {
+    IUniswapV3FactoryMinimal factory;
     INonFungiblePositionManager positionManager;
+    address tokenA;
+    address tokenB;
+    uint24 poolFee;
+    uint160 poolInitialSqrtPriceX96;
+}
+
+contract UniswapV3VaultOperationsSetup is VaultTestUtils, UniswapV3Infra {
+    UniswapV3Data public uniswapV3Data;
 
     function setUp() public {
         owner = makeAddr("owner");
@@ -23,30 +34,35 @@ contract UniswapV3VaultOperationsSetup is VaultTestUtils {
         bob = makeAddr("bob");
         feeCollector = makeAddr("feeCollector");
 
-        /////// arbitrum
-        // // eth/usdc: 0xC31E54c7a869B9FcBEcc14363CF510d1c41fa443
-        // pool = IUniswapV3PoolMinimal(
-        //     address(
-        //         0xC31E54c7a869B9FcBEcc14363CF510d1c41fa443 /* 0x2f5e87C9312fa29aed5c179E456625D79015299c */
-        //     )
-        // ); // arbitrum1 WBTC/WETH pool
-        // positionManager = INonFungiblePositionManager(address(0xC36442b4a4522E871399CD717aBDD847Ab11FE88));
-        // address weth = address(0x82aF49447D8a07e3bd95BD0d56f35241523fBab1);
-        ///////
-        /////// sepolia
-        pool = IUniswapV3PoolMinimal(address(0x3289680dD4d6C10bb19b899729cda5eEF58AEfF1)); // sepolia USDC/WETH pool
-        positionManager = INonFungiblePositionManager(address(0x1238536071E1c677A632429e3655c799b22cDA52));
-        address weth = address(0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14);
-        ///////
+        (IUniswapV3FactoryMinimal factory_,, INonFungiblePositionManager positionManager_) = deploy();
+
+        uniswapV3Data.poolFee = 3000; // 0.3%
+        uniswapV3Data.positionManager = positionManager_;
+        uniswapV3Data.factory = factory_;
+        uniswapV3Data.poolInitialSqrtPriceX96 = 2 ** 96; // = quote = 1:1 if both tokens have the same decimals value
+        asset = new MockERC20();
+        uniswapV3Data.tokenA = address(asset);
+        uniswapV3Data.tokenB = address(new MockERC20());
+
+        // Deploy and initialize the pool weth/mocked token pool
+        IUniswapV3PoolMinimal pool = createPoolAndInitialize(
+            uniswapV3Data.factory,
+            address(asset), // tokenA
+            address(uniswapV3Data.tokenB),
+            uniswapV3Data.poolFee,
+            uniswapV3Data.poolInitialSqrtPriceX96
+        );
 
         // module instantiation
         IHook hook = IHook(address(0));
         IOpValidatorModule opValidator = IOpValidatorModule(address(0));
-        IVaultFlowModule vaultOperations = new UniswapV3VaultFlow(pool, positionManager, weth, 0);
+        IVaultFlowModule vaultOperations = new UniswapV3VaultFlow(
+            pool,
+            uniswapV3Data.positionManager,
+            address(asset), // tokenA
+            0
+        );
         INav navModule = INav(address(0));
-
-        // Deploy contracts
-        asset = MockERC20(weth); // new MockERC20();
 
         vault = new LobsterVault(
             owner, asset, "Vault Token", "vTKN", feeCollector, opValidator, hook, navModule, vaultOperations, 0, 0, 0
