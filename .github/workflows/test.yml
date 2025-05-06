@@ -29,6 +29,14 @@ jobs:
         run: |
           forge --version
 
+      - name: Debug environment
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "File structure:"
+          find . -type f -name "*.sol" | grep -i NonFungiblePosition
+          echo "Git submodules:"
+          git submodule status
+
       - name: Run Forge fmt
         run: |
           forge fmt --check
