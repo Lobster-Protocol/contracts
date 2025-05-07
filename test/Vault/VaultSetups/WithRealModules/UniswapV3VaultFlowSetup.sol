@@ -37,12 +37,8 @@ contract UniswapV3VaultFlowSetup is VaultTestUtils, UniswapV3Infra {
         bob = makeAddr("bob");
         feeCollector = makeAddr("feeCollector");
 
-        (
-            IUniswapV3FactoryMinimal factory,
-            ,
-            INonFungiblePositionManager positionManager,
-            IUniswapV3RouterMinimal router
-        ) = deploy();
+        (IUniswapV3FactoryMinimal factory,, INonFungiblePositionManager positionManager, IUniswapV3RouterMinimal router)
+        = deploy();
 
         uniswapV3Data.poolFee = 3000; // 0.3%
         uniswapV3Data.positionManager = positionManager;
@@ -75,18 +71,7 @@ contract UniswapV3VaultFlowSetup is VaultTestUtils, UniswapV3Infra {
         INav navModule = INav(address(0));
 
         vault = new LobsterVault(
-            owner,
-            asset,
-            "Vault Token",
-            "vTKN",
-            feeCollector,
-            opValidator,
-            hook,
-            navModule,
-            vaultOperations,
-            0,
-            0,
-            0
+            owner, asset, "Vault Token", "vTKN", feeCollector, opValidator, hook, navModule, vaultOperations, 0, 0, 0
         );
 
         // Setup initial state

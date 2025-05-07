@@ -16,19 +16,8 @@ contract DummyVaultFlow is IVaultFlowModule {
     LobsterVault public vault;
     IERC20 token;
 
-    event DepositHasBeenCalled(
-        address caller,
-        address receiver,
-        uint256 assets,
-        uint256 shares
-    );
-    event WithdrawHasBeenCalled(
-        address caller,
-        address receiver,
-        address owner,
-        uint256 assets,
-        uint256 shares
-    );
+    event DepositHasBeenCalled(address caller, address receiver, uint256 assets, uint256 shares);
+    event WithdrawHasBeenCalled(address caller, address receiver, address owner, uint256 assets, uint256 shares);
 
     function maxWithdraw(address) external pure returns (uint256) {
         revert("maxWithdraw: Not implemented");
@@ -39,7 +28,10 @@ contract DummyVaultFlow is IVaultFlowModule {
         address receiver,
         uint256 assets,
         uint256 shares
-    ) external returns (bool success) {
+    )
+        external
+        returns (bool success)
+    {
         emit DepositHasBeenCalled(caller, receiver, assets, shares);
         // revert if caller is PANIC_CALLER
         if (caller == PANIC_CALLER) {
@@ -67,7 +59,10 @@ contract DummyVaultFlow is IVaultFlowModule {
         address owner,
         uint256 assets,
         uint256 shares
-    ) external returns (bool success) {
+    )
+        external
+        returns (bool success)
+    {
         emit WithdrawHasBeenCalled(caller, receiver, owner, assets, shares);
         // revert if caller is PANIC_CALLER
         if (caller == PANIC_CALLER) revert();

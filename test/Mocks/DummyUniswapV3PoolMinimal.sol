@@ -33,45 +33,22 @@ contract DummyUniswapV3PoolMinimal is IUniswapV3PoolMinimal {
         revert("feeGrowthGlobal1X128: Not implemented");
     }
 
-    function ticks(
-        int24
-    )
-        external
-        pure
-        returns (
-            uint128,
-            int128,
-            uint256,
-            uint256,
-            int56,
-            uint160,
-            uint32,
-            bool
-        )
-    {
+    function ticks(int24) external pure returns (uint128, int128, uint256, uint256, int56, uint160, uint32, bool) {
         revert("ticks: Not implemented");
     }
 
-    function swap(
-        address,
-        bool,
-        int256,
-        uint160,
-        bytes calldata
-    ) external pure returns (int256, int256) {
+    function swap(address, bool, int256, uint160, bytes calldata) external pure returns (int256, int256) {
         revert("swap: Not implemented");
     }
 
-    function positions(
-        bytes32
-    )
+    function positions(bytes32)
         external
         pure
         returns (
-            uint128 /* liquidity */,
-            uint256 /* feeGrowthInside0LastX128 */,
-            uint256 /* feeGrowthInside1LastX128 */,
-            uint128 /* tokensOwed0 */,
+            uint128, /* liquidity */
+            uint256, /* feeGrowthInside0LastX128 */
+            uint256, /* feeGrowthInside1LastX128 */
+            uint128, /* tokensOwed0 */
             uint128 /* tokensOwed1 */
         )
     {
@@ -82,12 +59,12 @@ contract DummyUniswapV3PoolMinimal is IUniswapV3PoolMinimal {
         external
         pure
         returns (
-            uint160 /* sqrtPriceX96 */,
-            int24 /* tick */,
-            uint16 /* observationIndex */,
-            uint16 /* observationCardinality */,
-            uint16 /* observationCardinalityNext */,
-            uint8 /* feeProtocol */,
+            uint160, /* sqrtPriceX96 */
+            int24, /* tick */
+            uint16, /* observationIndex */
+            uint16, /* observationCardinality */
+            uint16, /* observationCardinalityNext */
+            uint8, /* feeProtocol */
             bool /* unlocked */
         )
     {
@@ -104,11 +81,14 @@ contract DummyUniswapV3PoolMinimal is IUniswapV3PoolMinimal {
 
     function collect(
         address recipient,
-        int24 /* tickLower */,
-        int24 /* tickUpper */,
+        int24, /* tickLower */
+        int24, /* tickUpper */
         uint128 amount0Requested,
         uint128 amount1Requested
-    ) external returns (uint128 amount0, uint128 amount1) {
+    )
+        external
+        returns (uint128 amount0, uint128 amount1)
+    {
         amount0 = amount0Requested;
         amount1 = amount1Requested;
 
@@ -117,9 +97,7 @@ contract DummyUniswapV3PoolMinimal is IUniswapV3PoolMinimal {
         token1_.mint(recipient, amount1);
     }
 
-    function observe(
-        uint32[] memory
-    ) external pure returns (int56[] memory, uint160[] memory) {
+    function observe(uint32[] memory) external pure returns (int56[] memory, uint160[] memory) {
         revert("observe not implemented");
     }
 }
