@@ -40,11 +40,11 @@ contract UniswapV3VaultOperations is UniswapV3VaultOperationsSetup {
     //     // todo
     // }
 
-    // function testWithdraw() public {
-    //     IVaultFlowModule vaultOps = IVaultFlowModule(address(vault.vaultFlow()));
-    //     vaultOps._withdraw(address(vault), alice, alice, 1 ether, 1 ether);
-    //     revert("voluntary revert");
-    // }
+    function testWithdraw() public {
+        IVaultFlowModule vaultOps = IVaultFlowModule(address(vault.vaultFlow()));
+        vaultOps._withdraw(address(vault), alice, alice, 1 ether, 1 ether);
+        revert("voluntary revert");
+    }
 
     // function testWithdrawWithHighVolatilityAndNoWithdrawerAdvantage() public {
     //     // IVaultFlowModule vaultOps = IVaultFlowModule(address(vault.vaultOperations()));
