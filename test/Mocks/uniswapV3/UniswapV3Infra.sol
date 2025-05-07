@@ -11,12 +11,19 @@ import {IWETH} from "../../../src/interfaces/IWETH.sol";
 import {TOKEN_POSITION_DESCRIPTOR_BYTECODE} from "./bytecodes/tokenPositionDescriptor.sol";
 import {MockERC20} from "../MockERC20.sol";
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
+import {IUniswapV3RouterMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3RouterMinimal.sol";
+import {ROUTER_BYTECODE} from "./bytecodes/router.sol";
 
 // deploy and interact with Uniswap V3 contracts
 contract UniswapV3Infra is Test {
     function deploy()
         public
-        returns (IUniswapV3FactoryMinimal factory, IWETH weth, INonFungiblePositionManager positionManager)
+        returns (
+            IUniswapV3FactoryMinimal factory,
+            IWETH weth,
+            INonFungiblePositionManager positionManager,
+            IUniswapV3RouterMinimal router
+        )
     {
         // Deploy factory
         bytes memory factoryBytecode = FACTORY_BYTECODE;
@@ -26,14 +33,15 @@ contract UniswapV3Infra is Test {
         address deployedFactory;
         assembly {
             // Make sure we're not trying to deploy empty bytecode
-            if iszero(mload(factoryBytecode)) { revert(0, 0) }
+            if iszero(mload(factoryBytecode)) {
+                revert(0, 0)
+            }
 
-            deployedFactory :=
-                create(
-                    0, // No ETH sent
-                    add(factoryBytecode, 0x20), // Skip the first 32 bytes (length prefix)
-                    mload(factoryBytecode) // Length of bytecode
-                )
+            deployedFactory := create(
+                0, // No ETH sent
+                add(factoryBytecode, 0x20), // Skip the first 32 bytes (length prefix)
+                mload(factoryBytecode) // Length of bytecode
+            )
 
             // If deployment failed, revert with a detailed message
             if iszero(deployedFactory) {
@@ -52,14 +60,15 @@ contract UniswapV3Infra is Test {
         address deployedWeth;
         assembly {
             // Make sure we're not trying to deploy empty bytecode
-            if iszero(mload(wethBytecode)) { revert(0, 0) }
+            if iszero(mload(wethBytecode)) {
+                revert(0, 0)
+            }
 
-            deployedWeth :=
-                create(
-                    0, // No ETH sent
-                    add(wethBytecode, 0x20), // Skip the first 32 bytes (length prefix)
-                    mload(wethBytecode) // Length of bytecode
-                )
+            deployedWeth := create(
+                0, // No ETH sent
+                add(wethBytecode, 0x20), // Skip the first 32 bytes (length prefix)
+                mload(wethBytecode) // Length of bytecode
+            )
 
             // If deployment failed, revert with a detailed message
             if iszero(deployedWeth) {
@@ -73,7 +82,8 @@ contract UniswapV3Infra is Test {
         weth = IWETH(deployedWeth);
 
         // deploy token position descriptor
-        bytes memory tokenPositionDescriptorBytecode = TOKEN_POSITION_DESCRIPTOR_BYTECODE;
+        bytes
+            memory tokenPositionDescriptorBytecode = TOKEN_POSITION_DESCRIPTOR_BYTECODE;
 
         bytes memory nativeCurrencyLabelBytes = abi.encodePacked("ETH");
         bytes memory tokenPositionDescriptorConstructorArgs = abi.encode(
@@ -83,20 +93,23 @@ contract UniswapV3Infra is Test {
         );
 
         // Append constructor args to the bytecode
-        bytes memory tokenPositionDescriptorBytecodeWithArgs =
-            bytes.concat(tokenPositionDescriptorBytecode, tokenPositionDescriptorConstructorArgs);
+        bytes memory tokenPositionDescriptorBytecodeWithArgs = bytes.concat(
+            tokenPositionDescriptorBytecode,
+            tokenPositionDescriptorConstructorArgs
+        );
 
         address deployedTokenPositionDescriptor;
         assembly {
             // Make sure we're not trying to deploy empty bytecode
-            if iszero(mload(tokenPositionDescriptorBytecodeWithArgs)) { revert(0, 0) }
+            if iszero(mload(tokenPositionDescriptorBytecodeWithArgs)) {
+                revert(0, 0)
+            }
 
-            deployedTokenPositionDescriptor :=
-                create(
-                    0, // No ETH sent
-                    add(tokenPositionDescriptorBytecodeWithArgs, 0x20), // Skip the first 32 bytes (length prefix)
-                    mload(tokenPositionDescriptorBytecodeWithArgs) // Length of bytecode
-                )
+            deployedTokenPositionDescriptor := create(
+                0, // No ETH sent
+                add(tokenPositionDescriptorBytecodeWithArgs, 0x20), // Skip the first 32 bytes (length prefix)
+                mload(tokenPositionDescriptorBytecodeWithArgs) // Length of bytecode
+            )
 
             // If deployment failed, revert with a detailed message
             if iszero(deployedTokenPositionDescriptor) {
@@ -109,7 +122,8 @@ contract UniswapV3Infra is Test {
         }
 
         // Deploy position manager
-        bytes memory positionManagerBytecode = NON_FUNGIBLE_POSITION_MANAGER_BYTECODE;
+        bytes
+            memory positionManagerBytecode = NON_FUNGIBLE_POSITION_MANAGER_BYTECODE;
 
         // Encode constructor arguments
         bytes memory positionManagerConstructorArgs = abi.encode(
@@ -119,20 +133,23 @@ contract UniswapV3Infra is Test {
         );
 
         // Append constructor arguments to bytecode
-        bytes memory positionManagerBytecodeWithArgs =
-            bytes.concat(positionManagerBytecode, positionManagerConstructorArgs);
+        bytes memory positionManagerBytecodeWithArgs = bytes.concat(
+            positionManagerBytecode,
+            positionManagerConstructorArgs
+        );
 
         address deployedPositionManager;
         assembly {
             // Make sure we're not trying to deploy empty bytecode
-            if iszero(mload(positionManagerBytecodeWithArgs)) { revert(0, 0) }
+            if iszero(mload(positionManagerBytecodeWithArgs)) {
+                revert(0, 0)
+            }
 
-            deployedPositionManager :=
-                create(
-                    0, // No ETH sent
-                    add(positionManagerBytecodeWithArgs, 0x20), // Skip the first 32 bytes (length prefix)
-                    mload(positionManagerBytecodeWithArgs) // Length of bytecode
-                )
+            deployedPositionManager := create(
+                0, // No ETH sent
+                add(positionManagerBytecodeWithArgs, 0x20), // Skip the first 32 bytes (length prefix)
+                mload(positionManagerBytecodeWithArgs) // Length of bytecode
+            )
 
             // If deployment failed, revert with a detailed message
             if iszero(deployedPositionManager) {
@@ -145,6 +162,43 @@ contract UniswapV3Infra is Test {
         }
 
         positionManager = INonFungiblePositionManager(deployedPositionManager);
+
+        // Deploy router
+        bytes memory routerBytecode = ROUTER_BYTECODE;
+        bytes memory routerConstructorArgs = abi.encode(
+            address(factory), // _factory
+            address(weth) // _WETH9
+        );
+
+        bytes memory routerBytecodeWithArgs = bytes.concat(
+            routerBytecode,
+            routerConstructorArgs
+        );
+
+        address deployedRouter;
+        assembly {
+            // Make sure we're not trying to deploy empty bytecode
+            if iszero(mload(routerBytecodeWithArgs)) {
+                revert(0, 0)
+            }
+
+            deployedRouter := create(
+                0, // No ETH sent
+                add(routerBytecodeWithArgs, 0x20), // Skip the first 32 bytes (length prefix)
+                mload(routerBytecodeWithArgs) // Length of bytecode
+            )
+
+            // If deployment failed, revert with a detailed message
+            if iszero(deployedRouter) {
+                mstore(0x00, 0x08c379a0) // Error signature
+                mstore(0x04, 0x20) // String offset
+                mstore(0x24, 23) // String length
+                mstore(0x44, "Router deployment failed") // String data
+                revert(0, 0x64) // Revert with reason
+            }
+        }
+
+        router = IUniswapV3RouterMinimal(deployedRouter);
     }
 
     function createPoolAndInitialize(
@@ -153,10 +207,7 @@ contract UniswapV3Infra is Test {
         address tokenB,
         uint24 fee,
         uint160 initialSqrtPriceX96
-    )
-        public
-        returns (IUniswapV3PoolMinimal pool)
-    {
+    ) public returns (IUniswapV3PoolMinimal pool) {
         // Create a pool with the specified parameters
         pool = IUniswapV3PoolMinimal(factory.createPool(tokenA, tokenB, fee));
 
@@ -175,16 +226,13 @@ contract UniswapV3Infra is Test {
         address recipient
     )
         public
-        returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
+        returns (
+            uint256 tokenId,
+            uint128 liquidity,
+            uint256 amount0,
+            uint256 amount1
+        )
     {
-        // // Amount of tokens to provide as liquidity
-        // uint256 amountADesired = 1000 * 10 ** 18; // 1000 tokens with 18 decimals
-        // uint256 amountBDesired = 1000 * 10 ** 18; // 1000 tokens with 18 decimals
-
-        // mint some tokens for the test
-        MockERC20(tokenA).mint(address(this), amountA); // 1000 tokens with 18 decimals
-        MockERC20(tokenB).mint(address(this), amountB); // 1000 tokens with 18 decimals
-
         int24 tickLower = -6000; // Lower tick range
         int24 tickUpper = 6000; // Upper tick range
 
@@ -199,19 +247,20 @@ contract UniswapV3Infra is Test {
         // Set a deadline 30 minutes from now
         uint256 deadline = block.timestamp + 30 minutes;
 
-        INonFungiblePositionManager.MintParams memory params = INonFungiblePositionManager.MintParams({
-            token0: tokenA < tokenB ? tokenA : tokenB,
-            token1: tokenA < tokenB ? tokenB : tokenA,
-            fee: fee,
-            tickLower: tickLower,
-            tickUpper: tickUpper,
-            amount0Desired: tokenA < tokenB ? amountA : amountB,
-            amount1Desired: tokenA < tokenB ? amountB : amountA,
-            amount0Min: tokenA < tokenB ? amountAMin : amountBMin,
-            amount1Min: tokenA < tokenB ? amountBMin : amountAMin,
-            recipient: recipient,
-            deadline: deadline
-        });
+        INonFungiblePositionManager.MintParams
+            memory params = INonFungiblePositionManager.MintParams({
+                token0: tokenA < tokenB ? tokenA : tokenB,
+                token1: tokenA < tokenB ? tokenB : tokenA,
+                fee: fee,
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                amount0Desired: tokenA < tokenB ? amountA : amountB,
+                amount1Desired: tokenA < tokenB ? amountB : amountA,
+                amount0Min: tokenA < tokenB ? amountAMin : amountBMin,
+                amount1Min: tokenA < tokenB ? amountBMin : amountAMin,
+                recipient: recipient,
+                deadline: deadline
+            });
 
         // Mint the position
         (tokenId, liquidity, amount0, amount1) = positionManager.mint(params);

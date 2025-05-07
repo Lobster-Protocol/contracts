@@ -363,7 +363,7 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
      * @return The fee amount to be added
      * @notice Used in {IERC4626-mint} and {IERC4626-withdraw} operations
      */
-    function _feeOnRaw(uint256 amount, uint256 feeBasisPoints) private pure returns (uint256) {
+    function _feeOnRaw(uint256 amount, uint256 feeBasisPoints) internal pure returns (uint256) {
         return amount.mulDiv(feeBasisPoints, BASIS_POINT_SCALE, Math.Rounding.Ceil);
     }
 

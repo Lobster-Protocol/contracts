@@ -20,8 +20,8 @@ library PositionValue {
     uint256 internal constant Q128 = 0x100000000000000000000000000000000;
 
     /// @notice Returns the total amounts of token0 and token1, i.e. the sum of fees and principal
-    /// that a given nonfungible position manager token is worth
-    /// @param positionManager The Uniswap V3 NonfungiblePositionManager
+    /// that a given nonFungible position manager token is worth
+    /// @param positionManager The Uniswap V3 NonFungiblePositionManager
     /// @param tokenId The tokenId of the token for which to get the total value
     /// @param sqrtRatioX96 The square root price X96 for which to calculate the principal amounts
     /// @return amount0 The total amount of token0
@@ -44,7 +44,7 @@ library PositionValue {
 
     /// @notice Calculates the principal (currently acting as liquidity) owed to the token owner in the event
     /// that the position is burned
-    /// @param positionManager The Uniswap V3 NonfungiblePositionManager
+    /// @param positionManager The Uniswap V3 NonFungiblePositionManager
     /// @param tokenId The tokenId of the token for which to get the total principal owed
     /// @param sqrtRatioX96 The square root price X96 for which to calculate the principal amounts
     /// @return amount0 The principal amount of token0

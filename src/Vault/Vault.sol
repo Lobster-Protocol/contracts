@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GNU AGPL v3.0
 pragma solidity ^0.8.28;
+import "forge-std/Test.sol";
+
 
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ERC4626, ERC20} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
@@ -93,10 +95,17 @@ contract LobsterVault is Modular, ERC4626Fees {
         Ownable(initialOwner)
         ERC20(underlyingTokenName, underlyingTokenSymbol)
         ERC4626(asset)
-        ERC4626Fees(initialFeeCollector, entryFeeBasisPoints_, exitFeeBasisPoints_, managementFeeBasisPoints_)
+        ERC4626Fees(
+            initialFeeCollector,
+            entryFeeBasisPoints_,
+            exitFeeBasisPoints_,
+            managementFeeBasisPoints_
+        )
     {
         if (initialOwner == address(0)) revert ZeroAddress();
-        if (address(opValidator_) == address(0) && address(hook) != address(0)) {
+        if (
+            address(opValidator_) == address(0) && address(hook) != address(0)
+        ) {
             revert("Cannot install hook if there is no op validator");
         }
 
@@ -128,23 +137,24 @@ contract LobsterVault is Modular, ERC4626Fees {
             revert OpNotApproved();
         }
 
-        // Skip validation if caller is the hook
-        bool isFromHook = msg.sender == address(hook);
+        // Skip validation if caller is the hook or vaultFlow module
+        bool isFromHookOrFlow = msg.sender == address(hook) ||
+            msg.sender == address(vaultFlow);
 
-        // Validate operation if not from hook
-        if (!isFromHook && !opValidator.validateOp(op)) {
+        // Validate operation if not from hook or vaultFlow
+        if (!isFromHookOrFlow && !opValidator.validateOp(op)) {
             revert OpNotApproved();
         }
 
-        // Execute operation with hook calls only if not from hook
+        // Execute operation with hook calls only if not from hook or vaultFlow
         bytes memory ctx;
-        if (!isFromHook) {
+        if (!isFromHookOrFlow) {
             ctx = _preCallHook(op.base, msg.sender);
         }
 
         _call(op.base);
 
-        if (!isFromHook) {
+        if (!isFromHookOrFlow) {
             _postCallHook(ctx);
         }
     }
@@ -155,34 +165,37 @@ contract LobsterVault is Modular, ERC4626Fees {
      * @dev Requires an operation validator to be set
      * @dev If called by a hook, hook validation is skipped but operations are still executed
      */
-    function executeOpBatch(BatchOp calldata batch) external inExecutionContext {
+    function executeOpBatch(
+        BatchOp calldata batch
+    ) external inExecutionContext {
         // Always revert if validator is not set
         address validator = address(opValidator);
         if (validator == address(0)) {
             revert OpNotApproved();
         }
 
+        // Skip validation if caller is the hook or vaultFlow module
+        bool isFromHookOrFlow = msg.sender == address(hook) ||
+            msg.sender == address(vaultFlow);
+
         // Validate batch operation
-        if (!opValidator.validateBatchedOp(batch)) {
+        if (!isFromHookOrFlow && !opValidator.validateBatchedOp(batch)) {
             revert OpNotApproved();
         }
 
-        // Check if caller is the hook
-        bool isFromHook = msg.sender == address(hook);
-
         // Process all operations in batch
         uint256 length = batch.ops.length;
-        for (uint256 i = 0; i < length;) {
+        for (uint256 i = 0; i < length; ) {
             // Execute operation with hook calls only if not from hook
             bytes memory ctx;
-            if (!isFromHook) {
+            if (!isFromHookOrFlow) {
                 // todo: would it be better to call the hook once ? (but les granularity)
                 ctx = _preCallHook(batch.ops[i], msg.sender);
             }
 
             _call(batch.ops[i]);
 
-            if (!isFromHook) {
+            if (!isFromHookOrFlow) {
                 _postCallHook(ctx);
             }
 
@@ -195,13 +208,19 @@ contract LobsterVault is Modular, ERC4626Fees {
     /**
      * @notice Internal function to perform the actual call in an operation
      * @param op The base operation containing target, value, and data
+     * @return result The raw bytes data returned from the call
      * @dev Emits an Executed event after successful execution
+     * @dev Reverts with the error message if the call fails
      */
-    function _call(BaseOp calldata op) private {
-        (bool success, bytes memory result) = op.target.call{value: op.value}(op.data);
+    function _call(BaseOp calldata op) private returns (bytes memory result) {
+        (bool success, bytes memory returnData) = op.target.call{
+            value: op.value
+        }(op.data);
 
         assembly {
-            if iszero(success) { revert(add(result, 32), mload(result)) }
+            if iszero(success) {
+                revert(add(returnData, 32), mload(returnData))
+            }
         }
 
         bytes4 selector = bytes4(0);
@@ -210,6 +229,8 @@ contract LobsterVault is Modular, ERC4626Fees {
         }
 
         emit Executed(op.target, op.value, selector);
+
+        return returnData;
     }
 
     /* ------------------INAV------------------- */
@@ -234,13 +255,22 @@ contract LobsterVault is Modular, ERC4626Fees {
      * @return context Data to be passed to the postCheck function
      * @dev Reverts with PreHookFailed if the hook's preCheck fails
      */
-    function _preCallHook(BaseOp memory op, address caller) private returns (bytes memory context) {
+    function _preCallHook(
+        BaseOp memory op,
+        address caller
+    ) private returns (bytes memory context) {
         if (address(hook) != address(0)) {
             // Prepare the call data for preCheck function
-            bytes memory callData = abi.encodeWithSelector(hook.preCheck.selector, op, caller);
+            bytes memory callData = abi.encodeWithSelector(
+                hook.preCheck.selector,
+                op,
+                caller
+            );
 
             // Perform low-level static call
-            (bool success, bytes memory returnData) = address(hook).call(callData);
+            (bool success, bytes memory returnData) = address(hook).call(
+                callData
+            );
 
             // Revert with PreHookFailed error if the call fails
             if (!success) {
@@ -262,10 +292,13 @@ contract LobsterVault is Modular, ERC4626Fees {
     function _postCallHook(bytes memory ctx) private returns (bool success) {
         if (ctx.length > 0) {
             // Prepare the call data for preCheck function
-            bytes memory callData = abi.encodeWithSelector(hook.postCheck.selector, ctx);
+            bytes memory callData = abi.encodeWithSelector(
+                hook.postCheck.selector,
+                ctx
+            );
 
             // Perform low-level static call
-            (bool callSuccess,) = address(hook).call(callData);
+            (bool callSuccess, ) = address(hook).call(callData);
 
             // Revert with PreHookFailed error if the call fails
             if (!callSuccess) {
@@ -278,7 +311,7 @@ contract LobsterVault is Modular, ERC4626Fees {
         return true;
     }
 
-    /* ------------------DEPOSIT & WITHDRAW MODULES------------------ */
+    /* ------------------FLOW MODULES------------------ */
     /**
      * @notice Handles the deposit logic
      * @dev Override of ERC4626._deposit to use the vaultFlow module if available
@@ -287,10 +320,21 @@ contract LobsterVault is Modular, ERC4626Fees {
      * @param assets The amount of assets being deposited
      * @param shares The amount of shares to mint
      */
-    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
+    function _deposit(
+        address caller,
+        address receiver,
+        uint256 assets,
+        uint256 shares
+    ) internal override {
         if (address(vaultFlow) != address(0)) {
-            (bool success,) = address(vaultFlow).call(
-                abi.encodeWithSelector(vaultFlow._deposit.selector, caller, receiver, assets, shares)
+            (bool success, ) = address(vaultFlow).call(
+                abi.encodeWithSelector(
+                    vaultFlow._deposit.selector,
+                    caller,
+                    receiver,
+                    assets,
+                    shares
+                )
             );
 
             if (!success) revert DepositModuleFailed();
@@ -317,13 +361,17 @@ contract LobsterVault is Modular, ERC4626Fees {
         address owner,
         uint256 assets,
         uint256 shares
-    )
-        internal
-        override
-    {
+    ) internal override {
         if (address(vaultFlow) != address(0)) {
-            (bool success,) = address(vaultFlow).call(
-                abi.encodeWithSelector(vaultFlow._withdraw.selector, caller, receiver, owner, assets, shares)
+            (bool success, ) = address(vaultFlow).call(
+                abi.encodeWithSelector(
+                    vaultFlow._withdraw.selector,
+                    caller,
+                    receiver,
+                    owner,
+                    assets,
+                    shares
+                )
             );
 
             if (!success) revert WithdrawModuleFailed();
@@ -333,6 +381,37 @@ contract LobsterVault is Modular, ERC4626Fees {
 
         // if no module set, backoff to default
         return super._withdraw(caller, receiver, owner, assets, shares);
+    }
+
+    /**
+     * @inheritdoc ERC4626
+     * @dev Override of ERC4626.maxWithdraw to use the vaultFlow module if available
+     */
+    function maxWithdraw(
+        address owner
+    ) public view override returns (uint256 maxAssets) {
+        // if (address(vaultFlow) != address(0)) {
+        //     return vaultFlow.maxWithdraw(owner);
+        // }
+
+        // if no module set, backoff to default
+         uint256 ownerBalance = balanceOf(owner);
+         console.log("ownerBalance", ownerBalance);
+        return _convertToAssets(ownerBalance - _feeOnRaw(ownerBalance, exitFeeBasisPoints), Math.Rounding.Floor);
+    }
+
+        /**
+     * @dev Internal conversion function (from assets to shares) with support for rounding direction.
+     */
+    function _convertToShares(uint256 assets, Math.Rounding rounding) internal view override returns (uint256) {
+        return assets.mulDiv(totalSupply() + 10 ** _decimalsOffset(), totalAssets() + 1, rounding);
+    }
+
+    /**
+     * @dev Internal conversion function (from shares to assets) with support for rounding direction.
+     */
+    function _convertToAssets(uint256 shares, Math.Rounding rounding) internal view override returns (uint256) {
+        return shares.mulDiv(totalAssets() + 1, totalSupply() + 10 ** _decimalsOffset(), rounding);
     }
 
     /**
@@ -362,9 +441,24 @@ contract LobsterVault is Modular, ERC4626Fees {
      * @param amount The amount to transfer
      * @dev Can only be called by the vaultFlow module
      */
-    function safeTransfer(IERC20 token, address to, uint256 amount) external OnlyVaultFlow {
+    function safeTransfer(
+        IERC20 token,
+        address to,
+        uint256 amount
+    ) external OnlyVaultFlow {
         // Use SafeERC20 to transfer tokens safely
         SafeERC20.safeTransfer(token, to, amount);
+    }
+
+    /**
+     * @notice Approves a spender to spend a specified amount of tokens
+     * @param owner The address that owns the tokens
+     * @param spender The address that will be allowed to spend the tokens
+     * @param value The amount of tokens to approve
+     * @dev Can only be called by the vaultFlow module
+     */
+    function spendAllowance(address owner, address spender, uint256 value) external OnlyVaultFlow {
+       _spendAllowance( owner,  spender,  value);
     }
 
     /**
@@ -375,7 +469,12 @@ contract LobsterVault is Modular, ERC4626Fees {
      * @param amount The amount to transfer
      * @dev Can only be called by the vaultFlow module
      */
-    function safeTransferFrom(IERC20 token, address from, address to, uint256 amount) external OnlyVaultFlow {
+    function safeTransferFrom(
+        IERC20 token,
+        address from,
+        address to,
+        uint256 amount
+    ) external OnlyVaultFlow {
         // Use SafeERC20 to transfer tokens safely
         SafeERC20.safeTransferFrom(token, from, to, amount);
     }

@@ -15,17 +15,20 @@ import {INonFungiblePositionManager} from "../../../../src/interfaces/uniswapV3/
 import {UniswapV3Infra} from "../../../Mocks/uniswapV3/UniswapV3Infra.sol";
 import {IUniswapV3FactoryMinimal} from "../../../../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
 import {IWETH} from "../../../../src/interfaces/IWETH.sol";
+import {DummyValidator} from "../../../Mocks/modules/DummyValidator.sol";
+import {IUniswapV3RouterMinimal} from "../../../../src/interfaces/uniswapV3/IUniswapV3RouterMinimal.sol";
 
 struct UniswapV3Data {
     IUniswapV3FactoryMinimal factory;
     INonFungiblePositionManager positionManager;
+    IUniswapV3RouterMinimal router;
     address tokenA;
     address tokenB;
     uint24 poolFee;
     uint160 poolInitialSqrtPriceX96;
 }
 
-contract UniswapV3VaultOperationsSetup is VaultTestUtils, UniswapV3Infra {
+contract UniswapV3VaultFlowSetup is VaultTestUtils, UniswapV3Infra {
     UniswapV3Data public uniswapV3Data;
 
     function setUp() public {
@@ -34,11 +37,17 @@ contract UniswapV3VaultOperationsSetup is VaultTestUtils, UniswapV3Infra {
         bob = makeAddr("bob");
         feeCollector = makeAddr("feeCollector");
 
-        (IUniswapV3FactoryMinimal factory_,, INonFungiblePositionManager positionManager_) = deploy();
+        (
+            IUniswapV3FactoryMinimal factory,
+            ,
+            INonFungiblePositionManager positionManager,
+            IUniswapV3RouterMinimal router
+        ) = deploy();
 
         uniswapV3Data.poolFee = 3000; // 0.3%
-        uniswapV3Data.positionManager = positionManager_;
-        uniswapV3Data.factory = factory_;
+        uniswapV3Data.positionManager = positionManager;
+        uniswapV3Data.factory = factory;
+        uniswapV3Data.router = router;
         uniswapV3Data.poolInitialSqrtPriceX96 = 2 ** 96; // = quote = 1:1 if both tokens have the same decimals value
         asset = new MockERC20();
         uniswapV3Data.tokenA = address(asset);
@@ -55,17 +64,29 @@ contract UniswapV3VaultOperationsSetup is VaultTestUtils, UniswapV3Infra {
 
         // module instantiation
         IHook hook = IHook(address(0));
-        IOpValidatorModule opValidator = IOpValidatorModule(address(0));
+        IOpValidatorModule opValidator = new DummyValidator();
         IVaultFlowModule vaultOperations = new UniswapV3VaultFlow(
             pool,
             uniswapV3Data.positionManager,
+            address(uniswapV3Data.router),
             address(asset), // tokenA
             0
         );
         INav navModule = INav(address(0));
 
         vault = new LobsterVault(
-            owner, asset, "Vault Token", "vTKN", feeCollector, opValidator, hook, navModule, vaultOperations, 0, 0, 0
+            owner,
+            asset,
+            "Vault Token",
+            "vTKN",
+            feeCollector,
+            opValidator,
+            hook,
+            navModule,
+            vaultOperations,
+            0,
+            0,
+            0
         );
 
         // Setup initial state
