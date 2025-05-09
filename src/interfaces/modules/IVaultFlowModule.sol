@@ -45,13 +45,4 @@ interface IVaultFlowModule {
     )
         external
         returns (bool success);
-
-    /**
-     * @dev Returns the maximum amount of the underlying asset that can be withdrawn from the owner balance in the
-     * Vault, through a withdraw call.
-     *
-     * - MUST return a limited value if owner is subject to some withdrawal limit or timelock.
-     * - MUST NOT revert.
-     */
-    function maxWithdraw(address owner) external view returns (uint256 maxAssets);
 }

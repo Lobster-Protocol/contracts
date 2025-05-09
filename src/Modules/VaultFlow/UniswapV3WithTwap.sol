@@ -423,14 +423,6 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
         console.log("final tokenA: ", poolToken0.balanceOf(address(vault)));
         console.log("final tokenB: ", poolToken1.balanceOf(address(vault)));
 
-        /**
-         * - collect fees (including cut)
-         * - swap all tokens for the vault asset
-         * - Burn shares
-         * - transfer to receiver
-         * - transfer fees cut to the fee collector
-         */
-
         // If _asset is ERC-777, `transfer` can trigger a reentrancy AFTER the transfer happens through the
         // `tokensReceived` hook. On the other hand, the `tokensToSend` hook, that is triggered before the transfer,
         // calls the vault, which is assumed not malicious.
@@ -446,17 +438,6 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
         emit IERC4626.Withdraw(caller, receiver, owner, assets, shares);
 
         return true;
-    }
-
-    /**
-     * @inheritdoc IVaultFlowModule
-     */
-    function maxWithdraw(
-        address owner
-    ) external view returns (uint256 maxAssets) {
-        // Get the
-        // // Assumes the caller is the vault
-        // return _convertToAssets(balanceOf(owner), Math.Rounding.Floor);
     }
 
     /**
