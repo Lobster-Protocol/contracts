@@ -84,12 +84,14 @@ contract VaultWithNavWithRebaseSetup is VaultTestUtils {
     function createRebaseSignature(
         address signer,
         uint256 newTotalAssets,
-        uint256 validUntil
+        uint256 validUntil,
+        bytes memory operationData
     ) internal view returns (bytes memory signature) {
         // Get the message hash as expected by the contract
         bytes32 msgHash = NavWithRebase(address(vault.navModule())).getMessage(
             newTotalAssets,
-            validUntil
+            validUntil,
+            operationData
         );
 
         uint256 privateKey = 0;

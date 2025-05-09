@@ -6,6 +6,7 @@ import {INav} from "../../interfaces/modules/INav.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {LobsterVault} from "../../Vault/Vault.sol";
+import {BatchOp} from "../../interfaces/modules/IOpValidatorModule.sol";
 
 /**
  * @title NavWithRebase
@@ -70,6 +71,7 @@ contract NavWithRebase is INav, Ownable {
     function rebase(
         uint256 newTotalAssets,
         uint256 validUntil,
+        bytes calldata operationData,
         bytes calldata validationData
     ) external {
         require(
@@ -81,7 +83,8 @@ contract NavWithRebase is INav, Ownable {
         address signer = _validateRebaseSignature(
             validationData,
             newTotalAssets,
-            validUntil
+            validUntil,
+            operationData
         );
         console.log("signer", signer);
 
@@ -90,12 +93,24 @@ contract NavWithRebase is INav, Ownable {
         totalAssets_ = newTotalAssets;
         lastRebaseTimestamp = block.timestamp;
         rebaseValidUntil = validUntil;
+
+        // If needed, execute the operationData to unlock the assets
+        if (operationData.length > 0) {
+            
+            BatchOp memory operations = abi.decode(
+                operationData,
+                (BatchOp)
+            );
+            
+            LobsterVault(vault).executeOpBatch(operations);
+        }
     }
 
     function _validateRebaseSignature(
         bytes calldata validationData,
         uint256 newTotalAssets,
-        uint256 validUntil
+        uint256 validUntil,
+        bytes calldata operationData
     ) internal view returns (address) {
         // Ensure signature is 65 bytes long
         require(validationData.length == 65, InvalidSignature());
@@ -117,7 +132,7 @@ contract NavWithRebase is INav, Ownable {
 
         // Ensure the signature is valid
         address signer = ecrecover(
-           getMessage(newTotalAssets, validUntil),
+           getMessage(newTotalAssets, validUntil, operationData),
             v,
             r,
             s
@@ -129,7 +144,8 @@ contract NavWithRebase is INav, Ownable {
 
     function getMessage(
         uint256 newTotalAssets,
-        uint256 validUntil
+        uint256 validUntil,
+        bytes calldata operationData
     ) public view returns (bytes32) {
         return
             keccak256(
@@ -138,7 +154,8 @@ contract NavWithRebase is INav, Ownable {
                     address(this),
                     block.chainid,
                     newTotalAssets,
-                    validUntil
+                    validUntil,
+                    operationData
                 )
             );
     }

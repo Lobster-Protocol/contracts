@@ -12,7 +12,7 @@ import {NavWithRebase} from "./navWithRebase.sol";
  * @notice This contract is a proxy for the NavWithRebase module.
  * It is used to rebase and interact with the Vault (deposits, withdrawals, etc.)
  * in only one transaction.
- * @dev This contract provides convenience functions to execute vault operations 
+ * @dev This contract provides convenience functions to execute vault operations
  * and rebase actions atomically.
  */
 contract NavWithRebaseProxy {
@@ -21,13 +21,13 @@ contract NavWithRebaseProxy {
      * @dev This is immutable and set in the constructor
      */
     LobsterVault public immutable vault;
-    
+
     /**
      * @notice Reference to the NavWithRebase module for NAV calculations and rebasing
      * @dev This is immutable and set in the constructor based on the vault's navModule
      */
     NavWithRebase public immutable rebasingNavModule;
-    
+
     /**
      * @notice Reference to the underlying asset token contract
      * @dev This is immutable and set in the constructor based on the vault's asset
@@ -163,7 +163,7 @@ contract NavWithRebaseProxy {
         // decode the data
         address target = address(bytes20(doData[:20]));
         bytes memory data = doData[20:];
-        
+
         // call the target contract with the data
         (bool success, ) = target.call(data);
         require(success, "Call failed");
@@ -173,7 +173,7 @@ contract NavWithRebaseProxy {
 
     /**
      * @notice Executes a rebase operation on the NavWithRebase module
-     * @param rebaseData Encoded parameters containing newTotalAssets, rebaseValidUntil, and validationData
+     * @param rebaseData Encoded parameters containing newTotalAssets, rebaseValidUntil, operationData and validationData
      * @return true if the rebase operation succeeds
      * @dev Decodes the rebaseData and calls the rebase function on the NavWithRebase module
      * @dev rebaseData must be encoded as (uint256, uint256, bytes)
@@ -183,12 +183,14 @@ contract NavWithRebaseProxy {
         (
             uint256 newTotalAssets,
             uint256 rebaseValidUntil,
+            bytes memory operationData,
             bytes memory validationData
-        ) = abi.decode(rebaseData, (uint256, uint256, bytes));
+        ) = abi.decode(rebaseData, (uint256, uint256, bytes, bytes));
 
         rebasingNavModule.rebase(
             newTotalAssets,
             rebaseValidUntil,
+            operationData,
             validationData
         );
 
