@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {INav} from "../../interfaces/modules/INav.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {LobsterVault} from "../../Vault/Vault.sol";
 
 /**
  * @title NavWithRebase
@@ -15,9 +16,9 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  * ignore the rebase, user need to call the acceptNoRebase function (works for 1 withdrawal then needs to be re-activated).
  */
 contract NavWithRebase is INav, Ownable {
-    IERC20 private immutable vaultAsset;
+    IERC20 private vaultAsset;
 
-    address public immutable vault;
+    address public vault;
     /// @notice The total assets of the vault (without the vault's assets balance)
     uint256 public totalAssets_;
     uint256 public lastRebaseTimestamp;
@@ -29,12 +30,18 @@ contract NavWithRebase is INav, Ownable {
 
     constructor(
         address initialOwner,
-        address vaultAddress,
         uint256 initialTotalAssets
     ) Ownable(initialOwner) {
         lastRebaseTimestamp = block.timestamp;
-        vault = vaultAddress;
         totalAssets_ = initialTotalAssets;
+    }
+
+    function initialize(
+        address _vault
+    ) external onlyOwner {
+        require(vault == address(0), "NavWithRebase: Already initialized");
+        vault = _vault;
+        vaultAsset = IERC20(LobsterVault(vault).asset());
     }
 
     /**
