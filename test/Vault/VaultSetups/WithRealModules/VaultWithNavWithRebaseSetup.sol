@@ -20,13 +20,21 @@ import {NavWithRebase} from "../../../../src/Modules/NavWithRebase/navWithRebase
 // Vault base setup with validator function to be used in other test files
 contract VaultWithNavWithRebaseSetup is VaultTestUtils {
     DummyUniswapV3PoolMinimal uniV3MockedPool;
+    address public rebaser;
+    uint256 public rebaserPrivateKey;
+    uint256 public notRebaserPrivateKey;
+    address public notRebaser;
 
     function setUp() public {
         owner = makeAddr("owner");
         alice = makeAddr("alice");
         bob = makeAddr("bob");
         feeCollector = makeAddr("feeCollector");
-
+        rebaserPrivateKey = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
+        rebaser = vm.addr(rebaserPrivateKey);
+        notRebaserPrivateKey = 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
+        notRebaser = vm.addr(notRebaserPrivateKey);
+        console.log("rebaser: ", rebaser);
         // module instantiation
         IHook hook = new DummyHook();
         IOpValidatorModule opValidator = new DummyValidator();
@@ -39,14 +47,27 @@ contract VaultWithNavWithRebaseSetup is VaultTestUtils {
         counter = new Counter();
 
         vault = new LobsterVault(
-            owner, asset, "Vault Token", "vTKN", feeCollector, opValidator, hook, navModule, vaultOperations, 0, 0, 0
+            owner,
+            asset,
+            "Vault Token",
+            "vTKN",
+            feeCollector,
+            opValidator,
+            hook,
+            navModule,
+            vaultOperations,
+            0,
+            0,
+            0
         );
 
-        // initialize nav module
         vm.startPrank(owner);
+        // initialize nav module
         navModuleWithRebase.initialize(address(vault));
+        // set the rebaser
+        navModuleWithRebase.setRebaser(rebaser, true);
         vm.stopPrank();
-        
+
         // Setup initial state
         asset.mint(alice, 10000 ether);
         asset.mint(bob, 10000 ether);
@@ -58,5 +79,34 @@ contract VaultWithNavWithRebaseSetup is VaultTestUtils {
         vm.startPrank(bob);
         asset.approve(address(vault), type(uint256).max);
         vm.stopPrank();
+    }
+
+    function createRebaseSignature(
+        address signer,
+        uint256 newTotalAssets,
+        uint256 validUntil
+    ) internal view returns (bytes memory signature) {
+        // Get the message hash as expected by the contract
+        bytes32 msgHash = NavWithRebase(address(vault.navModule())).getMessage(
+            newTotalAssets,
+            validUntil
+        );
+
+        uint256 privateKey = 0;
+        if (signer == rebaser) {
+            privateKey = rebaserPrivateKey;
+        } else if (signer == notRebaser) {
+            privateKey = notRebaserPrivateKey;
+        } else {
+            revert("Invalid signer");
+        }
+        // Sign the message hash using the private key of the signer
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, msgHash);
+
+        console.log("ini v", v);
+        console.log("ini r", uint256(r));
+        console.log("ini s", uint256(s));
+        // Create the signature data in the format the contract expects
+        signature = abi.encodePacked(v,r,s);
     }
 }

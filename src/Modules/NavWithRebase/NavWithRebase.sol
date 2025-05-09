@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPLv3
 pragma solidity ^0.8.28;
+import "forge-std/Test.sol";
 
 import {INav} from "../../interfaces/modules/INav.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -28,6 +29,9 @@ contract NavWithRebase is INav, Ownable {
     /// @notice Mapping to track if a user has accepted the no rebase condition: address => approval deadline
     mapping(address => uint256) public acceptNoRebase;
 
+    error AlreadyInitialized();
+    error InvalidSignature();
+
     constructor(
         address initialOwner,
         uint256 initialTotalAssets
@@ -36,10 +40,8 @@ contract NavWithRebase is INav, Ownable {
         totalAssets_ = initialTotalAssets;
     }
 
-    function initialize(
-        address _vault
-    ) external onlyOwner {
-        require(vault == address(0), "NavWithRebase: Already initialized");
+    function initialize(address _vault) external onlyOwner {
+        require(vault == address(0), AlreadyInitialized());
         vault = _vault;
         vaultAsset = IERC20(LobsterVault(vault).asset());
     }
@@ -50,8 +52,8 @@ contract NavWithRebase is INav, Ownable {
      * @dev If the rebase is not valid, it returns the vault's balance of the asset
      */
     function totalAssets() external view returns (uint256) {
-        if (block.timestamp > rebaseValidUntil) {
-            return totalAssets_;
+        if (block.timestamp <= rebaseValidUntil) {
+            return totalAssets_ + vaultAsset.balanceOf(vault);
         } else {
             return vaultAsset.balanceOf(vault);
         }
@@ -70,16 +72,20 @@ contract NavWithRebase is INav, Ownable {
         uint256 validUntil,
         bytes calldata validationData
     ) external {
-        require(validUntil >= block.timestamp && validUntil >= rebaseValidUntil, "NavWithRebase: Invalid validUntil");
-
+        require(
+            validUntil >= block.timestamp && validUntil >= rebaseValidUntil,
+            "NavWithRebase: Invalid validUntil"
+        );
+        console.log("validUntil", validUntil);
         // Ensure the signature is valid
         address signer = _validateRebaseSignature(
             validationData,
             newTotalAssets,
             validUntil
         );
+        console.log("signer", signer);
 
-        require(rebasers[signer], "NavWithRebase: Not a valid rebaser");
+        require(rebasers[signer], InvalidSignature());
 
         totalAssets_ = newTotalAssets;
         lastRebaseTimestamp = block.timestamp;
@@ -92,45 +98,43 @@ contract NavWithRebase is INav, Ownable {
         uint256 validUntil
     ) internal view returns (address) {
         // Ensure signature is 65 bytes long
-        require(validationData.length == 65, "Invalid signature length");
+        require(validationData.length == 65, InvalidSignature());
 
         // Extract the signature components
+        uint8 v;
         bytes32 r;
         bytes32 s;
-        uint8 v;
-
         assembly {
             let dataOffset := validationData.offset
-            calldatacopy(0x0, dataOffset, 0x60) // Copy 96 bytes (r, s, v) to memory starting at 0x0
-            r := mload(0x0)
-            s := mload(0x20)
-            v := byte(0, mload(0x40))
+            v := byte(0, calldataload(dataOffset))
+            r := calldataload(add(dataOffset, 1))
+            s := calldataload(add(dataOffset, 33))
         }
+
+        console.log("v", v);
+        console.log("r", uint256(r));
+        console.log("s", uint256(s));
 
         // Ensure the signature is valid
         address signer = ecrecover(
-            keccak256(
-                abi.encodePacked(
-                    "\x19Ethereum Signed Message:\n32",
-                    getMessage(newTotalAssets, validUntil)
-                )
-            ),
+           getMessage(newTotalAssets, validUntil),
             v,
             r,
             s
         );
 
-        require(signer != address(0), "Invalid signature");
+        require(signer != address(0), InvalidSignature());
         return signer;
     }
 
     function getMessage(
         uint256 newTotalAssets,
         uint256 validUntil
-    ) internal view returns (bytes32) {
+    ) public view returns (bytes32) {
         return
             keccak256(
                 abi.encodePacked(
+                    "\x19Ethereum Signed Message:\n32",
                     address(this),
                     block.chainid,
                     newTotalAssets,
