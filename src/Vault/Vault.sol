@@ -227,6 +227,7 @@ contract LobsterVault is Modular, ERC4626Fees {
      */
     function totalAssets() public view virtual override returns (uint256) {
         if (address(navModule) != address(0)) {
+            console.log("NAV module set: ", navModule.totalAssets());
             return navModule.totalAssets();
         }
         return IERC20(asset()).balanceOf(address(this));

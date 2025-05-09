@@ -68,7 +68,7 @@ contract UniswapV3VaultFlowSetup is VaultTestUtils, UniswapV3Infra {
             address(asset), // tokenA
             0
         );
-        INav navModule = INav(address(0));
+        INav navModule = INav(address(vaultOperations)); // UniswapV3VaultFlow is also a Nav module
 
         vault = new LobsterVault(
             owner, asset, "Vault Token", "vTKN", feeCollector, opValidator, hook, navModule, vaultOperations, 0, 0, 0
