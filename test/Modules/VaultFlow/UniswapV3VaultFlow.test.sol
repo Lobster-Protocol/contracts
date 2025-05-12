@@ -22,12 +22,8 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
         vm.warp(1735689600); // we need this, otherwise when we call pool.observe(1 hour), it will revert. (only needs to be > 1 hour)
 
         vm.startPrank(alice);
-        uint256 initialAliceAssetBalance = IERC20(vault.asset()).balanceOf(
-            alice
-        );
-        uint256 initialVaultAssetBalance = IERC20(vault.asset()).balanceOf(
-            address(vault)
-        );
+        uint256 initialAliceAssetBalance = IERC20(vault.asset()).balanceOf(alice);
+        uint256 initialVaultAssetBalance = IERC20(vault.asset()).balanceOf(address(vault));
 
         // alice deposit
         uint256 depositedAmount = 1 ether;
@@ -40,14 +36,8 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
         vm.stopPrank();
 
         // ensure the transfer happened
-        vm.assertEq(
-            IERC20(vault.asset()).balanceOf(alice),
-            initialAliceAssetBalance - depositedAmount
-        );
-        vm.assertEq(
-            IERC20(vault.asset()).balanceOf(address(vault)),
-            initialVaultAssetBalance + depositedAmount
-        );
+        vm.assertEq(IERC20(vault.asset()).balanceOf(alice), initialAliceAssetBalance - depositedAmount);
+        vm.assertEq(IERC20(vault.asset()).balanceOf(address(vault)), initialVaultAssetBalance + depositedAmount);
     }
 
     // function testDepositHighVolatility() public {
@@ -66,32 +56,16 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
         // Alice withdraws all her shares
         uint256 sharesToWithdraw = mintedShares;
         uint256 expectedAssets = vault.convertToAssets(sharesToWithdraw);
-        uint256 initialAliceAssetBalance = IERC20(vault.asset()).balanceOf(
-            alice
-        );
-        uint256 initialVaultAssetBalance = IERC20(vault.asset()).balanceOf(
-            address(vault)
-        );
+        uint256 initialAliceAssetBalance = IERC20(vault.asset()).balanceOf(alice);
+        uint256 initialVaultAssetBalance = IERC20(vault.asset()).balanceOf(address(vault));
         // ensure the withdraw event is emitted
         vm.expectEmit(true, true, true, true);
-        emit IERC4626.Withdraw(
-            alice,
-            alice,
-            alice,
-            sharesToWithdraw,
-            expectedAssets
-        );
+        emit IERC4626.Withdraw(alice, alice, alice, sharesToWithdraw, expectedAssets);
         vault.withdraw(sharesToWithdraw, alice, alice);
 
         // ensure the transfer happened
-        vm.assertEq(
-            IERC20(vault.asset()).balanceOf(alice),
-            initialAliceAssetBalance + expectedAssets
-        );
-        vm.assertEq(
-            IERC20(vault.asset()).balanceOf(address(vault)),
-            initialVaultAssetBalance - expectedAssets
-        );
+        vm.assertEq(IERC20(vault.asset()).balanceOf(alice), initialAliceAssetBalance + expectedAssets);
+        vm.assertEq(IERC20(vault.asset()).balanceOf(address(vault)), initialVaultAssetBalance - expectedAssets);
 
         vm.stopPrank();
     }
@@ -128,31 +102,20 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
         // Alice deposits 1 ether into the vault
         uint256 aliceDeposit = 1 ether;
         uint256 mintedShares = vault.deposit(aliceDeposit, alice);
-        console.log(
-            "minted shares: ",
-            mintedShares,
-            " aliceDeposit: ",
-            aliceDeposit
-        );
+        console.log("minted shares: ", mintedShares, " aliceDeposit: ", aliceDeposit);
         vm.stopPrank();
 
         // approve tokenA
         BaseOp memory op0 = BaseOp({
             target: address(uniswapV3Data.tokenA),
             value: 0,
-            data: abi.encodeCall(
-                IERC20.approve,
-                (address(uniswapV3Data.router), type(uint256).max)
-            )
+            data: abi.encodeCall(IERC20.approve, (address(uniswapV3Data.router), type(uint256).max))
         });
         // approve tokenB
         BaseOp memory op1 = BaseOp({
             target: address(uniswapV3Data.tokenB),
             value: 0,
-            data: abi.encodeCall(
-                IERC20.approve,
-                (address(uniswapV3Data.router), type(uint256).max)
-            )
+            data: abi.encodeCall(IERC20.approve, (address(uniswapV3Data.router), type(uint256).max))
         });
         // swap 50% of the deposit to tokenB
         BaseOp memory op2 = BaseOp({
@@ -163,9 +126,7 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
                 (
                     IUniswapV3RouterMinimal.ExactInputSingleParams({
                         tokenIn: vault.asset(),
-                        tokenOut: vault.asset() == uniswapV3Data.tokenA
-                            ? uniswapV3Data.tokenB
-                            : uniswapV3Data.tokenA,
+                        tokenOut: vault.asset() == uniswapV3Data.tokenA ? uniswapV3Data.tokenB : uniswapV3Data.tokenA,
                         fee: uniswapV3Data.poolFee,
                         recipient: address(vault),
                         deadline: block.timestamp + 1 hours,
@@ -182,37 +143,24 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
         vault.executeOp(Op(op1, ""));
         vault.executeOp(Op(op2, ""));
         // get both token amounts
-        uint256 tokenAInVaultAfterSwap = IERC20(uniswapV3Data.tokenA).balanceOf(
-            address(vault)
-        );
-        uint256 tokenBInVaultAfterSwap = IERC20(uniswapV3Data.tokenB).balanceOf(
-            address(vault)
-        ); // expected to be <= aliceDeposit/2 because of the slippage
+        uint256 tokenAInVaultAfterSwap = IERC20(uniswapV3Data.tokenA).balanceOf(address(vault));
+        uint256 tokenBInVaultAfterSwap = IERC20(uniswapV3Data.tokenB).balanceOf(address(vault)); // expected to be <= aliceDeposit/2 because of the slippage
 
         console.log(
-            "tokenAInVaultAfterSwap: ",
-            tokenAInVaultAfterSwap,
-            " tokenBInVaultAfterSwap: ",
-            tokenBInVaultAfterSwap
+            "tokenAInVaultAfterSwap: ", tokenAInVaultAfterSwap, " tokenBInVaultAfterSwap: ", tokenBInVaultAfterSwap
         );
 
         // allow the position manager to spend the tokens
         BaseOp memory op3 = BaseOp({
             target: address(uniswapV3Data.tokenA),
             value: 0,
-            data: abi.encodeCall(
-                IERC20.approve,
-                (address(uniswapV3Data.positionManager), type(uint256).max)
-            )
+            data: abi.encodeCall(IERC20.approve, (address(uniswapV3Data.positionManager), type(uint256).max))
         });
         vault.executeOp(Op(op3, ""));
         BaseOp memory op4 = BaseOp({
             target: address(uniswapV3Data.tokenB),
             value: 0,
-            data: abi.encodeCall(
-                IERC20.approve,
-                (address(uniswapV3Data.positionManager), type(uint256).max)
-            )
+            data: abi.encodeCall(IERC20.approve, (address(uniswapV3Data.positionManager), type(uint256).max))
         });
         vault.executeOp(Op(op4, ""));
 
@@ -224,33 +172,23 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
                 INonFungiblePositionManager.mint,
                 (
                     INonFungiblePositionManager.MintParams({
-                        token0: uniswapV3Data.tokenA > uniswapV3Data.tokenB
-                            ? uniswapV3Data.tokenB
-                            : uniswapV3Data.tokenA,
-                        token1: uniswapV3Data.tokenA > uniswapV3Data.tokenB
-                            ? uniswapV3Data.tokenA
-                            : uniswapV3Data.tokenB,
+                        token0: uniswapV3Data.tokenA > uniswapV3Data.tokenB ? uniswapV3Data.tokenB : uniswapV3Data.tokenA,
+                        token1: uniswapV3Data.tokenA > uniswapV3Data.tokenB ? uniswapV3Data.tokenA : uniswapV3Data.tokenB,
                         fee: uniswapV3Data.poolFee,
                         tickLower: -6000,
                         tickUpper: 6000,
-                        amount0Desired: uniswapV3Data.tokenA >
-                            uniswapV3Data.tokenB
+                        amount0Desired: uniswapV3Data.tokenA > uniswapV3Data.tokenB
                             ? tokenAInVaultAfterSwap
                             : tokenBInVaultAfterSwap,
-                        amount1Desired: uniswapV3Data.tokenA >
-                            uniswapV3Data.tokenB
+                        amount1Desired: uniswapV3Data.tokenA > uniswapV3Data.tokenB
                             ? tokenBInVaultAfterSwap
                             : tokenAInVaultAfterSwap,
-                        amount0Min: ((
-                            uniswapV3Data.tokenA > uniswapV3Data.tokenB
-                                ? tokenAInVaultAfterSwap
-                                : tokenBInVaultAfterSwap
-                        ) * 99) / 100,
-                        amount1Min: ((
-                            uniswapV3Data.tokenA > uniswapV3Data.tokenB
-                                ? tokenBInVaultAfterSwap
-                                : tokenAInVaultAfterSwap
-                        ) * 99) / 100,
+                        amount0Min: (
+                            (uniswapV3Data.tokenA > uniswapV3Data.tokenB ? tokenAInVaultAfterSwap : tokenBInVaultAfterSwap) * 99
+                        ) / 100,
+                        amount1Min: (
+                            (uniswapV3Data.tokenA > uniswapV3Data.tokenB ? tokenBInVaultAfterSwap : tokenAInVaultAfterSwap) * 99
+                        ) / 100,
                         recipient: address(vault),
                         deadline: block.timestamp + 1 hours
                     })
@@ -269,36 +207,27 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
         uint256 amountAToSwap = 1 ether;
         MockERC20(uniswapV3Data.tokenA).mint(bob, amountAToSwap);
 
-        MockERC20(uniswapV3Data.tokenA).approve(
-            address(uniswapV3Data.router),
-            type(uint256).max
-        );
+        MockERC20(uniswapV3Data.tokenA).approve(address(uniswapV3Data.router), type(uint256).max);
 
         // swap 1e18 of tokenA to tokenB
-        IUniswapV3PoolMinimal pool = 
-            IUniswapV3PoolMinimal(
-                IUniswapV3FactoryMinimal(uniswapV3Data.factory).getPool(
-                    uniswapV3Data.tokenA,
-                    uniswapV3Data.tokenB,
-                    uniswapV3Data.poolFee
-                )
-            );
-        (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
-        IUniswapV3RouterMinimal.ExactInputSingleParams memory params = IUniswapV3RouterMinimal
-            .ExactInputSingleParams({
-                tokenIn: uniswapV3Data.tokenA,
-                tokenOut: uniswapV3Data.tokenB,
-                fee: uniswapV3Data.poolFee,
-                recipient: address(vault),
-                deadline: block.timestamp + 1 hours,
-                amountIn: amountAToSwap,
-                amountOutMinimum: 0, // 1% slippage
-                sqrtPriceLimitX96: sqrtPriceX96 + 100  // * 9990 / 10000
-            });
+        IUniswapV3PoolMinimal pool = IUniswapV3PoolMinimal(
+            IUniswapV3FactoryMinimal(uniswapV3Data.factory).getPool(
+                uniswapV3Data.tokenA, uniswapV3Data.tokenB, uniswapV3Data.poolFee
+            )
+        );
+        (uint160 sqrtPriceX96,,,,,,) = pool.slot0();
+        IUniswapV3RouterMinimal.ExactInputSingleParams memory params = IUniswapV3RouterMinimal.ExactInputSingleParams({
+            tokenIn: uniswapV3Data.tokenA,
+            tokenOut: uniswapV3Data.tokenB,
+            fee: uniswapV3Data.poolFee,
+            recipient: address(vault),
+            deadline: block.timestamp + 1 hours,
+            amountIn: amountAToSwap,
+            amountOutMinimum: 0, // 1% slippage
+            sqrtPriceLimitX96: sqrtPriceX96 + 100 // * 9990 / 10000
+        });
         // execute the swap
-        IUniswapV3RouterMinimal(address(uniswapV3Data.router)).exactInputSingle(
-                params
-            );
+        IUniswapV3RouterMinimal(address(uniswapV3Data.router)).exactInputSingle(params);
 
         vm.warp(initialTimestamp + 2 hours); // wait for the position to be created
 
@@ -309,33 +238,17 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
         vm.startPrank(alice);
         uint256 sharesToWithdraw = vault.maxWithdraw(alice);
         uint256 expectedAssets = vault.convertToAssets(sharesToWithdraw);
-        uint256 initialAliceAssetBalance = IERC20(vault.asset()).balanceOf(
-            alice
-        );
-        uint256 initialVaultAssetBalance = IERC20(vault.asset()).balanceOf(
-            address(vault)
-        );
+        uint256 initialAliceAssetBalance = IERC20(vault.asset()).balanceOf(alice);
+        uint256 initialVaultAssetBalance = IERC20(vault.asset()).balanceOf(address(vault));
         // ensure the withdraw event is emitted
         vm.expectEmit(true, true, true, true);
-        emit IERC4626.Withdraw(
-            alice,
-            alice,
-            alice,
-            sharesToWithdraw,
-            expectedAssets
-        );
+        emit IERC4626.Withdraw(alice, alice, alice, sharesToWithdraw, expectedAssets);
 
         vault.withdraw(sharesToWithdraw, alice, alice);
 
         // ensure the transfer happened
-        vm.assertEq(
-            IERC20(vault.asset()).balanceOf(alice),
-            initialAliceAssetBalance + expectedAssets
-        );
-        vm.assertEq(
-            IERC20(vault.asset()).balanceOf(address(vault)),
-            initialVaultAssetBalance - expectedAssets
-        );
+        vm.assertEq(IERC20(vault.asset()).balanceOf(alice), initialAliceAssetBalance + expectedAssets);
+        vm.assertEq(IERC20(vault.asset()).balanceOf(address(vault)), initialVaultAssetBalance - expectedAssets);
 
         vm.stopPrank();
     }
@@ -357,8 +270,7 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
     function testTotalAssetsForWithNoPositions() public view {
         /* ------ test total assets for ------ */
         uint256 expectedTotalAssets = 0;
-        uint256 totalAsset = UniswapV3VaultFlow(address(vault.vaultFlow()))
-            .totalAssetsFor(vault);
+        uint256 totalAsset = UniswapV3VaultFlow(address(vault.vaultFlow())).totalAssetsFor(vault);
 
         assertEq(totalAsset, expectedTotalAssets);
     }
@@ -371,14 +283,8 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
         MockERC20(uniswapV3Data.tokenB).mint(alice, mintedAmount);
 
         // approve tokens for the pool
-        IERC20(uniswapV3Data.tokenA).approve(
-            address(uniswapV3Data.positionManager),
-            type(uint256).max
-        );
-        IERC20(uniswapV3Data.tokenB).approve(
-            address(uniswapV3Data.positionManager),
-            type(uint256).max
-        );
+        IERC20(uniswapV3Data.tokenA).approve(address(uniswapV3Data.positionManager), type(uint256).max);
+        IERC20(uniswapV3Data.tokenB).approve(address(uniswapV3Data.positionManager), type(uint256).max);
 
         // deposit some assets as lp
         uint256 depositedAmount = 1 ether;
@@ -391,25 +297,21 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
             uint256 amount0,
             uint256 amount1
         ) = createPosition(
-                uniswapV3Data.positionManager,
-                uniswapV3Data.tokenA,
-                uniswapV3Data.tokenB,
-                depositedAmount,
-                depositedAmount,
-                uniswapV3Data.poolFee,
-                address(vault) // vault will be the position owner
-            );
+            uniswapV3Data.positionManager,
+            uniswapV3Data.tokenA,
+            uniswapV3Data.tokenB,
+            depositedAmount,
+            depositedAmount,
+            uniswapV3Data.poolFee,
+            address(vault) // vault will be the position owner
+        );
 
         /* ------ test total assets for ------ */
         // test with 1 position
         uint256 expectedTotalAssets = amount0 + amount1; // 2 assets in the pool with a quote of 1:1
-        uint256 totalAsset = UniswapV3VaultFlow(address(vault.vaultFlow()))
-            .totalAssetsFor(vault);
+        uint256 totalAsset = UniswapV3VaultFlow(address(vault.vaultFlow())).totalAssetsFor(vault);
 
-        assert(
-            totalAsset >= expectedTotalAssets - 2 &&
-                totalAsset <= expectedTotalAssets
-        ); // uniswap rounds down the amount of tokens in the pool so we accept 1 token difference for each deposited token (2 tokens in total with a quote of 1:1)
+        assert(totalAsset >= expectedTotalAssets - 2 && totalAsset <= expectedTotalAssets); // uniswap rounds down the amount of tokens in the pool so we accept 1 token difference for each deposited token (2 tokens in total with a quote of 1:1)
 
         // test with a new position
         // create a new position
@@ -421,24 +323,20 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
             uint256 amount0New,
             uint256 amount1New
         ) = createPosition(
-                uniswapV3Data.positionManager,
-                uniswapV3Data.tokenA,
-                uniswapV3Data.tokenB,
-                depositedAmount,
-                depositedAmount,
-                uniswapV3Data.poolFee,
-                address(vault) // vault will be the position owner
-            );
+            uniswapV3Data.positionManager,
+            uniswapV3Data.tokenA,
+            uniswapV3Data.tokenB,
+            depositedAmount,
+            depositedAmount,
+            uniswapV3Data.poolFee,
+            address(vault) // vault will be the position owner
+        );
 
         // test with 2 positions
         expectedTotalAssets = amount0 + amount1 + amount0New + amount1New; // 2 assets in the pool with a quote of 1:1
-        totalAsset = UniswapV3VaultFlow(address(vault.vaultFlow()))
-            .totalAssetsFor(vault);
+        totalAsset = UniswapV3VaultFlow(address(vault.vaultFlow())).totalAssetsFor(vault);
 
-        assert(
-            totalAsset >= expectedTotalAssets - 4 &&
-                totalAsset <= expectedTotalAssets
-        ); // uniswap rounds down the amount of tokens in the pool so we accept 1 token difference for each deposited token: 2*(2 tokens in total with a quote of 1:1) = 4
+        assert(totalAsset >= expectedTotalAssets - 4 && totalAsset <= expectedTotalAssets); // uniswap rounds down the amount of tokens in the pool so we accept 1 token difference for each deposited token: 2*(2 tokens in total with a quote of 1:1) = 4
 
         vm.stopPrank();
     }

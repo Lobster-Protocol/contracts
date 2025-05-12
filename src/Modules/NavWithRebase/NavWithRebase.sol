@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPLv3
 pragma solidity ^0.8.28;
+
 import "forge-std/Test.sol";
 
 import {INav} from "../../interfaces/modules/INav.sol";
@@ -33,10 +34,7 @@ contract NavWithRebase is INav, Ownable {
     error AlreadyInitialized();
     error InvalidSignature();
 
-    constructor(
-        address initialOwner,
-        uint256 initialTotalAssets
-    ) Ownable(initialOwner) {
+    constructor(address initialOwner, uint256 initialTotalAssets) Ownable(initialOwner) {
         lastRebaseTimestamp = block.timestamp;
         totalAssets_ = initialTotalAssets;
     }
@@ -73,19 +71,13 @@ contract NavWithRebase is INav, Ownable {
         uint256 validUntil,
         bytes calldata operationData,
         bytes calldata validationData
-    ) external {
-        require(
-            validUntil >= block.timestamp && validUntil >= rebaseValidUntil,
-            "NavWithRebase: Invalid validUntil"
-        );
+    )
+        external
+    {
+        require(validUntil >= block.timestamp && validUntil >= rebaseValidUntil, "NavWithRebase: Invalid validUntil");
         console.log("validUntil", validUntil);
         // Ensure the signature is valid
-        address signer = _validateRebaseSignature(
-            validationData,
-            newTotalAssets,
-            validUntil,
-            operationData
-        );
+        address signer = _validateRebaseSignature(validationData, newTotalAssets, validUntil, operationData);
         console.log("signer", signer);
 
         require(rebasers[signer], InvalidSignature());
@@ -96,12 +88,8 @@ contract NavWithRebase is INav, Ownable {
 
         // If needed, execute the operationData to unlock the assets
         if (operationData.length > 0) {
-            
-            BatchOp memory operations = abi.decode(
-                operationData,
-                (BatchOp)
-            );
-            
+            BatchOp memory operations = abi.decode(operationData, (BatchOp));
+
             LobsterVault(vault).executeOpBatch(operations);
         }
     }
@@ -111,7 +99,11 @@ contract NavWithRebase is INav, Ownable {
         uint256 newTotalAssets,
         uint256 validUntil,
         bytes calldata operationData
-    ) internal view returns (address) {
+    )
+        internal
+        view
+        returns (address)
+    {
         // Ensure signature is 65 bytes long
         require(validationData.length == 65, InvalidSignature());
 
@@ -131,12 +123,7 @@ contract NavWithRebase is INav, Ownable {
         console.log("s", uint256(s));
 
         // Ensure the signature is valid
-        address signer = ecrecover(
-           getMessage(newTotalAssets, validUntil, operationData),
-            v,
-            r,
-            s
-        );
+        address signer = ecrecover(getMessage(newTotalAssets, validUntil, operationData), v, r, s);
 
         require(signer != address(0), InvalidSignature());
         return signer;
@@ -146,18 +133,21 @@ contract NavWithRebase is INav, Ownable {
         uint256 newTotalAssets,
         uint256 validUntil,
         bytes calldata operationData
-    ) public view returns (bytes32) {
-        return
-            keccak256(
-                abi.encodePacked(
-                    "\x19Ethereum Signed Message:\n32",
-                    address(this),
-                    block.chainid,
-                    newTotalAssets,
-                    validUntil,
-                    operationData
-                )
-            );
+    )
+        public
+        view
+        returns (bytes32)
+    {
+        return keccak256(
+            abi.encodePacked(
+                "\x19Ethereum Signed Message:\n32",
+                address(this),
+                block.chainid,
+                newTotalAssets,
+                validUntil,
+                operationData
+            )
+        );
     }
 
     // todo: allow users to acceptNoRebase

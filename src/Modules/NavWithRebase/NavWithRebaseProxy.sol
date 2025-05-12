@@ -53,11 +53,7 @@ contract NavWithRebaseProxy {
      * @return shares Amount of shares minted to receiver
      * @dev Transfers assets from msg.sender to this contract, then approves and deposits to vault
      */
-    function deposit(
-        uint256 assets,
-        address receiver,
-        bytes calldata rebaseData
-    ) public returns (uint256 shares) {
+    function deposit(uint256 assets, address receiver, bytes calldata rebaseData) public returns (uint256 shares) {
         // transfer the assets to the proxy
         asset.transferFrom(msg.sender, address(this), assets);
 
@@ -85,7 +81,10 @@ contract NavWithRebaseProxy {
         address receiver,
         address owner,
         bytes calldata rebaseData
-    ) public returns (uint256 shares) {
+    )
+        public
+        returns (uint256 shares)
+    {
         if (rebaseData.length > 0) {
             rebase(rebaseData);
         }
@@ -101,11 +100,7 @@ contract NavWithRebaseProxy {
      * @return assets Amount of assets pulled from msg.sender
      * @dev Calculates required assets, transfers them to this contract, then mints shares
      */
-    function mint(
-        uint256 shares,
-        address receiver,
-        bytes calldata rebaseData
-    ) public returns (uint256 assets) {
+    function mint(uint256 shares, address receiver, bytes calldata rebaseData) public returns (uint256 assets) {
         // get the expected assets to mint the shares
         uint256 expectedAssets = vault.previewMint(shares);
 
@@ -136,7 +131,10 @@ contract NavWithRebaseProxy {
         address receiver,
         address owner,
         bytes calldata rebaseData
-    ) public returns (uint256 assets) {
+    )
+        public
+        returns (uint256 assets)
+    {
         if (rebaseData.length > 0) {
             rebase(rebaseData);
         }
@@ -152,10 +150,7 @@ contract NavWithRebaseProxy {
      * @dev First 20 bytes of doData must be the target address, remainder is the call data
      * @dev Reverts if the arbitrary call fails
      */
-    function rebaseAndDo(
-        bytes calldata rebaseData,
-        bytes calldata doData
-    ) public returns (bool) {
+    function rebaseAndDo(bytes calldata rebaseData, bytes calldata doData) public returns (bool) {
         if (rebaseData.length > 0) {
             rebase(rebaseData);
         }
@@ -165,7 +160,7 @@ contract NavWithRebaseProxy {
         bytes memory data = doData[20:];
 
         // call the target contract with the data
-        (bool success, ) = target.call(data);
+        (bool success,) = target.call(data);
         require(success, "Call failed");
 
         return true;
@@ -180,19 +175,10 @@ contract NavWithRebaseProxy {
      */
     function rebase(bytes calldata rebaseData) public returns (bool) {
         // decode the data
-        (
-            uint256 newTotalAssets,
-            uint256 rebaseValidUntil,
-            bytes memory operationData,
-            bytes memory validationData
-        ) = abi.decode(rebaseData, (uint256, uint256, bytes, bytes));
+        (uint256 newTotalAssets, uint256 rebaseValidUntil, bytes memory operationData, bytes memory validationData) =
+            abi.decode(rebaseData, (uint256, uint256, bytes, bytes));
 
-        rebasingNavModule.rebase(
-            newTotalAssets,
-            rebaseValidUntil,
-            operationData,
-            validationData
-        );
+        rebasingNavModule.rebase(newTotalAssets, rebaseValidUntil, operationData, validationData);
 
         return true;
     }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GNU AGPL v3.0
 pragma solidity ^0.8.28;
+
 import "forge-std/Test.sol";
 
 import {LobsterVault} from "../../../../src/Vault/Vault.sol";
@@ -47,18 +48,7 @@ contract VaultWithNavWithRebaseSetup is VaultTestUtils {
         counter = new Counter();
 
         vault = new LobsterVault(
-            owner,
-            asset,
-            "Vault Token",
-            "vTKN",
-            feeCollector,
-            opValidator,
-            hook,
-            navModule,
-            vaultOperations,
-            0,
-            0,
-            0
+            owner, asset, "Vault Token", "vTKN", feeCollector, opValidator, hook, navModule, vaultOperations, 0, 0, 0
         );
 
         vm.startPrank(owner);
@@ -86,13 +76,14 @@ contract VaultWithNavWithRebaseSetup is VaultTestUtils {
         uint256 newTotalAssets,
         uint256 validUntil,
         bytes memory operationData
-    ) internal view returns (bytes memory signature) {
+    )
+        internal
+        view
+        returns (bytes memory signature)
+    {
         // Get the message hash as expected by the contract
-        bytes32 msgHash = NavWithRebase(address(vault.navModule())).getMessage(
-            newTotalAssets,
-            validUntil,
-            operationData
-        );
+        bytes32 msgHash =
+            NavWithRebase(address(vault.navModule())).getMessage(newTotalAssets, validUntil, operationData);
 
         uint256 privateKey = 0;
         if (signer == rebaser) {
@@ -109,6 +100,6 @@ contract VaultWithNavWithRebaseSetup is VaultTestUtils {
         console.log("ini r", uint256(r));
         console.log("ini s", uint256(s));
         // Create the signature data in the format the contract expects
-        signature = abi.encodePacked(v,r,s);
+        signature = abi.encodePacked(v, r, s);
     }
 }
