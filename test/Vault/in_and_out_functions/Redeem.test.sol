@@ -32,17 +32,4 @@ contract VaultRedeemTest is SimpleVaultTestSetup {
         // at first, 1 share = 1 asset
         assertEq(assets, sharesToRedeem);
     }
-
-    function testPreviewRedeemFee() public {
-        uint16 exitFeeBasisPoints = 100; // 1%
-        setExitFeeBasisPoint(exitFeeBasisPoints);
-
-        // deposit 1000
-        uint256 sharesToRedeem = 1000;
-        uint256 expectedFee = computeFees(sharesToRedeem, exitFeeBasisPoints);
-        uint256 assets = vault.previewRedeem(sharesToRedeem);
-
-        // at first, 1 share = 1 asset
-        assertEq(assets, sharesToRedeem - expectedFee);
-    }
 }

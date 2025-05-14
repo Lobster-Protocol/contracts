@@ -3,13 +3,13 @@ pragma solidity 0.8.28;
 
 import "forge-std/Test.sol";
 
-import {SimpleVaultTestSetup} from "../VaultSetups/SimpleVaultTestSetup.sol";
+import {SimpleVaultFeesTestSetup} from "../VaultSetups/SimpleVaultFeesTestSetup.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 
 // test deposit / withdraw / mint / redeem functions with management fee
 // test collecting management fees manually
-contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
+contract VaultInAndOutFeesTest is SimpleVaultFeesTestSetup {
     using Math for uint256;
 
     /* -----------------------TEST UPDATING MANAGEMENT FEE----------------------- */

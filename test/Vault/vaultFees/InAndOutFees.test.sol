@@ -3,12 +3,12 @@ pragma solidity 0.8.28;
 
 import "forge-std/Test.sol";
 
-import {SimpleVaultTestSetup} from "../VaultSetups/SimpleVaultTestSetup.sol";
+import {SimpleVaultFeesTestSetup} from "../VaultSetups/SimpleVaultFeesTestSetup.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {BASIS_POINT_SCALE} from "../../../src/Vault/ERC4626Fees.sol";
+import {BASIS_POINT_SCALE} from "../../../src/Vault/Constants.sol";
 
 // test deposit / withdraw / mint / redeem fee
-contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
+contract VaultInAndOutFeesTest is SimpleVaultFeesTestSetup {
     using Math for uint256;
 
     // the default fee is set to 0
@@ -165,4 +165,59 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
     /* -----------------------TEST IN & OUT AS FEE_COLLECTOR----------------------- */
     // no fees for the feeCollector withdrawals
     // todo
+
+    /* -----------------------TEST PREVIEW DEPOSIT / WITHDRAW / MINT / REDEEM----------------------- */
+    function testPreviewDepositFee() public {
+        uint16 entryFeeBasisPoints = 100; // 1%
+        setEntryFeeBasisPoint(entryFeeBasisPoints);
+
+        // deposit 1000
+        uint256 depositAmount = 1000;
+        uint256 expectedFee = computeFees(depositAmount, entryFeeBasisPoints);
+        uint256 shares = vault.previewDeposit(depositAmount);
+
+        // at first, 1 share = 1 asset, shares = depositAmount - fee
+        assertEq(shares, depositAmount - expectedFee);
+    }
+
+    function testPreviewMintFee() public {
+        uint16 entryFeeBasisPoints = 100; // 1%
+        setEntryFeeBasisPoint(entryFeeBasisPoints);
+
+        // deposit 1000
+        uint256 mintAmount = 1000;
+        uint256 expectedFee = computeFees(mintAmount, entryFeeBasisPoints);
+        uint256 assets = vault.previewMint(mintAmount);
+
+        // at first, 1 share = 1 asset, assets = mintAmount + expectedFee (we send the amount of shares to get how many assets we must send to get (+ fees))
+        assertEq(assets, mintAmount + expectedFee);
+    }
+
+    function testPreviewRedeemFee() public {
+        uint16 exitFeeBasisPoints = 100; // 1%
+        setExitFeeBasisPoint(exitFeeBasisPoints);
+
+        // deposit 1000
+        uint256 sharesToRedeem = 1000;
+        uint256 expectedFee = computeFees(sharesToRedeem, exitFeeBasisPoints);
+        uint256 assets = vault.previewRedeem(sharesToRedeem);
+
+        // at first, 1 share = 1 asset
+        assertEq(assets, sharesToRedeem - expectedFee);
+    }
+
+    function testPreviewWithdrawFee() public {
+        uint16 exitFeeBasisPoints = 100; // 1%
+        setExitFeeBasisPoint(exitFeeBasisPoints);
+
+        // deposit 1000
+        uint256 assetsToWithdraw = 1000;
+        uint256 expectedFee = computeFees(assetsToWithdraw, exitFeeBasisPoints);
+        uint256 shares = vault.previewWithdraw(assetsToWithdraw);
+
+        // at first, 1 share = 1 asset
+        assertEq(shares, assetsToWithdraw + expectedFee);
+    }
 }
+
+// todo: test all max functions

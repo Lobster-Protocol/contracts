@@ -97,6 +97,11 @@ interface IERC4626FeesEvents {
     error InvalidFee();
 
     /**
+     * @notice Thrown when we try to set address zero to the fee collector
+     */
+    error ZeroAddress();
+
+    /**
      * @notice Thrown when there are not enough assets in the vault to cover fee collection
      */
     error InsufficientAssetsForFees();

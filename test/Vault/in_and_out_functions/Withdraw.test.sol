@@ -31,17 +31,4 @@ contract VaultMintTest is SimpleVaultTestSetup {
         // at first, 1 share = 1 asset
         assertEq(shares, assetsToWithdraw);
     }
-
-    function testPreviewWithdrawFee() public {
-        uint16 exitFeeBasisPoints = 100; // 1%
-        setExitFeeBasisPoint(exitFeeBasisPoints);
-
-        // deposit 1000
-        uint256 assetsToWithdraw = 1000;
-        uint256 expectedFee = computeFees(assetsToWithdraw, exitFeeBasisPoints);
-        uint256 shares = vault.previewWithdraw(assetsToWithdraw);
-
-        // at first, 1 share = 1 asset
-        assertEq(shares, assetsToWithdraw + expectedFee);
-    }
 }

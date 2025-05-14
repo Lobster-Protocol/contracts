@@ -7,22 +7,27 @@ import {MockERC20} from "../../../Mocks/MockERC20.sol";
 import {IHook} from "../../../../src/interfaces/modules/IHook.sol";
 import {INav} from "../../../../src/interfaces/modules/INav.sol";
 import {IOpValidatorModule} from "../../../../src/interfaces/modules/IOpValidatorModule.sol";
-import {VaultTestUtils} from "../VaultTestUtils.sol";
 import {UniswapFeeCollectorHook} from "../../../../src/Modules/Hooks/UniswapFeeCollectorHook.sol";
 import {IUniswapV3PoolMinimal} from "../../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {DummyValidator} from "../../../Mocks/modules/DummyValidator.sol";
 import {IVaultFlowModule} from "../../../../src/interfaces/modules/IVaultFlowModule.sol";
 import {DummyUniswapV3PoolMinimal} from "../../../Mocks/DummyUniswapV3PoolMinimal.sol";
+import {Test} from "forge-std/Test.sol";
 
 // Vault base setup with validator function to be used in other test files
-contract VaultWithUniswapFeeCollectorHookSetup is VaultTestUtils {
+contract VaultWithUniswapFeeCollectorHookSetup is Test {
     DummyUniswapV3PoolMinimal uniV3MockedPool;
+    LobsterVault public vault;
+    MockERC20 public asset;
+    Counter public counter;
+    address public owner;
+    address public alice;
+    address public bob;
 
     function setUp() public {
         owner = makeAddr("owner");
         alice = makeAddr("alice");
         bob = makeAddr("bob");
-        feeCollector = makeAddr("feeCollector");
 
         // Hook parameters
         uniV3MockedPool = new DummyUniswapV3PoolMinimal();
@@ -40,9 +45,7 @@ contract VaultWithUniswapFeeCollectorHookSetup is VaultTestUtils {
         asset = new MockERC20();
         counter = new Counter();
 
-        vault = new LobsterVault(
-            owner, asset, "Vault Token", "vTKN", feeCollector, opValidator, hook, navModule, vaultOperations, 0, 0, 0
-        );
+        vault = new LobsterVault(owner, asset, "Vault Token", "vTKN", opValidator, hook, navModule, vaultOperations);
 
         // Setup initial state
         asset.mint(alice, 10000 ether);

@@ -50,17 +50,4 @@ contract VaultMintTest is SimpleVaultTestSetup {
         // at first, 1 share = 1 asset
         assertEq(assets, mintAmount);
     }
-
-    function testPreviewMintFee() public {
-        uint16 entryFeeBasisPoints = 100; // 1%
-        setEntryFeeBasisPoint(entryFeeBasisPoints);
-
-        // deposit 1000
-        uint256 mintAmount = 1000;
-        uint256 expectedFee = computeFees(mintAmount, entryFeeBasisPoints);
-        uint256 assets = vault.previewMint(mintAmount);
-
-        // at first, 1 share = 1 asset, assets = mintAmount + expectedFee (we send the amount of shares to get how many assets we must send to get (+ fees))
-        assertEq(assets, mintAmount + expectedFee);
-    }
 }

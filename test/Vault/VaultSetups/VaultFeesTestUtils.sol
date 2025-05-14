@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import {LobsterVault, Op} from "../../../src/Vault/Vault.sol";
+import {LobsterFeesVault} from "../../../src/Vault/VaultFees.sol";
 import {Counter} from "../../Mocks/Counter.sol";
 import {MockERC20} from "../../Mocks/MockERC20.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
@@ -13,10 +13,10 @@ import {IOpValidatorModule} from "../../../src/interfaces/modules/IOpValidatorMo
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 
 // Vault base setup & utils function to be used in other test files
-contract VaultTestUtils is Test {
+contract VaultFeesTestUtils is Test {
     using Math for uint256;
 
-    LobsterVault public vault;
+    LobsterFeesVault public vault;
     MockERC20 public asset;
     Counter public counter;
     address public owner;

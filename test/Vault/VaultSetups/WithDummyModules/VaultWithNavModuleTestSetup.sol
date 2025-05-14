@@ -6,20 +6,26 @@ import {Counter} from "../../../Mocks/Counter.sol";
 import {MockERC20} from "../../../Mocks/MockERC20.sol";
 import {IHook} from "../../../../src/interfaces/modules/IHook.sol";
 import {IOpValidatorModule} from "../../../../src/interfaces/modules/IOpValidatorModule.sol";
-import {VaultTestUtils} from "../VaultTestUtils.sol";
 import {DummyHook} from "../../../Mocks/modules/DummyHook.sol";
 import {DummyValidator} from "../../../Mocks/modules/DummyValidator.sol";
 import {INav} from "../../../../src/interfaces/modules/INav.sol";
 import {DummyNav} from "../../../Mocks/modules/DummyNav.sol";
 import {IVaultFlowModule} from "../../../../src/interfaces/modules/IVaultFlowModule.sol";
+import {Test} from "forge-std/Test.sol";
 
 // Vault base setup with validator function to be used in other test files
-contract VaultWithNavModuleTestSetup is VaultTestUtils {
+contract VaultWithNavModuleTestSetup is Test {
+    LobsterVault public vault;
+    MockERC20 public asset;
+    Counter public counter;
+    address public owner;
+    address public alice;
+    address public bob;
+
     function setUp() public {
         owner = makeAddr("owner");
         alice = makeAddr("alice");
         bob = makeAddr("bob");
-        feeCollector = makeAddr("feeCollector");
 
         IHook hook = IHook(address(0));
         IOpValidatorModule opValidator = IOpValidatorModule(address(0));
@@ -30,9 +36,7 @@ contract VaultWithNavModuleTestSetup is VaultTestUtils {
         asset = new MockERC20();
         counter = new Counter();
 
-        vault = new LobsterVault(
-            owner, asset, "Vault Token", "vTKN", feeCollector, opValidator, hook, navModule, vaultOperations, 0, 0, 0
-        );
+        vault = new LobsterVault(owner, asset, "Vault Token", "vTKN", opValidator, hook, navModule, vaultOperations);
 
         // Setup initial state
         asset.mint(alice, 10000 ether);

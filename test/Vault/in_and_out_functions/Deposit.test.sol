@@ -47,17 +47,4 @@ contract VaultDepositTest is SimpleVaultTestSetup {
         // at first, 1 share = 1 asset
         assertEq(shares, depositAmount);
     }
-
-    function testPreviewDepositFee() public {
-        uint16 entryFeeBasisPoints = 100; // 1%
-        setEntryFeeBasisPoint(entryFeeBasisPoints);
-
-        // deposit 1000
-        uint256 depositAmount = 1000;
-        uint256 expectedFee = computeFees(depositAmount, entryFeeBasisPoints);
-        uint256 shares = vault.previewDeposit(depositAmount);
-
-        // at first, 1 share = 1 asset, shares = depositAmount - fee
-        assertEq(shares, depositAmount - expectedFee);
-    }
 }

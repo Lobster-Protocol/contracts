@@ -4,22 +4,28 @@ pragma solidity ^0.8.28;
 import "forge-std/Test.sol";
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {BASIS_POINT_SCALE, SECONDS_PER_YEAR} from "./Constants.sol";
 import {IERC4626FeesEvents, PendingFeeUpdate} from "./ERC4626FeesEvents.sol";
+import {Modular} from "../Modules/Modular.sol";
+import {IHook} from "../interfaces/modules/IHook.sol";
+import {INav} from "../interfaces/modules/INav.sol";
+import {IOpValidatorModule} from "../interfaces/modules/IOpValidatorModule.sol";
+import {IVaultFlowModule} from "../../src/interfaces/modules/IVaultFlowModule.sol";
 
 /**
- * @title ERC4626Fees
+ * @title LobsterFeesVault
  * @author Lobster
- * @dev ERC4626 vault with entry/exit and management fees and modular functionalities
+ * @dev Modular ERC4626 vault with entry/exit and management fees and modular functionalities
  * @notice This contract extends the standard ERC4626 with a comprehensive fee system
  * that includes entry fees (charged when depositing), exit fees (charged when withdrawing),
  * and management fees (charged over time based on assets under management).
  */
-abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
+contract LobsterFeesVault is Modular, Ownable, IERC4626FeesEvents {
     using Math for uint256;
     using SafeERC20 for IERC20;
 
@@ -89,17 +95,58 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
     uint256 public lastFeesCollectedAt;
 
     /**
-     * @dev Constructor
-     * @param feeCollector_ The address that will receive fees
+     * @notice Constructs a new LobsterVault
+     * @param initialOwner The address that will own the vault
+     * @param asset The ERC20 token used by the vault
+     * @param underlyingTokenName The name for the vault's share token
+     * @param underlyingTokenSymbol The symbol for the vault's share token
+     * @param initialFeeCollector The address that will receive collected fees
+     * @param opValidator_ The operation validator module
+     * @param hook_ The hook module for pre/post operation execution
+     * @param navModule_ The NAV module for asset valuation
+     * @param vaultFlowModule The module for deposit/withdraw operations
+     * @param entryFeeBasisPoints_ The initial entry fee in basis points
+     * @param exitFeeBasisPoints_ The initial exit fee in basis points
+     * @param managementFeeBasisPoints_ The initial management fee in basis points
      */
     constructor(
-        address feeCollector_,
+        address initialOwner,
+        IERC20 asset,
+        string memory underlyingTokenName,
+        string memory underlyingTokenSymbol,
+        address initialFeeCollector,
+        IOpValidatorModule opValidator_,
+        IHook hook_,
+        INav navModule_,
+        IVaultFlowModule vaultFlowModule,
         uint16 entryFeeBasisPoints_,
         uint16 exitFeeBasisPoints_,
         uint16 managementFeeBasisPoints_
-    ) {
-        require(feeCollector_ != address(0), "FeeVault: Fee collector cannot be zero address");
-        feeCollector = feeCollector_;
+    )
+        Ownable(initialOwner)
+        ERC20(underlyingTokenName, underlyingTokenSymbol)
+        ERC4626(asset)
+    {
+        if (initialOwner == address(0) || initialFeeCollector == address(0)) {
+            revert ZeroAddress();
+        }
+        if (address(opValidator_) == address(0) && address(hook) != address(0)) {
+            revert("Cannot install hook if there is no op validator");
+        }
+
+        opValidator = opValidator_;
+        emit OpValidatorSet(opValidator_);
+
+        hook = hook_;
+        emit HookSet(hook_);
+
+        navModule = navModule_;
+        emit NavModuleSet(navModule_);
+
+        vaultFlow = vaultFlowModule;
+        emit vaultFlowSet(vaultFlowModule);
+
+        feeCollector = initialFeeCollector;
         entryFeeBasisPoints = entryFeeBasisPoints_;
         exitFeeBasisPoints = exitFeeBasisPoints_;
         managementFeeBasisPoints = managementFeeBasisPoints_;
@@ -574,19 +621,19 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
         view
         returns (uint256 assetsLeft, uint256 managementFeeShares)
     {
-        uint256 totalAssets = totalAssets();
+        uint256 totalAssets_ = totalAssets();
 
         managementFeeShares = pendingManagementFee();
 
         uint256 totalFees = managementFeeShares;
 
-        if (totalFees > totalAssets) {
+        if (totalFees > totalAssets_) {
             // Not enough assets to cover fees
             // Should not happen in practice
             revert("FeeVault: Insufficient assets to cover fees");
         }
 
-        assetsLeft = totalAssets - _convertToShares(totalFees, Math.Rounding.Ceil);
+        assetsLeft = totalAssets_ - _convertToShares(totalFees, Math.Rounding.Ceil);
 
         return (assetsLeft, managementFeeShares);
     }
@@ -694,10 +741,10 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
         view
         returns (uint256 assetsForReceiver, uint256 feeAssets)
     {
-        uint256 totalAssets = _convertToAssetsSimulation(sharesToRedeem, vaultAssets, vaultSupply, Math.Rounding.Ceil);
+        uint256 totalAssets_ = _convertToAssetsSimulation(sharesToRedeem, vaultAssets, vaultSupply, Math.Rounding.Ceil);
 
-        feeAssets = _feeOnRaw(totalAssets, exitFeeBasisPoints);
-        assetsForReceiver = totalAssets - feeAssets;
+        feeAssets = _feeOnRaw(totalAssets_, exitFeeBasisPoints);
+        assetsForReceiver = totalAssets_ - feeAssets;
     }
 
     /**
@@ -744,5 +791,120 @@ abstract contract ERC4626Fees is ERC4626, Ownable, IERC4626FeesEvents {
         returns (uint256)
     {
         return shares.mulDiv(vaultAssets + 1, vaultSupply + 10 ** _decimalsOffset(), rounding);
+    }
+
+    /* ------------------INAV------------------- */
+
+    /**
+     * @notice Returns the total assets managed by the vault
+     * @dev Override ERC4626.totalAssets to use the NAV module if available
+     * @return The total amount of underlying assets
+     */
+    function totalAssets() public view virtual override returns (uint256) {
+        if (address(navModule) != address(0)) {
+            return navModule.totalAssets();
+        }
+        return IERC20(asset()).balanceOf(address(this));
+    }
+
+    /* ------------------FLOW MODULES------------------ */
+    /**
+     * @notice Handles the deposit logic
+     * @dev Override of ERC4626._deposit to use the vaultFlow module if available
+     * @param caller The address initiating the deposit
+     * @param receiver The address receiving the shares
+     * @param assets The amount of assets being deposited
+     * @param shares The amount of shares to mint
+     */
+    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
+        if (address(vaultFlow) != address(0)) {
+            (bool success,) =
+                address(vaultFlow).call(abi.encodeCall(vaultFlow._deposit, (caller, receiver, assets, shares)));
+
+            if (!success) revert DepositModuleFailed();
+
+            return;
+        }
+
+        // if no module set, backoff to default
+        return super._deposit(caller, receiver, assets, shares);
+    }
+
+    /**
+     * @notice Handles the withdrawal logic
+     * @dev Override of ERC4626._withdraw to use the vaultFlow module if available
+     * @param caller The address initiating the withdrawal
+     * @param receiver The address receiving the assets
+     * @param owner The address that owns the shares
+     * @param assets The amount of assets to withdraw
+     * @param shares The amount of shares to burn
+     */
+    function _withdraw(
+        address caller,
+        address receiver,
+        address owner,
+        uint256 assets,
+        uint256 shares
+    )
+        internal
+        override
+    {
+        if (address(vaultFlow) != address(0)) {
+            (bool success,) = address(vaultFlow).call(
+                abi.encodeWithSelector(vaultFlow._withdraw.selector, caller, receiver, owner, assets, shares)
+            );
+
+            if (!success) revert WithdrawModuleFailed();
+
+            return;
+        }
+
+        // if no module set, backoff to default
+        return super._withdraw(caller, receiver, owner, assets, shares);
+    }
+
+    /**
+     * @dev Internal conversion function (from assets to shares) with support for rounding direction.
+     */
+    function _convertToShares(uint256 assets, Math.Rounding rounding) internal view override returns (uint256) {
+        return assets.mulDiv(totalSupply() + 10 ** _decimalsOffset(), totalAssets() + 1, rounding);
+    }
+
+    /**
+     * @dev Internal conversion function (from shares to assets) with support for rounding direction.
+     */
+    function _convertToAssets(uint256 shares, Math.Rounding rounding) internal view override returns (uint256) {
+        return shares.mulDiv(totalAssets() + 1, totalSupply() + 10 ** _decimalsOffset(), rounding);
+    }
+
+    /**
+     * @notice Mints shares to an account
+     * @param account The address to receive the shares
+     * @param value The amount of shares to mint
+     * @dev Can only be called by the vaultFlow module
+     */
+    function mintShares(address account, uint256 value) external OnlyVaultFlow {
+        return super._mint(account, value);
+    }
+
+    /**
+     * @notice Burns shares from an account
+     * @param account The address to burn shares from
+     * @param value The amount of shares to burn
+     * @dev Can only be called by the vaultFlow module
+     */
+    function burnShares(address account, uint256 value) external OnlyVaultFlow {
+        return super._burn(account, value);
+    }
+
+    /**
+     * @notice Approves a spender to spend a specified amount of tokens
+     * @param owner The address that owns the tokens
+     * @param spender The address that will be allowed to spend the tokens
+     * @param value The amount of tokens to approve
+     * @dev Can only be called by the vaultFlow module
+     */
+    function spendAllowance(address owner, address spender, uint256 value) external OnlyVaultFlow {
+        _spendAllowance(owner, spender, value);
     }
 }

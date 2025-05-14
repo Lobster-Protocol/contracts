@@ -9,7 +9,6 @@ import {MockERC20} from "../../../Mocks/MockERC20.sol";
 import {IHook} from "../../../../src/interfaces/modules/IHook.sol";
 import {INav} from "../../../../src/interfaces/modules/INav.sol";
 import {IOpValidatorModule} from "../../../../src/interfaces/modules/IOpValidatorModule.sol";
-import {VaultTestUtils} from "../VaultTestUtils.sol";
 import {UniswapFeeCollectorHook} from "../../../../src/Modules/Hooks/UniswapFeeCollectorHook.sol";
 import {IUniswapV3PoolMinimal} from "../../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {DummyValidator} from "../../../Mocks/modules/DummyValidator.sol";
@@ -17,9 +16,16 @@ import {IVaultFlowModule} from "../../../../src/interfaces/modules/IVaultFlowMod
 import {DummyUniswapV3PoolMinimal} from "../../../Mocks/DummyUniswapV3PoolMinimal.sol";
 import {DummyHook} from "../../../Mocks/modules/DummyHook.sol";
 import {NavWithRebase} from "../../../../src/Modules/NavWithRebase/NavWithRebase.sol";
+import {Test} from "forge-std/Test.sol";
 
 // Vault base setup with validator function to be used in other test files
-contract VaultWithNavWithRebaseSetup is VaultTestUtils {
+contract VaultWithNavWithRebaseSetup is Test {
+    LobsterVault public vault;
+    MockERC20 public asset;
+    Counter public counter;
+    address public owner;
+    address public alice;
+    address public bob;
     DummyUniswapV3PoolMinimal uniV3MockedPool;
     address public rebaser;
     uint256 public rebaserPrivateKey;
@@ -30,7 +36,6 @@ contract VaultWithNavWithRebaseSetup is VaultTestUtils {
         owner = makeAddr("owner");
         alice = makeAddr("alice");
         bob = makeAddr("bob");
-        feeCollector = makeAddr("feeCollector");
         rebaserPrivateKey = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
         rebaser = vm.addr(rebaserPrivateKey);
         notRebaserPrivateKey = 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
@@ -47,9 +52,7 @@ contract VaultWithNavWithRebaseSetup is VaultTestUtils {
         asset = new MockERC20();
         counter = new Counter();
 
-        vault = new LobsterVault(
-            owner, asset, "Vault Token", "vTKN", feeCollector, opValidator, hook, navModule, vaultOperations, 0, 0, 0
-        );
+        vault = new LobsterVault(owner, asset, "Vault Token", "vTKN", opValidator, hook, navModule, vaultOperations);
 
         vm.startPrank(owner);
         // initialize nav module

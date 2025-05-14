@@ -9,6 +9,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {LobsterVault} from "../../../src/Vault/Vault.sol";
+import {BASIS_POINT_SCALE} from "../../../src/Vault/Constants.sol";
 
 /**
  * @title UniswapFeeCollectorHook
@@ -19,9 +20,6 @@ import {LobsterVault} from "../../../src/Vault/Vault.sol";
  *      LobsterVault system's hook mechanism.
  * @dev This contract expect msg.sender to be the vault
  */
-
-/// @dev Denominator for basis point calculations (100% = 10,000 basis points)
-uint256 constant BASIS_POINT_SCALE = 10_000;
 
 // Hook used to take a fee when the vault collect its fees from a uniswap pool
 contract UniswapFeeCollectorHook is IHook, Ownable {

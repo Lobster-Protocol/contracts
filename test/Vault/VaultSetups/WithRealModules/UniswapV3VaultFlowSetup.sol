@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPLv3
 pragma solidity ^0.8.28;
 
-import {VaultTestUtils} from "../VaultTestUtils.sol";
 import {IHook} from "../../../../src/interfaces/modules/IHook.sol";
 import {IOpValidatorModule} from "../../../../src/interfaces/modules/IOpValidatorModule.sol";
 import {INav} from "../../../../src/interfaces/modules/INav.sol";
@@ -27,14 +26,19 @@ struct UniswapV3Data {
     uint160 poolInitialSqrtPriceX96;
 }
 
-contract UniswapV3VaultFlowSetup is VaultTestUtils, UniswapV3Infra {
+contract UniswapV3VaultFlowSetup is UniswapV3Infra {
+    address public owner;
+    address public alice;
+    address public bob;
+    MockERC20 public asset;
+    LobsterVault public vault;
+
     UniswapV3Data public uniswapV3Data;
 
     function setUp() public {
         owner = makeAddr("owner");
         alice = makeAddr("alice");
         bob = makeAddr("bob");
-        feeCollector = makeAddr("feeCollector");
         address uniV3feeCutCollector = makeAddr("feeCollector");
 
         (IUniswapV3FactoryMinimal factory,, INonFungiblePositionManager positionManager, IUniswapV3RouterMinimal router)
@@ -71,9 +75,7 @@ contract UniswapV3VaultFlowSetup is VaultTestUtils, UniswapV3Infra {
         );
         INav navModule = INav(address(vaultOperations)); // UniswapV3VaultFlow is also a Nav module
 
-        vault = new LobsterVault(
-            owner, asset, "Vault Token", "vTKN", feeCollector, opValidator, hook, navModule, vaultOperations, 0, 0, 0
-        );
+        vault = new LobsterVault(owner, asset, "Vault Token", "vTKN", opValidator, hook, navModule, vaultOperations);
 
         // Setup initial state
         asset.mint(alice, 10000 ether);
