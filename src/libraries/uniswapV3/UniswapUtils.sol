@@ -1,4 +1,3 @@
-// Maxime / Thomas ignore
 // SPDX-License-Identifier: GPLv3
 pragma solidity ^0.8.28;
 

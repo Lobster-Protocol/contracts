@@ -1,4 +1,3 @@
-// Maxime / Thomas ignore
 // SPDX-License-Identifier: GPLv3
 pragma solidity ^0.8.28;
 
@@ -9,7 +8,7 @@ import {INav} from "../../../../src/interfaces/modules/INav.sol";
 import {IVaultFlowModule} from "../../../../src/interfaces/modules/IVaultFlowModule.sol";
 import {MockERC20} from "../../../Mocks/MockERC20.sol";
 import {LobsterVault} from "../../../../src/Vault/Vault.sol";
-import {UniswapV3VaultFlow} from "../../../../src/Modules/VaultFlow/UniswapV3WithTwap.sol";
+import {UniswapV3VaultFlow} from "../../../../src/Modules/VaultFlow/UniswapV3VaultFlow.sol";
 import {IUniswapV3PoolMinimal} from "../../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {INonFungiblePositionManager} from "../../../../src/interfaces/uniswapV3/INonFungiblePositionManager.sol";
 import {UniswapV3Infra} from "../../../Mocks/uniswapV3/UniswapV3Infra.sol";
@@ -36,6 +35,7 @@ contract UniswapV3VaultFlowSetup is VaultTestUtils, UniswapV3Infra {
         alice = makeAddr("alice");
         bob = makeAddr("bob");
         feeCollector = makeAddr("feeCollector");
+        address uniV3feeCutCollector = makeAddr("feeCollector");
 
         (IUniswapV3FactoryMinimal factory,, INonFungiblePositionManager positionManager, IUniswapV3RouterMinimal router)
         = deploy();
@@ -66,6 +66,7 @@ contract UniswapV3VaultFlowSetup is VaultTestUtils, UniswapV3Infra {
             uniswapV3Data.positionManager,
             address(uniswapV3Data.router),
             address(asset), // tokenA
+            uniV3feeCutCollector,
             0
         );
         INav navModule = INav(address(vaultOperations)); // UniswapV3VaultFlow is also a Nav module

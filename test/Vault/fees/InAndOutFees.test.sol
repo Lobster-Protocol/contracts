@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+import "forge-std/Test.sol";
+
 import {SimpleVaultTestSetup} from "../VaultSetups/SimpleVaultTestSetup.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {BASIS_POINT_SCALE} from "../../../src/Vault/ERC4626Fees.sol";
 
 // test deposit / withdraw / mint / redeem fee
 contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
@@ -21,7 +24,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         uint256 initialAliceBalance = asset.balanceOf(alice);
         uint256 initialFeeCollectorBalance = asset.balanceOf(vault.feeCollector());
 
-        uint256 depositAmount = 1000;
+        uint256 depositAmount = 1000 ether;
         uint256 expectedFee = computeFees(depositAmount, fee);
         uint256 shares = vault.deposit(depositAmount, alice);
         vm.stopPrank();
@@ -40,6 +43,9 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
 
         // check fee collector shares balance
         assertEq(vault.balanceOf(vault.feeCollector()), expectedFee);
+
+        // check maxWithdraw value
+        assertEq(vault.maxWithdraw(vault.feeCollector()), depositAmount.mulDiv(fee, BASIS_POINT_SCALE));
     }
 
     function testMintWithFee() public {
@@ -51,7 +57,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         uint256 initialAliceBalance = asset.balanceOf(alice);
         uint256 initialFeeCollectorBalance = asset.balanceOf(vault.feeCollector());
 
-        uint256 mintAmount = 1000;
+        uint256 mintAmount = 1000 ether;
         uint256 expectedFee = computeFees(mintAmount, fee);
         uint256 assets = vault.mint(mintAmount, alice);
         vm.stopPrank();
@@ -70,6 +76,9 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
 
         // check fee collector shares balance
         assertEq(vault.balanceOf(vault.feeCollector()), expectedFee);
+
+        // check maxWithdraw value
+        assertEq(vault.maxRedeem(vault.feeCollector()), mintAmount.mulDiv(fee, BASIS_POINT_SCALE));
     }
 
     function testWithdrawWithFee() public {
@@ -77,24 +86,28 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         setExitFeeBasisPoint(fee); // 1%
 
         vm.startPrank(alice);
-        // alice deposit 1000 assets
+        // alice deposit
         uint256 initialAliceBalance = asset.balanceOf(alice);
         uint256 initialFeeCollectorBalance = asset.balanceOf(vault.feeCollector());
 
-        uint256 depositAmount = 1000;
-        uint256 expectedFee = computeFees(depositAmount, fee);
+        uint256 depositAmount = 1000 ether;
         uint256 shares = vault.deposit(depositAmount, alice);
+
+        uint256 expectedBalanceLeftInVault =
+            vault.convertToAssets(computeFees(depositAmount, vault.exitFeeBasisPoints()));
 
         // alice withdraw all her assets
         uint256 withdrawnAssets = vault.maxWithdraw(alice);
         uint256 sharesBurnt = vault.withdraw(withdrawnAssets, alice, alice);
-        vm.stopPrank();
 
         // check alice asset balance
-        assertEq(asset.balanceOf(alice), initialAliceBalance - 10); // 10 is the expected fee for 1% management fee with a 1000 assets deposit for 1 block 1 year
+        assertEq(asset.balanceOf(alice), initialAliceBalance - computeFees(depositAmount, vault.exitFeeBasisPoints()));
 
         // check vault balance
-        assertEq(asset.balanceOf(address(vault)), vault.convertToAssets(expectedFee)); // (vault has been emptied, there is only the collected fees)
+        assertEq(asset.balanceOf(address(vault)), expectedBalanceLeftInVault); // (vault has been emptied, there is only the collected fees)
+        console.log("alice shares", vault.balanceOf(alice));
+        // Ensure only fee collector's shares remain
+        assertEq(vault.balanceOf(vault.feeCollector()), vault.totalSupply());
 
         // ensure `shares`is the amount of shares burnt by alice
         assertEq(sharesBurnt, shares);
@@ -106,7 +119,8 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         assertEq(asset.balanceOf(vault.feeCollector()), initialFeeCollectorBalance);
 
         // check fee collector shares balance
-        assertEq(vault.balanceOf(vault.feeCollector()), expectedFee);
+        assertEq(vault.balanceOf(vault.feeCollector()), computeFees(sharesBurnt, vault.exitFeeBasisPoints()));
+        vm.stopPrank();
     }
 
     function testRedeemWithFee() public {
@@ -118,7 +132,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         uint256 initialAliceBalance = asset.balanceOf(alice);
         uint256 initialFeeCollectorBalance = asset.balanceOf(vault.feeCollector());
 
-        uint256 mintAmount = 1000;
+        uint256 mintAmount = 1000 ether;
         uint256 expectedFee = computeFees(mintAmount, fee);
         uint256 assets = vault.mint(mintAmount, alice);
 
@@ -126,6 +140,7 @@ contract VaultInAndOutFeesTest is SimpleVaultTestSetup {
         uint256 withdrawnAssets = vault.maxRedeem(alice);
         uint256 expectedFeeAsset = vault.convertToAssets(expectedFee);
         uint256 assetsRedeemed = vault.redeem(withdrawnAssets, alice, alice); // assetsRedeemed = alice assets in vault before redeem
+
         vm.stopPrank();
 
         // check alice asset balance

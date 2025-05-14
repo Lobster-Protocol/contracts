@@ -227,7 +227,6 @@ contract LobsterVault is Modular, ERC4626Fees {
      */
     function totalAssets() public view virtual override returns (uint256) {
         if (address(navModule) != address(0)) {
-            console.log("NAV module set: ", navModule.totalAssets());
             return navModule.totalAssets();
         }
         return IERC20(asset()).balanceOf(address(this));
@@ -296,9 +295,8 @@ contract LobsterVault is Modular, ERC4626Fees {
      */
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
         if (address(vaultFlow) != address(0)) {
-            (bool success,) = address(vaultFlow).call(
-                abi.encodeWithSelector(vaultFlow._deposit.selector, caller, receiver, assets, shares)
-            );
+            (bool success,) =
+                address(vaultFlow).call(abi.encodeCall(vaultFlow._deposit, (caller, receiver, assets, shares)));
 
             if (!success) revert DepositModuleFailed();
 
@@ -340,21 +338,6 @@ contract LobsterVault is Modular, ERC4626Fees {
 
         // if no module set, backoff to default
         return super._withdraw(caller, receiver, owner, assets, shares);
-    }
-
-    /**
-     * @inheritdoc ERC4626
-     * @dev Override of ERC4626.maxWithdraw to use the vaultFlow module if available
-     */
-    function maxWithdraw(address owner) public view override returns (uint256 maxAssets) {
-        // if (address(vaultFlow) != address(0)) {
-        //     return vaultFlow.maxWithdraw(owner);
-        // }
-
-        // if no module set, backoff to default
-        uint256 ownerBalance = balanceOf(owner);
-        console.log("ownerBalance", ownerBalance);
-        return _convertToAssets(ownerBalance - _feeOnRaw(ownerBalance, exitFeeBasisPoints), Math.Rounding.Floor);
     }
 
     /**
