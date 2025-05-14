@@ -96,7 +96,12 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
         uint256 initialToken1Alice = IERC20(uniswapV3Data.tokenB).balanceOf(alice);
         // Alice deposits 1 ether into the vault
         uint256 aliceDeposit = 1 ether;
+        uint256 expectedMintedShares = vault.previewDeposit(aliceDeposit);
         uint256 mintedShares = vault.deposit(aliceDeposit, alice);
+
+        // Ensure the expected shares were minted
+        assertEq(expectedMintedShares, mintedShares);
+
         vm.stopPrank();
         console.log("vault asset balance 1: ", IERC20(vault.asset()).balanceOf(address(vault)));
 
