@@ -16,7 +16,7 @@ import {DummyValidator} from "../../../Mocks/modules/DummyValidator.sol";
 import {IVaultFlowModule} from "../../../../src/interfaces/modules/IVaultFlowModule.sol";
 import {DummyUniswapV3PoolMinimal} from "../../../Mocks/DummyUniswapV3PoolMinimal.sol";
 import {DummyHook} from "../../../Mocks/modules/DummyHook.sol";
-import {NavWithRebase} from "../../../../src/Modules/NavWithRebase/navWithRebase.sol";
+import {NavWithRebase} from "../../../../src/Modules/NavWithRebase/NavWithRebase.sol";
 
 // Vault base setup with validator function to be used in other test files
 contract VaultWithNavWithRebaseSetup is VaultTestUtils {

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {VaultWithNavWithRebaseSetup} from "../../Vault/VaultSetups/WithRealModules/VaultWithNavWithRebaseSetup.sol";
-import {NavWithRebase} from "../../../src/Modules/NavWithRebase/navWithRebase.sol";
+import {NavWithRebase} from "../../../src/Modules/NavWithRebase/NavWithRebase.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MockERC20} from "../../Mocks/MockERC20.sol";
 

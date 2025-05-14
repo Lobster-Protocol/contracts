@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {LobsterVault} from "../../Vault/Vault.sol";
 import {ERC4626Fees} from "../../Vault/ERC4626Fees.sol";
-import {NavWithRebase} from "./navWithRebase.sol";
+import {NavWithRebase} from "./NavWithRebase.sol";
 
 /**
  * @title NavWithRebaseProxy
