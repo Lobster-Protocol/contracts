@@ -111,7 +111,8 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
         // Verify that the asset is one of the pool tokens and store which one it is
         assetIsToken0 = address(_pool.token0()) == asset;
         require(
-            assetIsToken0 || address(_pool.token1()) == asset, "UniswapV3VaultFlow: Neither token is the wanted asset"
+            assetIsToken0 || address(_pool.token1()) == asset,
+            "UniswapV3VaultFlow: Neither token is the wanted asset"
         );
 
         vaultAsset = IERC20(asset);
@@ -128,26 +129,28 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
         feeCutBasisPoint = feeCutBasisPoint_;
     }
 
-    /**
-     * @inheritdoc IVaultFlowModule
-     * @dev Handles the deposit flow with price volatility protection
-     * - Checks that current price volatility is within acceptable bounds
-     * - Transfers assets from caller to vault
-     * - Mints shares to the receiver
-     */
+    // /**
+    //  * @inheritdoc IVaultFlowModule
+    //  * @dev Handles the deposit flow with price volatility protection
+    //  * - Checks that current price volatility is within acceptable bounds
+    //  * - Transfers assets from caller to vault
+    //  * - Mints shares to the receiver
+    //  */
     function _deposit(
         address caller,
         address receiver,
         uint256 assets,
         uint256 shares
-    )
-        external
-        returns (bool success)
-    {
+    ) external returns (bool success) {
         LobsterVault vault = LobsterVault(msg.sender);
 
         // Execute the deposit
-        vault.safeTransferFrom(IERC20(vault.asset()), caller, address(vault), assets);
+        vault.safeTransferFrom(
+            IERC20(vault.asset()),
+            caller,
+            address(vault),
+            assets
+        );
         vault.mintShares(receiver, shares);
 
         emit IERC4626.Deposit(caller, receiver, assets, shares);
@@ -155,19 +158,16 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
         return true;
     }
 
-    /**
-     * @inheritdoc IVaultFlowModule
-     */
+    // /**
+    //  * @inheritdoc IVaultFlowModule
+    //  */
     function _withdraw(
         address caller,
         address receiver,
         address owner,
         uint256 assets,
         uint256 shares
-    )
-        external
-        returns (bool success)
-    {
+    ) external returns (bool success) {
         LobsterVault vault = LobsterVault(msg.sender);
 
         if (caller != owner) {
@@ -183,11 +183,19 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
 
         // Get the shares ratio to burn so we can get the positions ratio to withdraw
         // if we withdraw x% of the shares, we need to withdraw x% of each position
-        uint256 sharesRatioBp = shares.mulDiv(BASIS_POINT_SCALE, vault.totalSupply());
+        uint256 sharesRatioBp = shares.mulDiv(
+            BASIS_POINT_SCALE,
+            vault.totalSupply()
+        );
 
-        console.log("shares: ", shares, "vault.totalSupply(): ", vault.totalSupply());
+        console.log(
+            "shares: ",
+            shares,
+            "vault.totalSupply(): ",
+            vault.totalSupply()
+        );
 
-        (uint160 sqrtPriceX96,,,,,,) = pool.slot0();
+        (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
 
         // Aggregate all the fees to be cut
         uint256 allFee0 = 0;
@@ -196,7 +204,10 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
         uint256 totalToWithdraw1 = 0;
 
         for (uint256 i = 0; i < tokensCount; i++) {
-            uint256 tokenId = positionManager.tokenOfOwnerByIndex(address(vault), i);
+            uint256 tokenId = positionManager.tokenOfOwnerByIndex(
+                address(vault),
+                i
+            );
 
             // Get the position details
             // todo: merge with PositionValue.total to also get the token0 & token1 amounts and save gas:
@@ -213,11 +224,19 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
                 ,
                 ,
                 ,
+
             ) = positionManager.positions(tokenId);
 
             // Only take the positions that are in the pool
-            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(token0, token1, fee);
-            address computedPoolAddress = PoolAddress.computeAddress(pool.factory(), key);
+            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(
+                token0,
+                token1,
+                fee
+            );
+            address computedPoolAddress = PoolAddress.computeAddress(
+                pool.factory(),
+                key
+            );
 
             if (computedPoolAddress != address(pool)) {
                 // Should not happen. Those positions would likely be lost
@@ -225,8 +244,12 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
             }
 
             // Get the position value
-            (uint256 position0, uint256 fee0, uint256 position1, uint256 fee1) =
-                PositionValue.total(positionManager, tokenId, sqrtPriceX96);
+            (
+                uint256 position0,
+                uint256 fee0,
+                uint256 position1,
+                uint256 fee1
+            ) = PositionValue.total(positionManager, tokenId, sqrtPriceX96);
 
             // Save the fee ratio to withdraw
             allFee0 += fee0;
@@ -237,25 +260,34 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
             console.log("shares ratio: ", sharesRatioBp);
 
             // Get the amounts to extract
-            uint256 toWithdraw0 = position0.mulDiv(sharesRatioBp, BASIS_POINT_SCALE);
-            uint256 toWithdraw1 = position1.mulDiv(sharesRatioBp, BASIS_POINT_SCALE);
+            uint256 toWithdraw0 = position0.mulDiv(
+                sharesRatioBp,
+                BASIS_POINT_SCALE
+            );
+            uint256 toWithdraw1 = position1.mulDiv(
+                sharesRatioBp,
+                BASIS_POINT_SCALE
+            );
 
             // Decrease the liquidity of the position
             INonFungiblePositionManager.DecreaseLiquidityParams memory params = INonFungiblePositionManager
                 .DecreaseLiquidityParams({
-                tokenId: tokenId,
-                liquidity: liquidity,
-                // todo: are those values ok or do we need a slippage ?
-                amount0Min: toWithdraw0,
-                amount1Min: toWithdraw1,
-                deadline: block.timestamp
-            });
+                    tokenId: tokenId,
+                    liquidity: liquidity,
+                    // todo: are those values ok or do we need a slippage ?
+                    amount0Min: toWithdraw0,
+                    amount1Min: toWithdraw1,
+                    deadline: block.timestamp
+                });
 
             // Decrease liquidity
             BaseOp memory decreaseLiquidity = BaseOp({
                 target: address(positionManager),
                 value: 0,
-                data: abi.encodeCall(positionManager.decreaseLiquidity, (params))
+                data: abi.encodeCall(
+                    positionManager.decreaseLiquidity,
+                    (params)
+                )
             });
 
             vault.executeOp(Op(decreaseLiquidity, ""));
@@ -293,14 +325,28 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
         uint256 feeCut1 = allFee1.mulDiv(feeCutBasisPoint, BASIS_POINT_SCALE);
 
         // Total tokens to send to the user = Share of the initial vault balance + positions tokens
-        uint256 valueToWithdraw0 = initialToken0Balance.mulDiv(sharesRatioBp, BASIS_POINT_SCALE)
-            + (totalToWithdraw0 - initialToken0Balance - feeCut0);
-        uint256 valueToWithdraw1 = initialToken1Balance.mulDiv(sharesRatioBp, BASIS_POINT_SCALE)
-            + (totalToWithdraw1 - initialToken0Balance - feeCut1);
+        uint256 valueToWithdraw0 = initialToken0Balance.mulDiv(
+            sharesRatioBp,
+            BASIS_POINT_SCALE
+        ) + (totalToWithdraw0 - feeCut0);
+        uint256 valueToWithdraw1 = initialToken1Balance.mulDiv(
+            sharesRatioBp,
+            BASIS_POINT_SCALE
+        ) + (totalToWithdraw1 - feeCut1);
 
-        console.log("initialToken0Balance: ", initialToken0Balance, "initialToken1Balance: ", initialToken1Balance);
+        console.log(
+            "initialToken0Balance: ",
+            initialToken0Balance,
+            "initialToken1Balance: ",
+            initialToken1Balance
+        );
         console.log("feeCut0: ", feeCut0, "feeCut1: ", feeCut1);
-        console.log("valueToWithdraw0: ", valueToWithdraw0, "valueToWithdraw1: ", valueToWithdraw1);
+        console.log(
+            "valueToWithdraw0: ",
+            valueToWithdraw0,
+            "valueToWithdraw1: ",
+            valueToWithdraw1
+        );
         console.log(
             "token0 in vault: ",
             poolToken0.balanceOf(address(vault)),
@@ -345,7 +391,9 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
      * @param vault The vault to calculate total assets for
      * @return totalValue The total value of the vault in the asset
      */
-    function totalAssetsFor(LobsterVault vault) external view returns (uint256 totalValue) {
+    function totalAssetsFor(
+        LobsterVault vault
+    ) external view returns (uint256 totalValue) {
         return totalAssets_(vault);
     }
 
@@ -362,12 +410,16 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
      * @param vault The vault to calculate total assets for
      * @return totalValue The total value of the vault in the asset
      */
-    function totalAssets_(LobsterVault vault) internal view returns (uint256 totalValue) {
+    function totalAssets_(
+        LobsterVault vault
+    ) internal view returns (uint256 totalValue) {
         // Determine if the vault's asset is token0 or token1 in the pool
-        bool isVaultAssetToken0 = address(poolToken0) == LobsterVault(vault).asset();
+        bool isVaultAssetToken0 = address(poolToken0) ==
+            LobsterVault(vault).asset();
 
         require(
-            isVaultAssetToken0 || address(poolToken1) == LobsterVault(vault).asset(),
+            isVaultAssetToken0 ||
+                address(poolToken1) == LobsterVault(vault).asset(),
             "None of the pool assets is the vault asset"
         );
 
@@ -376,21 +428,32 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
         uint256 amount1 = poolToken1.balanceOf(address(vault));
 
         // Get all the positions in the pool (including non-collected fees)
-        (Position memory position0, Position memory position1) = getAllUniswapV3Positions(address(vault));
+        (
+            Position memory position0,
+            Position memory position1
+        ) = getAllUniswapV3Positions(address(vault));
 
         // Get the current spot price to convert between tokens
-        (uint160 sqrtPriceX96,,,,,,) = pool.slot0();
+        (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
         uint256 spotPrice = UniswapUtils.getQuoteFromSqrtRatioX96(
-            sqrtPriceX96, uint128(10 ** (isVaultAssetToken0 ? decimals1 : decimals0)), isVaultAssetToken0
+            sqrtPriceX96,
+            uint128(10 ** (isVaultAssetToken0 ? decimals1 : decimals0)),
+            isVaultAssetToken0
         );
 
         // Calculate total value by converting all holdings to the vault's asset
         if (isVaultAssetToken0) {
             // If vault's asset is token0, convert token1 to token0
-            totalValue = amount0 + position0.value + position1.value.mulDiv(spotPrice, 10 ** decimals1);
+            totalValue =
+                amount0 +
+                position0.value +
+                position1.value.mulDiv(spotPrice, 10 ** decimals1);
         } else {
             // If vault's asset is token1, convert token0 to token1
-            totalValue = amount1 + position1.value + position0.value.mulDiv(spotPrice, 10 ** decimals0);
+            totalValue =
+                amount1 +
+                position1.value +
+                position0.value.mulDiv(spotPrice, 10 ** decimals0);
         }
     }
 
@@ -402,7 +465,9 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
      * @return position0 The total value in token0 with fee adjustments
      * @return position1 The total value in token1 with fee adjustments
      */
-    function getAllUniswapV3Positions(address user)
+    function getAllUniswapV3Positions(
+        address user
+    )
         public
         view
         returns (Position memory position0, Position memory position1)
@@ -420,31 +485,93 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
             uint256 tokenId = positionManager.tokenOfOwnerByIndex(user, i);
 
             // Retrieve position details
-            (,, address token0, address token1, uint24 fee,,,,,,,) = positionManager.positions(tokenId);
+            (
+                ,
+                ,
+                address token0,
+                address token1,
+                uint24 fee,
+                ,
+                ,
+                ,
+                ,
+                ,
+                ,
+
+            ) = positionManager.positions(tokenId);
 
             // Compute the pool address for this position
-            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(token0, token1, fee);
-            address computedPoolAddress = PoolAddress.computeAddress(pool.factory(), key);
+            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(
+                token0,
+                token1,
+                fee
+            );
+            address computedPoolAddress = PoolAddress.computeAddress(
+                pool.factory(),
+                key
+            );
 
             // Only count positions in the relevant pool
             if (computedPoolAddress == address(pool)) {
                 // Get current price to value the position
-                (uint160 sqrtPriceX96,,,,,,) = pool.slot0();
+                (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
 
                 // Get total position value including fees
-                (uint256 amount0, uint256 fee0, uint256 amount1, uint256 fee1) =
-                    PositionValue.total(positionManager, tokenId, sqrtPriceX96);
+                (
+                    uint256 amount0,
+                    uint256 fee0,
+                    uint256 amount1,
+                    uint256 fee1
+                ) = PositionValue.total(positionManager, tokenId, sqrtPriceX96);
 
                 // Add principal amounts directly
                 position0.value += amount0;
                 position1.value += amount1;
 
                 // For fees, apply the fee cut before adding
-                position0.value += fee0.mulDiv(BASIS_POINT_SCALE - feeCutBasisPoint, BASIS_POINT_SCALE);
-                position1.value += fee1.mulDiv(BASIS_POINT_SCALE - feeCutBasisPoint, BASIS_POINT_SCALE);
+                position0.value += fee0.mulDiv(
+                    BASIS_POINT_SCALE - feeCutBasisPoint,
+                    BASIS_POINT_SCALE
+                );
+                position1.value += fee1.mulDiv(
+                    BASIS_POINT_SCALE - feeCutBasisPoint,
+                    BASIS_POINT_SCALE
+                );
             }
         }
 
         return (position0, position1);
+    }
+
+    function maxDeposit(address) external pure returns (uint256) {
+        revert("UniswapV3VaultFlow: maxDeposit not implemented");
+    }
+
+    function maxMint(address) external pure returns (uint256) {
+        revert("UniswapV3VaultFlow: maxMint not implemented");
+    }
+
+    function maxWithdraw(address) external pure returns (uint256) {
+        revert("UniswapV3VaultFlow: maxWithdraw not implemented");
+    }
+
+    function maxRedeem(address) external pure returns (uint256) {
+        revert("UniswapV3VaultFlow: maxRedeem not implemented");
+    }
+
+    function previewDeposit(uint256) external pure returns (uint256) {
+        revert("UniswapV3VaultFlow: previewDeposit not implemented");
+    }
+
+    function previewMint(uint256) external pure returns (uint256) {
+        revert("UniswapV3VaultFlow: previewMint not implemented");
+    }
+
+    function previewWithdraw(uint256) external pure returns (uint256) {
+        revert("UniswapV3VaultFlow: previewWithdraw not implemented");
+    }
+
+    function previewRedeem(uint256) external pure returns (uint256) {
+        revert("UniswapV3VaultFlow: previewRedeem not implemented");
     }
 }

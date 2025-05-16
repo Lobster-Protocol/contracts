@@ -16,22 +16,26 @@ contract DummyVaultFlow is IVaultFlowModule {
     LobsterVault public vault;
     IERC20 token;
 
-    event DepositHasBeenCalled(address caller, address receiver, uint256 assets, uint256 shares);
-    event WithdrawHasBeenCalled(address caller, address receiver, address owner, uint256 assets, uint256 shares);
-
-    function maxWithdraw(address) external pure returns (uint256) {
-        revert("maxWithdraw: Not implemented");
-    }
+    event DepositHasBeenCalled(
+        address caller,
+        address receiver,
+        uint256 assets,
+        uint256 shares
+    );
+    event WithdrawHasBeenCalled(
+        address caller,
+        address receiver,
+        address owner,
+        uint256 assets,
+        uint256 shares
+    );
 
     function _deposit(
         address caller,
         address receiver,
         uint256 assets,
         uint256 shares
-    )
-        external
-        returns (bool success)
-    {
+    ) external returns (bool success) {
         emit DepositHasBeenCalled(caller, receiver, assets, shares);
         // revert if caller is PANIC_CALLER
         if (caller == PANIC_CALLER) {
@@ -59,10 +63,7 @@ contract DummyVaultFlow is IVaultFlowModule {
         address owner,
         uint256 assets,
         uint256 shares
-    )
-        external
-        returns (bool success)
-    {
+    ) external returns (bool success) {
         emit WithdrawHasBeenCalled(caller, receiver, owner, assets, shares);
         // revert if caller is PANIC_CALLER
         if (caller == PANIC_CALLER) revert();
@@ -76,5 +77,37 @@ contract DummyVaultFlow is IVaultFlowModule {
 
     function setToken(address _token) external {
         token = IERC20(_token);
+    }
+
+    function maxDeposit(address) external pure returns (uint256) {
+        revert("UniswapV3VaultFlow: maxDeposit not implemented");
+    }
+
+    function maxMint(address) external pure returns (uint256) {
+        revert("UniswapV3VaultFlow: maxMint not implemented");
+    }
+
+    function maxWithdraw(address) external pure returns (uint256) {
+        revert("UniswapV3VaultFlow: maxWithdraw not implemented");
+    }
+
+    function maxRedeem(address) external pure returns (uint256) {
+        revert("UniswapV3VaultFlow: maxRedeem not implemented");
+    }
+
+    function previewDeposit(uint256) external pure returns (uint256) {
+        revert("UniswapV3VaultFlow: previewDeposit not implemented");
+    }
+
+    function previewMint(uint256) external pure returns (uint256) {
+        revert("UniswapV3VaultFlow: previewMint not implemented");
+    }
+
+    function previewWithdraw(uint256) external pure returns (uint256) {
+        revert("UniswapV3VaultFlow: previewWithdraw not implemented");
+    }
+
+    function previewRedeem(uint256) external pure returns (uint256) {
+        revert("UniswapV3VaultFlow: previewRedeem not implemented");
     }
 }

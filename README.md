@@ -1,3 +1,14 @@
+todo: 
+- rm the vault fees
+- add entry/exit and aum fees in vault flow
+- test rebase vault flow
+- test uniswap vault flow
+- add max and preview functions in vault flow (use bit shifting to know if we have to use default function or vault flow function)
+
+
+
+
+
 # Lobster Vault
 
 A modular ERC4626 vault system with customizable fee structures, operation validation, and asset management.
