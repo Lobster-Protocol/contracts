@@ -26,7 +26,9 @@ interface IVaultFlowModule {
         address receiver,
         uint256 assets,
         uint256 shares
-    ) external returns (bool success);
+    )
+        external
+        returns (bool success);
 
     /**
      * @notice Custom implementation for vault withdrawal logic
@@ -44,7 +46,9 @@ interface IVaultFlowModule {
         address owner,
         uint256 assets,
         uint256 shares
-    ) external returns (bool success);
+    )
+        external
+        returns (bool success);
 
     /**
      * @notice Returns the maximum amount of assets that can be deposited into the vault for the receiver
@@ -53,9 +57,7 @@ interface IVaultFlowModule {
      * @param receiver The address of the receiver of the shares
      * @return maxAssets The maximum amount of assets that can be deposited
      */
-    function maxDeposit(
-        address receiver
-    ) external view returns (uint256 maxAssets);
+    function maxDeposit(address receiver) external view returns (uint256 maxAssets);
 
     /**
      * @notice Returns the maximum amount of shares that can be minted for the receiver
@@ -64,9 +66,7 @@ interface IVaultFlowModule {
      * @param receiver The address of the receiver of the shares
      * @return maxShares The maximum amount of shares that can be minted
      */
-    function maxMint(
-        address receiver
-    ) external view returns (uint256 maxShares);
+    function maxMint(address receiver) external view returns (uint256 maxShares);
 
     /**
      * @notice Returns the maximum amount of assets that can be withdrawn from owner's balance
@@ -75,9 +75,7 @@ interface IVaultFlowModule {
      * @param owner The address of the owner of the assets
      * @return maxAssets The maximum amount of assets that can be withdrawn
      */
-    function maxWithdraw(
-        address owner
-    ) external view returns (uint256 maxAssets);
+    function maxWithdraw(address owner) external view returns (uint256 maxAssets);
 
     /**
      * @notice Returns the maximum amount of shares that can be redeemed from owner's balance
@@ -95,9 +93,7 @@ interface IVaultFlowModule {
      * @param assets The amount of assets to deposit
      * @return shares The amount of shares that would be minted
      */
-    function previewDeposit(
-        uint256 assets
-    ) external view returns (uint256 shares);
+    function previewDeposit(uint256 assets) external view returns (uint256 shares);
 
     /**
      * @notice Simulates the effects of a mint at the current block, given current on-chain conditions
@@ -115,9 +111,7 @@ interface IVaultFlowModule {
      * @param assets The amount of assets to withdraw
      * @return shares The amount of shares that would be burned
      */
-    function previewWithdraw(
-        uint256 assets
-    ) external view returns (uint256 shares);
+    function previewWithdraw(uint256 assets) external view returns (uint256 shares);
 
     /**
      * @notice Simulates the effects of a redemption at the current block, given current on-chain conditions
@@ -126,9 +120,7 @@ interface IVaultFlowModule {
      * @param shares The amount of shares to redeem
      * @return assets The amount of assets that would be withdrawn
      */
-    function previewRedeem(
-        uint256 shares
-    ) external view returns (uint256 assets);
+    function previewRedeem(uint256 shares) external view returns (uint256 assets);
 }
 
 // Authorization bit constants for IVaultFlowModule overrides on vault functions
