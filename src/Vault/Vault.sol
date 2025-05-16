@@ -14,7 +14,7 @@ import {Modular} from "../Modules/Modular.sol";
 import {IHook} from "../interfaces/modules/IHook.sol";
 import {INav} from "../interfaces/modules/INav.sol";
 import {IOpValidatorModule} from "../interfaces/modules/IOpValidatorModule.sol";
-import {IVaultFlowModule} from "../../src/interfaces/modules/IVaultFlowModule.sol";
+import "../../src/interfaces/modules/IVaultFlowModule.sol";
 
 /**
  * @title LobsterVault
@@ -60,6 +60,12 @@ contract LobsterVault is Modular {
             revert("Cannot install hook if there is no op validator");
         }
 
+        if (vaultFlowModule != IVaultFlowModule(address(0))) {
+            vaultFlowOverridePolicy = vaultFlowModule.overridePolicy();
+        } else {
+            vaultFlowOverridePolicy = 0;
+        }
+
         opValidator = opValidator_;
         emit OpValidatorSet(opValidator_);
 
@@ -70,7 +76,7 @@ contract LobsterVault is Modular {
         emit NavModuleSet(navModule_);
 
         vaultFlow = vaultFlowModule;
-        emit vaultFlowSet(vaultFlowModule);
+        emit vaultFlowSet(vaultFlowModule, vaultFlowOverridePolicy);
     }
 
     /* ------------------INAV------------------- */
@@ -87,7 +93,7 @@ contract LobsterVault is Modular {
         return IERC20(asset()).balanceOf(address(this));
     }
 
-    /* ------------------FLOW MODULES------------------ */
+    /* ------------------FLOW MODULE OVERRIDES------------------ */
     /**
      * @notice Handles the deposit logic
      * @dev Override of ERC4626._deposit to use the vaultFlow module if available
@@ -97,7 +103,10 @@ contract LobsterVault is Modular {
      * @param shares The amount of shares to mint
      */
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
-        if (address(vaultFlow) != address(0)) {
+        console.log("in _deposit");
+        if (vaultFlowOverridePolicy & _DEPOSIT_OVERRIDE_ENABLED != 0) {
+            console.log("in custom deposit");
+
             (bool success,) =
                 address(vaultFlow).call(abi.encodeCall(vaultFlow._deposit, (caller, receiver, assets, shares)));
 
@@ -105,6 +114,8 @@ contract LobsterVault is Modular {
 
             return;
         }
+
+        console.log("in default deposit");
 
         // if no module set, backoff to default
         return super._deposit(caller, receiver, assets, shares);
@@ -129,10 +140,9 @@ contract LobsterVault is Modular {
         internal
         override
     {
-        if (address(vaultFlow) != address(0)) {
-            (bool success,) = address(vaultFlow).call(
-                abi.encodeWithSelector(vaultFlow._withdraw.selector, caller, receiver, owner, assets, shares)
-            );
+        if (vaultFlowOverridePolicy & _WITHDRAW_OVERRIDE_ENABLED != 0) {
+            (bool success,) =
+                address(vaultFlow).call(abi.encodeCall(vaultFlow._withdraw, (caller, receiver, owner, assets, shares)));
 
             if (!success) revert WithdrawModuleFailed();
 
@@ -143,18 +153,110 @@ contract LobsterVault is Modular {
         return super._withdraw(caller, receiver, owner, assets, shares);
     }
 
-    /**
-     * @dev Internal conversion function (from assets to shares) with support for rounding direction.
-     */
-    function _convertToShares(uint256 assets, Math.Rounding rounding) internal view override returns (uint256) {
-        return assets.mulDiv(totalSupply() + 10 ** _decimalsOffset(), totalAssets() + 1, rounding);
+    function maxDeposit(address receiver) public view override returns (uint256 maxAssets) {
+        console.log("in maxDeposit");
+        if (vaultFlowOverridePolicy & MAX_DEPOSIT_OVERRIDE_ENABLED != 0) {
+            console.log("in custom maxDeposit");
+            (bool success, bytes memory data) =
+                address(vaultFlow).staticcall(abi.encodeCall(vaultFlow.maxDeposit, (receiver)));
+
+            if (!success) revert MaxDepositModuleFailed();
+
+            return abi.decode(data, (uint256));
+        }
+
+        return super.maxDeposit(receiver);
     }
 
-    /**
-     * @dev Internal conversion function (from shares to assets) with support for rounding direction.
-     */
-    function _convertToAssets(uint256 shares, Math.Rounding rounding) internal view override returns (uint256) {
-        return shares.mulDiv(totalAssets() + 1, totalSupply() + 10 ** _decimalsOffset(), rounding);
+    function maxMint(address receiver) public view override returns (uint256 maxShares) {
+        if (vaultFlowOverridePolicy & MAX_MINT_OVERRIDE_ENABLED != 0) {
+            (bool success, bytes memory data) =
+                address(vaultFlow).staticcall(abi.encodeCall(vaultFlow.maxMint, receiver));
+
+            if (!success) revert MaxMintModuleFailed();
+
+            return abi.decode(data, (uint256));
+        }
+
+        return super.maxMint(receiver);
+    }
+
+    function maxWithdraw(address owner) public view override returns (uint256 maxAssets) {
+        if (vaultFlowOverridePolicy & MAX_WITHDRAW_OVERRIDE_ENABLED != 0) {
+            (bool success, bytes memory data) =
+                address(vaultFlow).staticcall(abi.encodeCall(vaultFlow.maxWithdraw, (owner)));
+
+            if (!success) revert MaxWithdrawModuleFailed();
+
+            return abi.decode(data, (uint256));
+        }
+
+        return super.maxWithdraw(owner);
+    }
+
+    function maxRedeem(address owner) public view override returns (uint256 maxShares) {
+        if (vaultFlowOverridePolicy & MAX_REDEEM_OVERRIDE_ENABLED != 0) {
+            (bool success, bytes memory data) =
+                address(vaultFlow).staticcall(abi.encodeCall(vaultFlow.maxRedeem, (owner)));
+
+            if (!success) revert MaxRedeemModuleFailed();
+
+            return abi.decode(data, (uint256));
+        }
+
+        return super.maxRedeem(owner);
+    }
+
+    function previewDeposit(uint256 assets) public view override returns (uint256 shares) {
+        if (vaultFlowOverridePolicy & PREVIEW_DEPOSIT_OVERRIDE_ENABLED != 0) {
+            (bool success, bytes memory data) =
+                address(vaultFlow).staticcall(abi.encodeCall(vaultFlow.previewDeposit, (assets)));
+
+            if (!success) revert PreviewDepositModuleFailed();
+
+            return abi.decode(data, (uint256));
+        }
+
+        return super.previewDeposit(assets);
+    }
+
+    function previewMint(uint256 shares) public view override returns (uint256 assets) {
+        if (vaultFlowOverridePolicy & PREVIEW_MINT_OVERRIDE_ENABLED != 0) {
+            (bool success, bytes memory data) =
+                address(vaultFlow).staticcall(abi.encodeCall(vaultFlow.previewMint, (shares)));
+
+            if (!success) revert PreviewMintModuleFailed();
+
+            return abi.decode(data, (uint256));
+        }
+
+        return super.previewMint(shares);
+    }
+
+    function previewWithdraw(uint256 assets) public view override returns (uint256 shares) {
+        if (vaultFlowOverridePolicy & PREVIEW_WITHDRAW_OVERRIDE_ENABLED != 0) {
+            (bool success, bytes memory data) =
+                address(vaultFlow).staticcall(abi.encodeCall(vaultFlow.previewWithdraw, (assets)));
+
+            if (!success) revert PreviewWithdrawModuleFailed();
+
+            return abi.decode(data, (uint256));
+        }
+
+        return super.previewWithdraw(assets);
+    }
+
+    function previewRedeem(uint256 shares) public view override returns (uint256 assets) {
+        if (vaultFlowOverridePolicy & PREVIEW_REDEEM_OVERRIDE_ENABLED != 0) {
+            (bool success, bytes memory data) =
+                address(vaultFlow).staticcall(abi.encodeCall(vaultFlow.previewRedeem, (shares)));
+
+            if (!success) revert PreviewRedeemModuleFailed();
+
+            return abi.decode(data, (uint256));
+        }
+
+        return super.previewRedeem(shares);
     }
 
     /**
@@ -164,7 +266,11 @@ contract LobsterVault is Modular {
      * @dev Can only be called by the vaultFlow module
      */
     function mintShares(address account, uint256 value) external OnlyVaultFlow {
-        return super._mint(account, value);
+        if (vaultFlowOverridePolicy & _DEPOSIT_OVERRIDE_ENABLED != 0) {
+            return super._mint(account, value);
+        }
+
+        revert("Cannot mint shares if no module set & _deposit override not enabled");
     }
 
     /**
@@ -174,7 +280,11 @@ contract LobsterVault is Modular {
      * @dev Can only be called by the vaultFlow module
      */
     function burnShares(address account, uint256 value) external OnlyVaultFlow {
-        return super._burn(account, value);
+        if (vaultFlowOverridePolicy & _WITHDRAW_OVERRIDE_ENABLED != 0) {
+            return super._burn(account, value);
+        }
+
+        revert("Cannot burn shares if no module set & _withdraw override not enabled");
     }
 
     /**
@@ -185,6 +295,9 @@ contract LobsterVault is Modular {
      * @dev Can only be called by the vaultFlow module
      */
     function spendAllowance(address owner, address spender, uint256 value) external OnlyVaultFlow {
+        if (vaultFlowOverridePolicy & _SPEND_ALLOWANCE_OVERRIDE_ENABLED != 0) {
+            return super._spendAllowance(owner, spender, value);
+        }
         _spendAllowance(owner, spender, value);
     }
 }

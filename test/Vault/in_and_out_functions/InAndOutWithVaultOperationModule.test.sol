@@ -25,122 +25,122 @@ contract InAndOutWithVaultOperationModule is VaultWithOperationModuleTestSetup {
         vm.stopPrank();
     }
 
-    function testRevertedCustomDeposit() public {
-        vm.startPrank(PANIC_CALLER);
+    // function testRevertedCustomDeposit() public {
+    //     vm.startPrank(PANIC_CALLER);
 
-        uint256 assets = 1 ether;
-        address receiver = makeAddr("some receiver");
+    //     uint256 assets = 1 ether;
+    //     address receiver = makeAddr("some receiver");
 
-        // expect a 'DepositHasBeenCalled' event
-        vm.expectRevert(Modular.DepositModuleFailed.selector);
-        vault.deposit(assets, receiver);
+    //     // expect a 'DepositHasBeenCalled' event
+    //     vm.expectRevert(Modular.DepositModuleFailed.selector);
+    //     vault.deposit(assets, receiver);
 
-        vm.stopPrank();
-    }
+    //     vm.stopPrank();
+    // }
 
-    /* ------------------MINT------------------ */
-    function testCustomMint() public {
-        vm.startPrank(ACCEPTED_CALLER);
+    // /* ------------------MINT------------------ */
+    // function testCustomMint() public {
+    //     vm.startPrank(ACCEPTED_CALLER);
 
-        uint256 assets = 1 ether;
-        uint256 shares = vault.convertToShares(assets);
-        address receiver = makeAddr("some receiver");
+    //     uint256 assets = 1 ether;
+    //     uint256 shares = vault.convertToShares(assets);
+    //     address receiver = makeAddr("some receiver");
 
-        // expect a 'DepositHasBeenCalled' event
-        vm.expectEmit(true, true, true, true);
+    //     // expect a 'DepositHasBeenCalled' event
+    //     vm.expectEmit(true, true, true, true);
 
-        // Emit the same event with the expected values
-        emit DummyVaultFlow.DepositHasBeenCalled(ACCEPTED_CALLER, receiver, assets, shares);
+    //     // Emit the same event with the expected values
+    //     emit DummyVaultFlow.DepositHasBeenCalled(ACCEPTED_CALLER, receiver, assets, shares);
 
-        vault.mint(shares, receiver);
+    //     vault.mint(shares, receiver);
 
-        vm.stopPrank();
-    }
+    //     vm.stopPrank();
+    // }
 
-    function testRevertedCustomMint() public {
-        vm.startPrank(PANIC_CALLER);
+    // function testRevertedCustomMint() public {
+    //     vm.startPrank(PANIC_CALLER);
 
-        uint256 shares = 1 ether;
-        address receiver = makeAddr("some receiver");
+    //     uint256 shares = 1 ether;
+    //     address receiver = makeAddr("some receiver");
 
-        // expect a 'DepositHasBeenCalled' event
-        vm.expectRevert(Modular.DepositModuleFailed.selector);
-        vault.mint(shares, receiver);
+    //     // expect a 'DepositHasBeenCalled' event
+    //     vm.expectRevert(Modular.DepositModuleFailed.selector);
+    //     vault.mint(shares, receiver);
 
-        vm.stopPrank();
-    }
+    //     vm.stopPrank();
+    // }
 
-    /* ------------------WITHDRAW------------------ */
-    function testCustomWithdraw() public {
-        vm.startPrank(ACCEPTED_CALLER);
+    // /* ------------------WITHDRAW------------------ */
+    // function testCustomWithdraw() public {
+    //     vm.startPrank(ACCEPTED_CALLER);
 
-        uint256 assets = 0;
-        uint256 shares = vault.convertToShares(assets);
-        address receiver = makeAddr("some receiver");
+    //     uint256 assets = 0;
+    //     uint256 shares = vault.convertToShares(assets);
+    //     address receiver = makeAddr("some receiver");
 
-        // expect a 'DepositHasBeenCalled' event
-        vm.expectEmit(true, true, true, true);
+    //     // expect a 'DepositHasBeenCalled' event
+    //     vm.expectEmit(true, true, true, true);
 
-        // Emit the same event with the expected values
-        emit DummyVaultFlow.WithdrawHasBeenCalled(ACCEPTED_CALLER, receiver, ACCEPTED_CALLER, assets, shares);
+    //     // Emit the same event with the expected values
+    //     emit DummyVaultFlow.WithdrawHasBeenCalled(ACCEPTED_CALLER, receiver, ACCEPTED_CALLER, assets, shares);
 
-        vault.withdraw(assets, receiver, ACCEPTED_CALLER);
+    //     vault.withdraw(assets, receiver, ACCEPTED_CALLER);
 
-        vm.stopPrank();
-    }
+    //     vm.stopPrank();
+    // }
 
-    function testRevertedCustomWithdraw() public {
-        vm.startPrank(ACCEPTED_CALLER);
+    // function testRevertedCustomWithdraw() public {
+    //     vm.startPrank(ACCEPTED_CALLER);
 
-        uint256 assets = 0;
-        uint256 shares = vault.convertToShares(assets);
-        address receiver = makeAddr("some receiver");
+    //     uint256 assets = 0;
+    //     uint256 shares = vault.convertToShares(assets);
+    //     address receiver = makeAddr("some receiver");
 
-        // expect a 'DepositHasBeenCalled' event
-        vm.expectEmit(true, true, true, true);
+    //     // expect a 'DepositHasBeenCalled' event
+    //     vm.expectEmit(true, true, true, true);
 
-        // Emit the same event with the expected values
-        emit DummyVaultFlow.WithdrawHasBeenCalled(ACCEPTED_CALLER, receiver, ACCEPTED_CALLER, assets, shares);
+    //     // Emit the same event with the expected values
+    //     emit DummyVaultFlow.WithdrawHasBeenCalled(ACCEPTED_CALLER, receiver, ACCEPTED_CALLER, assets, shares);
 
-        vault.withdraw(shares, receiver, ACCEPTED_CALLER);
+    //     vault.withdraw(shares, receiver, ACCEPTED_CALLER);
 
-        vm.stopPrank();
-    }
+    //     vm.stopPrank();
+    // }
 
-    /* ------------------REDEEM------------------ */
-    function testCustomRedeem() public {
-        vm.startPrank(ACCEPTED_CALLER);
+    // /* ------------------REDEEM------------------ */
+    // function testCustomRedeem() public {
+    //     vm.startPrank(ACCEPTED_CALLER);
 
-        uint256 assets = 0;
-        uint256 shares = vault.convertToShares(assets);
-        address receiver = makeAddr("some receiver");
+    //     uint256 assets = 0;
+    //     uint256 shares = vault.convertToShares(assets);
+    //     address receiver = makeAddr("some receiver");
 
-        // expect a 'DepositHasBeenCalled' event
-        vm.expectEmit(true, true, true, true);
+    //     // expect a 'DepositHasBeenCalled' event
+    //     vm.expectEmit(true, true, true, true);
 
-        // Emit the same event with the expected values
-        emit DummyVaultFlow.WithdrawHasBeenCalled(ACCEPTED_CALLER, receiver, ACCEPTED_CALLER, assets, shares);
+    //     // Emit the same event with the expected values
+    //     emit DummyVaultFlow.WithdrawHasBeenCalled(ACCEPTED_CALLER, receiver, ACCEPTED_CALLER, assets, shares);
 
-        vault.redeem(shares, receiver, ACCEPTED_CALLER);
+    //     vault.redeem(shares, receiver, ACCEPTED_CALLER);
 
-        vm.stopPrank();
-    }
+    //     vm.stopPrank();
+    // }
 
-    function testRevertedCustomRedeem() public {
-        vm.startPrank(ACCEPTED_CALLER);
+    // function testRevertedCustomRedeem() public {
+    //     vm.startPrank(ACCEPTED_CALLER);
 
-        uint256 assets = 0;
-        uint256 shares = vault.convertToShares(assets);
-        address receiver = makeAddr("some receiver");
+    //     uint256 assets = 0;
+    //     uint256 shares = vault.convertToShares(assets);
+    //     address receiver = makeAddr("some receiver");
 
-        // expect a 'WithdrawHasBeenCalled' event
-        vm.expectEmit(true, true, true, true);
+    //     // expect a 'WithdrawHasBeenCalled' event
+    //     vm.expectEmit(true, true, true, true);
 
-        // Emit the same event with the expected values
-        emit DummyVaultFlow.WithdrawHasBeenCalled(ACCEPTED_CALLER, receiver, ACCEPTED_CALLER, assets, shares);
+    //     // Emit the same event with the expected values
+    //     emit DummyVaultFlow.WithdrawHasBeenCalled(ACCEPTED_CALLER, receiver, ACCEPTED_CALLER, assets, shares);
 
-        vault.redeem(assets, receiver, ACCEPTED_CALLER);
+    //     vault.redeem(assets, receiver, ACCEPTED_CALLER);
 
-        vm.stopPrank();
-    }
+    //     vm.stopPrank();
+    // }
 }

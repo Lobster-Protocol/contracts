@@ -31,6 +31,12 @@ abstract contract Modular is ERC4626 {
     IVaultFlowModule public immutable vaultFlow;
 
     /**
+     * @notice Each bit tells the vault wether or not the vaultFlow module overrides
+     * the _deposit, _withdraw, max and/or preview functions
+     */
+    uint16 public immutable vaultFlowOverridePolicy;
+
+    /**
      * @notice Hook for executing code before and after vault operations
      * @dev Allows for additional validation, state modification, or other actions
      * @dev todo: 1 hook for all calls or 1 hook per call?
@@ -79,8 +85,9 @@ abstract contract Modular is ERC4626 {
     /**
      * @notice Emitted when a vault operations module is set
      * @param vaultFlow The address of the new vault flow module
+     * @param auth The packed overrides bits for the vault flow module (tells which functions to override)
      */
-    event vaultFlowSet(IVaultFlowModule vaultFlow);
+    event vaultFlowSet(IVaultFlowModule vaultFlow, uint16 auth);
 
     /**
      * @notice Thrown when the pre-operation hook check fails
@@ -106,6 +113,17 @@ abstract contract Modular is ERC4626 {
      * @notice Thrown when the withdraw module fails to process a withdrawal
      */
     error WithdrawModuleFailed();
+
+    error MaxDepositModuleFailed();
+    error MaxMintModuleFailed();
+
+    error MaxWithdrawModuleFailed();
+
+    error MaxRedeemModuleFailed();
+    error PreviewDepositModuleFailed();
+    error PreviewMintModuleFailed();
+    error PreviewWithdrawModuleFailed();
+    error PreviewRedeemModuleFailed();
 
     /**
      * @notice Ensures only the vaultFlow module can call the function

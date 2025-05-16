@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
-import {IVaultFlowModule} from "../../../src/interfaces/modules/IVaultFlowModule.sol";
+import {
+    IVaultFlowModule,
+    _DEPOSIT_OVERRIDE_ENABLED,
+    _WITHDRAW_OVERRIDE_ENABLED
+} from "../../../src/interfaces/modules/IVaultFlowModule.sol";
 import {LobsterVault} from "../../../src/Vault/Vault.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 
@@ -13,11 +17,18 @@ address constant CALL_SAFE_TRANSFER = address(15);
 address constant CALL_SAFE_TRANSFER_FROM = address(16);
 
 contract DummyVaultFlow is IVaultFlowModule {
+    // Constants for override policy
+    uint16 private constant overridePolicy_ = _DEPOSIT_OVERRIDE_ENABLED | _WITHDRAW_OVERRIDE_ENABLED;
+
     LobsterVault public vault;
     IERC20 token;
 
     event DepositHasBeenCalled(address caller, address receiver, uint256 assets, uint256 shares);
     event WithdrawHasBeenCalled(address caller, address receiver, address owner, uint256 assets, uint256 shares);
+
+    function overridePolicy() external pure override returns (uint16) {
+        return overridePolicy_;
+    }
 
     function _deposit(
         address caller,

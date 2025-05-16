@@ -13,6 +13,18 @@ pragma solidity ^0.8.28;
  */
 interface IVaultFlowModule {
     /**
+     * @notice Returns the policy for overriding vault functions
+     * @dev This function returns a bitmask indicating which vault functions are overridden.
+     *      Each bit in the mask corresponds to a specific function override.
+     *     If a bit is set, the corresponding function is overridden.
+     *     For example, if the _DEPOSIT_OVERRIDE_ENABLED bit is set,
+     *     the vault's deposit function is overridden by this module's _deposit function.
+     *     The bits are defined as constants after the interface.
+     *     @return overridePolicy A bitmask indicating which vault functions are overridden
+     */
+    function overridePolicy() external view returns (uint16 overridePolicy);
+
+    /**
      * @notice Custom implementation for vault deposit logic
      * @param caller The address initiating the deposit
      * @param receiver The address that will receive the shares
@@ -136,3 +148,5 @@ uint16 constant PREVIEW_DEPOSIT_OVERRIDE_ENABLED = 1 << 6;
 uint16 constant PREVIEW_MINT_OVERRIDE_ENABLED = 1 << 7;
 uint16 constant PREVIEW_WITHDRAW_OVERRIDE_ENABLED = 1 << 8;
 uint16 constant PREVIEW_REDEEM_OVERRIDE_ENABLED = 1 << 9;
+// Other
+uint16 constant _SPEND_ALLOWANCE_OVERRIDE_ENABLED = 1 << 10;

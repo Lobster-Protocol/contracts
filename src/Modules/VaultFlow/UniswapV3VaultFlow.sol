@@ -3,7 +3,11 @@ pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
 
-import {IVaultFlowModule} from "../../interfaces/modules/IVaultFlowModule.sol";
+import {
+    IVaultFlowModule,
+    _DEPOSIT_OVERRIDE_ENABLED,
+    _WITHDRAW_OVERRIDE_ENABLED
+} from "../../interfaces/modules/IVaultFlowModule.sol";
 import {INav} from "../../interfaces/modules/INav.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/interfaces/IERC20Metadata.sol";
@@ -36,6 +40,8 @@ uint16 constant BASIS_POINT_SCALE = 10_000;
  */
 contract UniswapV3VaultFlow is IVaultFlowModule, INav {
     using Math for uint256;
+
+    uint16 private constant OVERRIDE_POLICY = _DEPOSIT_OVERRIDE_ENABLED | _WITHDRAW_OVERRIDE_ENABLED;
 
     uint256 constant MAX_SLIPPAGE = 300; // 3% slippage (dev value)
 
@@ -126,6 +132,10 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
         positionManager = positionManager_;
         router = router_;
         feeCutBasisPoint = feeCutBasisPoint_;
+    }
+
+    function overridePolicy() external pure override returns (uint16) {
+        return OVERRIDE_POLICY;
     }
 
     // /**

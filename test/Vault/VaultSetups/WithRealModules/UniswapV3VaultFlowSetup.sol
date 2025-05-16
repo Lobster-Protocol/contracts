@@ -73,6 +73,7 @@ contract UniswapV3VaultFlowSetup is UniswapV3Infra {
             uniV3feeCutCollector,
             0
         );
+
         INav navModule = INav(address(vaultOperations)); // UniswapV3VaultFlow is also a Nav module
 
         vault = new LobsterVault(owner, asset, "Vault Token", "vTKN", opValidator, hook, navModule, vaultOperations);
