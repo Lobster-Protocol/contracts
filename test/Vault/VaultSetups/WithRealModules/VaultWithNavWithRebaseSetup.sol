@@ -99,9 +99,6 @@ contract VaultWithNavWithRebaseSetup is Test {
         // Sign the message hash using the private key of the signer
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, msgHash);
 
-        console.log("ini v", v);
-        console.log("ini r", uint256(r));
-        console.log("ini s", uint256(s));
         // Create the signature data in the format the contract expects
         signature = abi.encodePacked(v, r, s);
     }

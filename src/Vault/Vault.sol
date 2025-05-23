@@ -79,6 +79,83 @@ contract LobsterVault is Modular {
         emit vaultFlowSet(vaultFlowModule, vaultFlowOverridePolicy);
     }
 
+    /**
+     * @dev See {IERC4626-deposit}.
+     * @dev If the vaultFlow module is set, and the TWO_TOKEN_SUPPORT_ENABLED policy is enabled,
+     * we expect assets to be the 2 tokens amount packed into a single uint256
+     */
+    function deposit(uint256 assets, address receiver) public override returns (uint256) {
+        uint256 maxAssets = maxDeposit(receiver);
+
+        // Handle the case where the vaultFlow module handles 2 tokens
+        if (vaultFlowOverridePolicy & TWO_TOKEN_SUPPORT_ENABLED != 0) {
+            // The flow module uses 2 tokens so maxWithdraw is a packed value of the two tokens
+            (uint128 maxAssets0, uint128 maxAssets1) = decodePackedUint128(maxAssets);
+            (uint128 assets0, uint128 assets1) = decodePackedUint128(assets);
+
+            if (assets0 > maxAssets0 || assets1 > maxAssets1) {
+                revert ERC4626ExceededMaxDeposit(receiver, assets, maxAssets);
+            }
+        } else {
+            // 1 asset
+            if (assets > maxAssets) {
+                revert ERC4626ExceededMaxDeposit(receiver, assets, maxAssets);
+            }
+        }
+
+        uint256 shares = previewDeposit(assets);
+        console.log("deposit, shares", shares);
+        uint256 asset0 = assets >> 128;
+        uint256 asset1 = uint128(assets);
+        console.log("deposit ", asset0, asset1);
+        _deposit(_msgSender(), receiver, assets, shares);
+
+        return shares;
+    }
+
+    /**
+     * @dev See {IERC4626-withdraw}.
+     * @dev If the vaultFlow module is set and the TWO_TOKEN_SUPPORT_ENABLED policy is enabled,
+     * we expect assets to be the 2 tokens amount packed into a single uint256
+     */
+    function withdraw(uint256 assets, address receiver, address owner) public override returns (uint256) {
+        uint256 maxAssets = maxWithdraw(owner);
+
+        // Handle the case where the vaultFlow module handles 2 tokens
+        if (vaultFlowOverridePolicy & TWO_TOKEN_SUPPORT_ENABLED != 0) {
+            // The flow module uses 2 tokens so maxWithdraw is a packed value of the two tokens
+            (uint128 maxAssets0, uint128 maxAssets1) = decodePackedUint128(maxAssets);
+            (uint128 assets0, uint128 assets1) = decodePackedUint128(assets);
+
+            console.log("withdraw: assets0", assets0, "maxAssets0", maxAssets0);
+            console.log("withdraw: assets1", assets1, "maxAssets1", maxAssets1);
+
+            if (assets0 > maxAssets0 || assets1 > maxAssets1) {
+                revert ERC4626ExceededMaxWithdraw(owner, assets, maxAssets);
+            }
+        } else {
+            if (assets > maxAssets) {
+                revert ERC4626ExceededMaxWithdraw(owner, assets, maxAssets);
+            }
+        }
+
+        uint256 shares = previewWithdraw(assets);
+
+        _withdraw(_msgSender(), receiver, owner, assets, shares);
+
+        return shares;
+    }
+
+    /**
+     * @dev See {IERC4626-redeem}.
+     * @dev If the vaultFlow module is set, and the TWO_TOKEN_SUPPORT_ENABLED policy is enabled,
+     * the maxRedeem function returns a packed value of the two tokens
+     * TWO_TOKEN_SUPPORT_ENABLED is set: assets = uint256(uint128,uint128) = (asset0, asset1)
+     */
+    function redeem(uint256 shares, address receiver, address owner) public override returns (uint256) {
+        return super.redeem(shares, receiver, owner);
+    }
+
     /* ------------------INAV------------------- */
 
     /**
@@ -103,10 +180,7 @@ contract LobsterVault is Modular {
      * @param shares The amount of shares to mint
      */
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
-        console.log("in _deposit");
         if (vaultFlowOverridePolicy & _DEPOSIT_OVERRIDE_ENABLED != 0) {
-            console.log("in custom deposit");
-
             (bool success,) =
                 address(vaultFlow).call(abi.encodeCall(vaultFlow._deposit, (caller, receiver, assets, shares)));
 
@@ -114,8 +188,6 @@ contract LobsterVault is Modular {
 
             return;
         }
-
-        console.log("in default deposit");
 
         // if no module set, backoff to default
         return super._deposit(caller, receiver, assets, shares);
@@ -154,9 +226,7 @@ contract LobsterVault is Modular {
     }
 
     function maxDeposit(address receiver) public view override returns (uint256 maxAssets) {
-        console.log("in maxDeposit");
         if (vaultFlowOverridePolicy & MAX_DEPOSIT_OVERRIDE_ENABLED != 0) {
-            console.log("in custom maxDeposit");
             (bool success, bytes memory data) =
                 address(vaultFlow).staticcall(abi.encodeCall(vaultFlow.maxDeposit, (receiver)));
 
@@ -274,6 +344,37 @@ contract LobsterVault is Modular {
     }
 
     /**
+     * @dev See {IERC4626-convertToShares}. - returns the amount of shares using the limiting token
+     */
+    function convertToShares(uint256 assets) public view override returns (uint256) {
+        if (vaultFlowOverridePolicy | ASSETS_SHARES_CONVERSION != 0) {
+            (bool success, bytes memory data) =
+                address(vaultFlow).staticcall(abi.encodeCall(vaultFlow.convertToShares, (assets)));
+
+            if (!success) revert PreviewWithdrawModuleFailed();
+
+            return abi.decode(data, (uint256));
+        }
+
+        return _convertToShares(assets, Math.Rounding.Floor);
+    }
+
+    /**
+     * @dev See {IERC4626-convertToAssets}.
+     */
+    function convertToAssets(uint256 shares) public view override returns (uint256) {
+        if (vaultFlowOverridePolicy | ASSETS_SHARES_CONVERSION != 0) {
+            (bool success, bytes memory data) =
+                address(vaultFlow).staticcall(abi.encodeCall(vaultFlow.convertToAssets, (shares)));
+
+            if (!success) revert PreviewWithdrawModuleFailed();
+
+            return abi.decode(data, (uint256));
+        }
+        return _convertToAssets(shares, Math.Rounding.Floor);
+    }
+
+    /**
      * @notice Burns shares from an account
      * @param account The address to burn shares from
      * @param value The amount of shares to burn
@@ -299,5 +400,19 @@ contract LobsterVault is Modular {
             return super._spendAllowance(owner, spender, value);
         }
         _spendAllowance(owner, spender, value);
+    }
+
+    function decodePackedUint128(uint256 packed) public pure returns (uint128 a, uint128 b) {
+        // Extract the first uint128 (higher order bits)
+        a = uint128(packed >> 128);
+
+        // Extract the second uint128 (lower order bits)
+        b = uint128(packed);
+
+        return (a, b);
+    }
+
+    function decimalsOffset() external view returns (uint8 offset) {
+        return _decimalsOffset();
     }
 }

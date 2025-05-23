@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPLv3
 pragma solidity ^0.8.28;
 
+import "forge-std/Test.sol";
+
 import {IHook} from "../../../../src/interfaces/modules/IHook.sol";
 import {IOpValidatorModule} from "../../../../src/interfaces/modules/IOpValidatorModule.sol";
 import {INav} from "../../../../src/interfaces/modules/INav.sol";
 import {IVaultFlowModule} from "../../../../src/interfaces/modules/IVaultFlowModule.sol";
 import {MockERC20} from "../../../Mocks/MockERC20.sol";
-import {LobsterVault} from "../../../../src/Vault/Vault.sol";
+import {LobsterVault, BASIS_POINT_SCALE} from "../../../../src/Vault/Vault.sol";
 import {UniswapV3VaultFlow} from "../../../../src/Modules/VaultFlow/UniswapV3VaultFlow.sol";
 import {IUniswapV3PoolMinimal} from "../../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {INonFungiblePositionManager} from "../../../../src/interfaces/uniswapV3/INonFungiblePositionManager.sol";
@@ -15,6 +17,12 @@ import {IUniswapV3FactoryMinimal} from "../../../../src/interfaces/uniswapV3/IUn
 import {IWETH} from "../../../../src/interfaces/IWETH.sol";
 import {DummyValidator} from "../../../Mocks/modules/DummyValidator.sol";
 import {IUniswapV3RouterMinimal} from "../../../../src/interfaces/uniswapV3/IUniswapV3RouterMinimal.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import {BaseOp, Op} from "../../../../src/interfaces/modules/IOpValidatorModule.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {PositionValue} from "../../../../src/libraries/uniswapV3/PositionValue.sol";
+import {PoolAddress} from "../../../../src/libraries/uniswapV3/PoolAddress.sol";
 
 struct UniswapV3Data {
     IUniswapV3FactoryMinimal factory;
@@ -27,10 +35,11 @@ struct UniswapV3Data {
 }
 
 contract UniswapV3VaultFlowSetup is UniswapV3Infra {
+    using Math for uint256;
+
     address public owner;
     address public alice;
     address public bob;
-    MockERC20 public asset;
     LobsterVault public vault;
 
     UniswapV3Data public uniswapV3Data;
@@ -49,45 +58,389 @@ contract UniswapV3VaultFlowSetup is UniswapV3Infra {
         uniswapV3Data.factory = factory;
         uniswapV3Data.router = router;
         uniswapV3Data.poolInitialSqrtPriceX96 = 2 ** 96; // = quote = 1:1 if both tokens have the same decimals value
-        asset = new MockERC20();
-        uniswapV3Data.tokenA = address(asset);
-        uniswapV3Data.tokenB = address(new MockERC20());
 
         // Deploy and initialize the pool weth/mocked token pool
         IUniswapV3PoolMinimal pool = createPoolAndInitialize(
             uniswapV3Data.factory,
-            address(asset), // tokenA
-            address(uniswapV3Data.tokenB),
+            address(new MockERC20()),
+            address(new MockERC20()),
             uniswapV3Data.poolFee,
             uniswapV3Data.poolInitialSqrtPriceX96
         );
+
+        uniswapV3Data.tokenA = pool.token0();
+        uniswapV3Data.tokenB = pool.token1();
+
+        // mint some tokens for the alice and bob
+        MockERC20(uniswapV3Data.tokenA).mint(alice, 10000 ether); // 1000 tokens with 18 decimals
+        MockERC20(uniswapV3Data.tokenB).mint(alice, 10000 ether); // 1000 tokens with 18 decimals
+        MockERC20(uniswapV3Data.tokenA).mint(bob, 10000 ether); // 1000 tokens with 18 decimals
+        MockERC20(uniswapV3Data.tokenB).mint(bob, 10000 ether); // 1000 tokens with 18 decimals
 
         // module instantiation
         IHook hook = IHook(address(0));
         IOpValidatorModule opValidator = new DummyValidator();
         IVaultFlowModule vaultOperations = new UniswapV3VaultFlow(
-            pool,
-            uniswapV3Data.positionManager,
-            address(uniswapV3Data.router),
-            address(asset), // tokenA
-            uniV3feeCutCollector,
-            0
+            pool, uniswapV3Data.positionManager, address(uniswapV3Data.router), uniV3feeCutCollector, 0
         );
 
         INav navModule = INav(address(vaultOperations)); // UniswapV3VaultFlow is also a Nav module
 
-        vault = new LobsterVault(owner, asset, "Vault Token", "vTKN", opValidator, hook, navModule, vaultOperations);
+        vault = new LobsterVault(
+            owner, MockERC20(address(0)), "Vault Token", "vTKN", opValidator, hook, navModule, vaultOperations
+        );
 
         // Setup initial state
-        asset.mint(alice, 10000 ether);
-        asset.mint(bob, 10000 ether);
+        MockERC20(uniswapV3Data.tokenA).mint(alice, 10000 ether);
+        MockERC20(uniswapV3Data.tokenB).mint(bob, 10000 ether);
 
         vm.startPrank(alice);
-        asset.approve(address(vault), type(uint256).max);
+        MockERC20(uniswapV3Data.tokenA).approve(address(vault), type(uint256).max);
         vm.stopPrank();
 
         vm.startPrank(bob);
-        asset.approve(address(vault), type(uint256).max);
+        MockERC20(uniswapV3Data.tokenB).approve(address(vault), type(uint256).max);
         vm.stopPrank();
+    }
+
+    /* ------------------------UTILS------------------------ */
+    function packUint128(uint128 a, uint128 b) internal pure returns (uint256 packed) {
+        packed = (uint256(a) << 128) | uint256(b);
+    }
+
+    function decodePackedUint128(uint256 packed) public pure returns (uint128 a, uint128 b) {
+        // Extract the first uint128 (higher order bits)
+        a = uint128(packed >> 128);
+
+        // Extract the second uint128 (lower order bits)
+        b = uint128(packed);
+
+        return (a, b);
+    }
+
+    // Function to perform vault deposit and verify results
+    function depositToVault(
+        // tests ok
+        address depositor,
+        uint256 amount0,
+        uint256 amount1
+    )
+        internal
+        returns (uint256 mintedShares)
+    {
+        uint256 packedAmounts = packUint128(uint128(amount0), uint128(amount1));
+
+        UniswapV3VaultFlow vaultFlow = UniswapV3VaultFlow(address(vault.vaultFlow()));
+        vm.startPrank(depositor);
+
+        // Approve the vault to spend the assets
+        vaultFlow.vaultAsset0().approve(address(vault), type(uint256).max);
+        vaultFlow.vaultAsset1().approve(address(vault), type(uint256).max);
+
+        uint256 depositorInitialAsset0Balance = vaultFlow.vaultAsset0().balanceOf(depositor);
+        uint256 depositorInitialAsset1Balance = vaultFlow.vaultAsset1().balanceOf(depositor);
+        uint256 initialDepositorShares = vault.balanceOf(depositor);
+
+        uint256 vaultTotalSupplyBeforeDeposit = vault.totalSupply();
+        uint256 vaultInitialAsset0Balance = vaultFlow.vaultAsset0().balanceOf(address(vault));
+        uint256 vaultInitialAsset1Balance = vaultFlow.vaultAsset1().balanceOf(address(vault));
+
+        uint256 expectedMintedShares = vault.previewDeposit(packedAmounts);
+
+        vm.expectEmit(true, true, true, true);
+        emit IERC4626.Deposit(alice, alice, packedAmounts, expectedMintedShares);
+        mintedShares = vault.deposit(packedAmounts, depositor);
+
+        // Ensure the expected shares were minted
+        assertEq(expectedMintedShares, mintedShares);
+
+        // ensure the transfers happened
+        vm.assertEq(vaultFlow.vaultAsset0().balanceOf(alice), depositorInitialAsset0Balance - amount0);
+        vm.assertEq(vaultFlow.vaultAsset1().balanceOf(alice), depositorInitialAsset1Balance - amount1);
+        vm.assertEq(vaultFlow.vaultAsset0().balanceOf(address(vault)), vaultInitialAsset0Balance + amount0);
+        vm.assertEq(vaultFlow.vaultAsset1().balanceOf(address(vault)), vaultInitialAsset1Balance + amount1);
+
+        vm.assertEq(vault.balanceOf(alice), initialDepositorShares + mintedShares);
+
+        vm.assertEq(vault.totalSupply(), vaultTotalSupplyBeforeDeposit + mintedShares);
+
+        vm.stopPrank();
+        return mintedShares;
+    }
+
+    // Function to mint vault shares and verify results
+    function mintVaultShares(address user, uint256 sharesToMint) internal returns (uint256 assetsDeposited) {
+        vm.startPrank(user);
+
+        uint256 expectedDeposit = vault.previewMint(sharesToMint);
+        assetsDeposited = vault.mint(sharesToMint, user);
+
+        // Ensure Mint event is emitted
+        vm.expectEmit(true, true, true, true);
+        emit IERC4626.Deposit(user, user, expectedDeposit, sharesToMint);
+
+        // Ensure the expected assets were deposited
+        assertEq(expectedDeposit, assetsDeposited);
+
+        vm.stopPrank();
+        return assetsDeposited;
+    }
+
+    // Function to redeem vault shares and verify results
+    function redeemVaultShares(address user, uint256 sharesToRedeem) internal returns (uint256 assetsWithdrawn) {
+        vm.startPrank(user);
+
+        uint256 aliceBalanceBeforeWithdraw0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
+        uint256 aliceBalanceBeforeWithdraw1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
+
+        uint256 expectedWithdraw = vault.previewRedeem(sharesToRedeem);
+
+        // ensure the withdraw event is emitted
+        vm.expectEmit(true, true, true, true);
+        emit IERC4626.Withdraw(user, user, user, expectedWithdraw, sharesToRedeem);
+
+        assetsWithdrawn = vault.redeem(sharesToRedeem, user, user);
+
+        // Verify asset balances
+        uint256 aliceBalanceAfterWithdraw0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
+        uint256 aliceBalanceAfterWithdraw1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
+
+        assertEq(aliceBalanceAfterWithdraw0 - aliceBalanceBeforeWithdraw0, expectedWithdraw);
+        assertEq(aliceBalanceAfterWithdraw1 - aliceBalanceBeforeWithdraw1, expectedWithdraw);
+
+        vm.stopPrank();
+        return assetsWithdrawn;
+    }
+
+    // Function to withdraw assets from vault and verify results
+    function withdrawFromVault(
+        address user,
+        uint256 packedAssetsToWithdraw
+    )
+        internal
+        returns (uint256 sharesRedeemed)
+    {
+        vm.startPrank(user);
+
+        uint256 userBalanceBeforeWithdraw0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
+        uint256 userBalanceBeforeWithdraw1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
+
+        uint256 vaultBalanceBeforeWithdraw0 = IERC20(uniswapV3Data.tokenA).balanceOf(address(vault));
+        uint256 vaultBalanceBeforeWithdraw1 = IERC20(uniswapV3Data.tokenB).balanceOf(address(vault));
+
+        uint256 vaultTotalSupplyBeforeWithdraw = vault.totalSupply();
+        uint256 userSharesBeforeWithdraw = vault.balanceOf(user);
+
+        (uint256 token0ToWithdraw, uint256 token1ToWithdraw) = decodePackedUint128(packedAssetsToWithdraw);
+
+        console.log("packedAssetsToWithdraw:", token0ToWithdraw, token1ToWithdraw);
+
+        uint256 expectedShares = vault.previewWithdraw(packedAssetsToWithdraw);
+
+        // ensure the withdraw event is emitted
+        vm.expectEmit(true, true, true, true);
+        emit IERC4626.Withdraw(user, user, user, packedAssetsToWithdraw, expectedShares);
+
+        sharesRedeemed = vault.withdraw(packedAssetsToWithdraw, user, user);
+
+        // Verify asset balances
+        uint256 userBalanceAfterWithdraw0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
+        uint256 userBalanceAfterWithdraw1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
+
+        uint256 vaultBalanceAfterWithdraw0 = IERC20(uniswapV3Data.tokenA).balanceOf(address(vault));
+        uint256 vaultBalanceAfterWithdraw1 = IERC20(uniswapV3Data.tokenB).balanceOf(address(vault));
+        uint256 vaultTotalSupplyAfterWithdraw = vault.totalSupply();
+        uint256 userSharesAfterWithdraw = vault.balanceOf(user);
+
+        assertEq(userBalanceAfterWithdraw0 - userBalanceBeforeWithdraw0, token0ToWithdraw);
+        assertEq(userBalanceAfterWithdraw1 - userBalanceBeforeWithdraw1, token1ToWithdraw);
+
+        assertEq(vaultBalanceBeforeWithdraw0 - vaultBalanceAfterWithdraw0, token0ToWithdraw);
+        assertEq(vaultBalanceBeforeWithdraw1 - vaultBalanceAfterWithdraw1, token1ToWithdraw);
+        assertEq(vaultTotalSupplyBeforeWithdraw - vaultTotalSupplyAfterWithdraw, sharesRedeemed);
+        assertEq(userSharesBeforeWithdraw - userSharesAfterWithdraw, sharesRedeemed);
+
+        // Ensure the expected shares were redeemed
+        assertEq(expectedShares, sharesRedeemed);
+
+        vm.stopPrank();
+        return sharesRedeemed;
+    }
+
+    function maxWithdraw(address user) internal returns (uint256 packedMaxWithdrawableAssets) {
+        vm.startPrank(user);
+
+        uint256 totalSharesSupply = vault.totalSupply();
+        uint256 userShares = vault.balanceOf(user);
+
+        // Manually calculate the expected max assets to withdraw
+        // Take into account: vault balance for both tokens, uniswap position
+        // (only) in the supported pool (active positions and unclaimed fees)
+
+        uint256 vaultBalance0 = IERC20(uniswapV3Data.tokenA).balanceOf(address(vault));
+        uint256 vaultBalance1 = IERC20(uniswapV3Data.tokenB).balanceOf(address(vault));
+
+        uint256 uniswapPositionBalance = uniswapV3Data.positionManager.balanceOf(address(vault));
+
+        uint256 totalPositions0 = 0;
+        uint256 totalPositions1 = 0;
+        uint256 totalFees0 = 0;
+        uint256 totalFees1 = 0;
+
+        for (uint256 i = 0; i < uniswapPositionBalance; i++) {
+            uint256 tokenId = uniswapV3Data.positionManager.tokenOfOwnerByIndex(address(vault), i);
+            (,, address token0, address token1, uint24 fee,,,,,,,) = uniswapV3Data.positionManager.positions(tokenId);
+            // Compute the pool address for this position
+            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(token0, token1, fee);
+            address computedPoolAddress = PoolAddress.computeAddress(address(uniswapV3Data.factory), key);
+
+            PoolAddress.PoolKey memory wantedPoolkey =
+                PoolAddress.getPoolKey(uniswapV3Data.tokenA, uniswapV3Data.tokenB, uniswapV3Data.poolFee);
+            address wantedPoolAddress = PoolAddress.computeAddress(address(uniswapV3Data.factory), wantedPoolkey);
+
+            if (computedPoolAddress != wantedPoolAddress) {
+                continue;
+            }
+
+            // Get the current sqrt price from the pool
+            (uint160 sqrtPriceX96,,,,,,) = IUniswapV3PoolMinimal(computedPoolAddress).slot0();
+
+            (uint256 amount0, uint256 fee0, uint256 amount1, uint256 fee1) =
+                PositionValue.total(uniswapV3Data.positionManager, tokenId, sqrtPriceX96);
+
+            totalPositions0 += amount0;
+            totalPositions1 += amount1;
+            totalFees0 += fee0;
+            totalFees1 += fee1;
+        }
+
+        UniswapV3VaultFlow vaultFlow = UniswapV3VaultFlow(address(vault.vaultFlow()));
+
+        uint256 basisPointFeeCut = vaultFlow.feeCutBasisPoint();
+
+        // Calculate the total assets in the vault
+        uint256 totalAssets0 = vaultBalance0 + totalPositions0
+            + totalFees0.mulDiv(BASIS_POINT_SCALE - basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
+
+        uint256 totalAssets1 = vaultBalance1 + totalPositions1
+            + totalFees1.mulDiv(BASIS_POINT_SCALE - basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
+
+        // Calculate the expected total assets to withdraw
+        uint256 expectedTotalAssetsToWithdraw0 = userShares.mulDiv(totalAssets0, totalSharesSupply, Math.Rounding.Floor);
+        uint256 expectedTotalAssetsToWithdraw1 = userShares.mulDiv(totalAssets1, totalSharesSupply, Math.Rounding.Floor);
+
+        // pack the assets
+        uint256 packedExpectedAssets =
+            packUint128(uint128(expectedTotalAssetsToWithdraw0), uint128(expectedTotalAssetsToWithdraw1));
+
+        uint256 actualMaxWithdrawResult = vault.maxWithdraw(user);
+        // Decode the packed result
+        (uint256 actualMaxWithdraw0, uint256 actualMaxWithdraw1) = decodePackedUint128(actualMaxWithdrawResult);
+
+        // Compute the expected and returned asset values
+        vm.assertEq(packedExpectedAssets, actualMaxWithdrawResult);
+
+        vm.stopPrank();
+
+        return actualMaxWithdrawResult;
+    }
+
+    function maxRedeem(address user) public view returns (uint256) {
+        uint256 expectedMaxRedeem = vault.balanceOf(user);
+
+        vm.assertEq(expectedMaxRedeem, vault.maxRedeem(user));
+
+        return expectedMaxRedeem;
+    }
+
+    // Function to approve token spending
+    function vaultOpApproveToken(address token, address spender) internal {
+        BaseOp memory op = BaseOp({
+            target: address(token),
+            value: 0,
+            data: abi.encodeCall(IERC20.approve, (spender, type(uint256).max))
+        });
+        vault.executeOp(Op(op, ""));
+    }
+
+    function vaultOpSwapTokens(
+        address tokenIn,
+        address tokenOut,
+        uint24 fee,
+        uint256 amountIn,
+        uint256 slippageBasisPoint
+    )
+        internal
+        returns (uint256 amountOut)
+    {
+        uint256 amountOutMinimum = amountIn.mulDiv(BASIS_POINT_SCALE - slippageBasisPoint, BASIS_POINT_SCALE);
+
+        BaseOp memory op = BaseOp({
+            target: address(uniswapV3Data.router),
+            value: 0,
+            data: abi.encodeCall(
+                IUniswapV3RouterMinimal.exactInputSingle,
+                (
+                    IUniswapV3RouterMinimal.ExactInputSingleParams({
+                        tokenIn: tokenIn,
+                        tokenOut: tokenOut,
+                        fee: fee,
+                        recipient: address(vault),
+                        deadline: block.timestamp,
+                        amountIn: amountIn,
+                        amountOutMinimum: amountOutMinimum,
+                        sqrtPriceLimitX96: 0
+                    })
+                )
+            )
+        });
+
+        vault.executeOp(Op(op, ""));
+
+        return IERC20(tokenOut).balanceOf(address(vault));
+    }
+
+    function vaultOpMintUniswapPosition(
+        uint256 amount0Desired,
+        uint256 amount1Desired,
+        int24 tickLower,
+        int24 tickUpper,
+        uint256 slippagePercentage
+    )
+        internal
+    {
+        vaultOpApproveToken(uniswapV3Data.tokenA, address(uniswapV3Data.positionManager));
+        vaultOpApproveToken(uniswapV3Data.tokenB, address(uniswapV3Data.positionManager));
+
+        address token0 = uniswapV3Data.tokenA < uniswapV3Data.tokenB ? uniswapV3Data.tokenA : uniswapV3Data.tokenB;
+        address token1 = uniswapV3Data.tokenA < uniswapV3Data.tokenB ? uniswapV3Data.tokenB : uniswapV3Data.tokenA;
+
+        uint256 amount0Min = (amount0Desired * (BASIS_POINT_SCALE - slippagePercentage)) / BASIS_POINT_SCALE;
+        uint256 amount1Min = (amount1Desired * (BASIS_POINT_SCALE - slippagePercentage)) / BASIS_POINT_SCALE;
+
+        BaseOp memory op = BaseOp({
+            target: address(uniswapV3Data.positionManager),
+            value: 0,
+            data: abi.encodeCall(
+                INonFungiblePositionManager.mint,
+                (
+                    INonFungiblePositionManager.MintParams({
+                        token0: token0,
+                        token1: token1,
+                        fee: uniswapV3Data.poolFee,
+                        tickLower: tickLower,
+                        tickUpper: tickUpper,
+                        amount0Desired: amount0Desired,
+                        amount1Desired: amount1Desired,
+                        amount0Min: amount0Min,
+                        amount1Min: amount1Min,
+                        recipient: address(vault),
+                        deadline: block.timestamp
+                    })
+                )
+            )
+        });
+
+        vault.executeOp(Op(op, ""));
     }
 }

@@ -75,10 +75,8 @@ contract NavWithRebase is INav, Ownable {
         external
     {
         require(validUntil >= block.timestamp && validUntil >= rebaseValidUntil, "NavWithRebase: Invalid validUntil");
-        console.log("validUntil", validUntil);
         // Ensure the signature is valid
         address signer = _validateRebaseSignature(validationData, newTotalAssets, validUntil, operationData);
-        console.log("signer", signer);
 
         require(rebasers[signer], InvalidSignature());
 
@@ -117,10 +115,6 @@ contract NavWithRebase is INav, Ownable {
             r := calldataload(add(dataOffset, 1))
             s := calldataload(add(dataOffset, 33))
         }
-
-        console.log("v", v);
-        console.log("r", uint256(r));
-        console.log("s", uint256(s));
 
         // Ensure the signature is valid
         address signer = ecrecover(getMessage(newTotalAssets, validUntil, operationData), v, r, s);

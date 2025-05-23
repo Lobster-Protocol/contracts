@@ -116,4 +116,15 @@ contract DummyVaultFlow is IVaultFlowModule {
     function previewRedeem(uint256) external pure returns (uint256) {
         revert("UniswapV3VaultFlow: previewRedeem not implemented");
     }
+
+    function convertToShares(uint256 /* assets */ ) external pure returns (uint256) {
+        revert("UniswapV3VaultFlow: convertToShares not implemented");
+    }
+
+    /**
+     * @dev See {IERC4626-convertToAssets}.
+     */
+    function convertToAssets(uint256 /* shares */ ) external pure returns (uint256) {
+        revert("UniswapV3VaultFlow: convertToAssets not implemented");
+    }
 }

@@ -133,6 +133,16 @@ interface IVaultFlowModule {
      * @return assets The amount of assets that would be withdrawn
      */
     function previewRedeem(uint256 shares) external view returns (uint256 assets);
+
+    /**
+     * @dev See {IERC4626-convertToShares}.
+     */
+    function convertToShares(uint256 assets) external view returns (uint256);
+
+    /**
+     * @dev See {IERC4626-convertToAssets}.
+     */
+    function convertToAssets(uint256 shares) external view returns (uint256);
 }
 
 // Authorization bit constants for IVaultFlowModule overrides on vault functions
@@ -143,10 +153,12 @@ uint16 constant MAX_DEPOSIT_OVERRIDE_ENABLED = 1 << 2;
 uint16 constant MAX_MINT_OVERRIDE_ENABLED = 1 << 3;
 uint16 constant MAX_WITHDRAW_OVERRIDE_ENABLED = 1 << 4;
 uint16 constant MAX_REDEEM_OVERRIDE_ENABLED = 1 << 5;
-// Preview functions
+// Preview functions // todo: override actually useful ?
 uint16 constant PREVIEW_DEPOSIT_OVERRIDE_ENABLED = 1 << 6;
 uint16 constant PREVIEW_MINT_OVERRIDE_ENABLED = 1 << 7;
 uint16 constant PREVIEW_WITHDRAW_OVERRIDE_ENABLED = 1 << 8;
 uint16 constant PREVIEW_REDEEM_OVERRIDE_ENABLED = 1 << 9;
 // Other
 uint16 constant _SPEND_ALLOWANCE_OVERRIDE_ENABLED = 1 << 10;
+uint16 constant TWO_TOKEN_SUPPORT_ENABLED = 1 << 11;
+uint16 constant ASSETS_SHARES_CONVERSION = 1 << 12;
