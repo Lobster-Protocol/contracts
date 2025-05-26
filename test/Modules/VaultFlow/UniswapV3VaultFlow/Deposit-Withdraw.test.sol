@@ -31,10 +31,17 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
         uint256 aliceDeposit0 = 1 ether;
         uint256 aliceDeposit1 = 3 ether;
 
-        uint256 mintedShares = depositToVault(alice, aliceDeposit0, aliceDeposit1);
+        uint256 mintedShares = depositToVault(
+            alice,
+            aliceDeposit0,
+            aliceDeposit1
+        );
 
         // Alice withdraws all her shares
-        uint256 expectedAssets = packUint128(uint128(aliceDeposit0), uint128(aliceDeposit1)); // vault.previewRedeem(mintedShares);
+        uint256 expectedAssets = packUint128(
+            uint128(aliceDeposit0),
+            uint128(aliceDeposit1)
+        ); // vault.previewRedeem(mintedShares);
 
         (uint128 u0, uint128 u1) = decodePackedUint128(expectedAssets);
 
@@ -51,18 +58,31 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
         uint256 aliceDeposit0 = 1 ether;
         uint256 aliceDeposit1 = 3 ether;
 
-        uint256 mintedShares = depositToVault(alice, aliceDeposit0, aliceDeposit1);
+        uint256 mintedShares = depositToVault(
+            alice,
+            aliceDeposit0,
+            aliceDeposit1
+        );
 
         // get both token amounts
-        uint256 tokenAInVault = IERC20(uniswapV3Data.tokenA).balanceOf(address(vault));
-        uint256 tokenBInVault = IERC20(uniswapV3Data.tokenB).balanceOf(address(vault));
+        uint256 tokenAInVault = IERC20(uniswapV3Data.tokenA).balanceOf(
+            address(vault)
+        );
+        uint256 tokenBInVault = IERC20(uniswapV3Data.tokenB).balanceOf(
+            address(vault)
+        );
 
         // allow the position manager to spend the tokens
-        vaultOpApproveToken(uniswapV3Data.tokenA, address(uniswapV3Data.positionManager));
+        vaultOpApproveToken(
+            uniswapV3Data.tokenA,
+            address(uniswapV3Data.positionManager)
+        );
 
         // Create a new position with the swapped tokens
         vaultOpMintUniswapPosition(
-            uniswapV3Data.tokenA > uniswapV3Data.tokenB ? tokenAInVault : tokenBInVault / 3, // todo: get the expected amount using sqrt prices
+            uniswapV3Data.tokenA > uniswapV3Data.tokenB
+                ? tokenAInVault
+                : tokenBInVault / 3, // todo: get the expected amount using sqrt prices
             uniswapV3Data.tokenA > uniswapV3Data.tokenB
                 ? tokenBInVault / 3 // todo: get the expected amount using sqrt prices
                 : tokenAInVault,
@@ -82,17 +102,11 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
         vm.assertEq(vault.balanceOf(alice), mintedShares - burntShares);
     }
 
-    // function testWithdrawWithHighVolatilityAndNoWithdrawerAdvantage() public {
-    //     // IVaultFlowModule vaultOps = IVaultFlowModule(address(vault.vaultOperations()));
-    //     // vaultOps._withdraw(address(vault), alice, alice, 1 ether, 1 ether);
-    //     // revert("voluntary revert");
-    // }
+    // function testMintNoFees() public {}
 
-    // function testWithdrawWithHighVolatilityAndWithdrawerAdvantage() public {
-    //     // IVaultFlowModule vaultOps = IVaultFlowModule(address(vault.vaultOperations()));
-    //     // vaultOps._withdraw(address(vault), alice, alice, 1 ether, 1 ether);
-    //     // revert("voluntary revert");
-    // }
+    // function testRedeemNoPositionNoFees() public {}
+
+    // function testRedeemWithPositionNoFees() public {}
 
     // function testTotalAssets()
 
