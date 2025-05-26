@@ -2,10 +2,10 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import {GenericMusigOpValidator} from "../../../src/Modules/OpValidators/GenericMusigOpValidator.sol";
-import {WhitelistedCall, SelectorAndChecker, Signer, Op} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
-import {SEND_ETH, CALL_FUNCTIONS, NO_PARAMS_CHECKS_ADDRESS} from "../../../src/Modules/OpValidators/constants.sol";
-import {Counter} from "../../Mocks/Counter.sol";
+import {GenericMusigOpValidator} from "../../src/Modules/OpValidators/GenericMusigOpValidator.sol";
+import {WhitelistedCall, SelectorAndChecker, Signer, Op} from "../../src/interfaces/modules/IOpValidatorModule.sol";
+import {SEND_ETH, CALL_FUNCTIONS, NO_PARAMS_CHECKS_ADDRESS} from "../../src/Modules/OpValidators/constants.sol";
+import {Counter} from "../Mocks/Counter.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 contract GenericMusigOpValidatorTestSetup is Test {

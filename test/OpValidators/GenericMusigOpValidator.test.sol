@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
-import {GenericMusigOpValidator} from "../../../src/Modules/OpValidators/GenericMusigOpValidator.sol";
+import {GenericMusigOpValidator} from "../../src/Modules/OpValidators/GenericMusigOpValidator.sol";
 import {
     WhitelistedCall,
     SelectorAndChecker,
@@ -9,9 +9,9 @@ import {
     BaseOp,
     Op,
     BatchOp
-} from "../../../src/interfaces/modules/IOpValidatorModule.sol";
-import {SEND_ETH, CALL_FUNCTIONS, NO_PARAMS_CHECKS_ADDRESS} from "../../../src/Modules/OpValidators/constants.sol";
-import {Counter} from "../../Mocks/Counter.sol";
+} from "../../src/interfaces/modules/IOpValidatorModule.sol";
+import {SEND_ETH, CALL_FUNCTIONS, NO_PARAMS_CHECKS_ADDRESS} from "../../src/Modules/OpValidators/constants.sol";
+import {Counter} from "../Mocks/Counter.sol";
 import {GenericMusigOpValidatorTestSetup} from "./GenericMusigOpValidatorTestSetup.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 

@@ -1,18 +1,15 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
-import {IVaultFlowModule} from "../../../../src/interfaces/modules/IVaultFlowModule.sol";
-import {IHook} from "../../../../src/interfaces/modules/IHook.sol";
 import {IOpValidatorModule} from "../../../../src/interfaces/modules/IOpValidatorModule.sol";
-import {INav} from "../../../../src/interfaces/modules/INav.sol";
-import {DummyVaultFlow} from "../../../Mocks/modules/DummyVaultFlow.sol";
 import {MockERC20} from "../../../Mocks/MockERC20.sol";
 import {Counter} from "../../../Mocks/Counter.sol";
-import {LobsterVault} from "../../../../src/Vault/Vault.sol";
+import {ERC4626WithOpValidator} from "../../../../src/Vault/ERC4626WithOpValidator.sol";
 import {Test} from "forge-std/Test.sol";
+import {DummyValidator} from "../../../Mocks/modules/DummyValidator.sol";
 
 contract VaultWithOperationModuleTestSetup is Test {
-    LobsterVault public vault;
+    ERC4626WithOpValidator public vault;
     MockERC20 public asset;
     Counter public counter;
     address public owner;
@@ -24,16 +21,18 @@ contract VaultWithOperationModuleTestSetup is Test {
         alice = makeAddr("alice");
         bob = makeAddr("bob");
 
-        IHook hook = IHook(address(0));
-        IOpValidatorModule opValidator = IOpValidatorModule(address(0));
-        IVaultFlowModule vaultOperations = new DummyVaultFlow();
-        INav navModule = INav(address(0));
+        IOpValidatorModule opValidator = new DummyValidator();
 
         // Deploy contracts
         asset = new MockERC20();
         counter = new Counter();
 
-        vault = new LobsterVault(owner, asset, "Vault Token", "vTKN", opValidator, hook, navModule, vaultOperations);
+        vault = new ERC4626WithOpValidator(
+            "receiptTokenName",
+            "receiptTokenSymbol",
+            asset,
+            opValidator
+        );
 
         // Setup initial state
         asset.mint(alice, 10000 ether);

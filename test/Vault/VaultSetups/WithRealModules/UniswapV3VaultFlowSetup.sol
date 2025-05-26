@@ -1,15 +1,10 @@
 // SPDX-License-Identifier: GPLv3
 pragma solidity ^0.8.28;
-
 import "forge-std/Test.sol";
 
-import {IHook} from "../../../../src/interfaces/modules/IHook.sol";
 import {IOpValidatorModule} from "../../../../src/interfaces/modules/IOpValidatorModule.sol";
-import {INav} from "../../../../src/interfaces/modules/INav.sol";
-import {IVaultFlowModule} from "../../../../src/interfaces/modules/IVaultFlowModule.sol";
 import {MockERC20} from "../../../Mocks/MockERC20.sol";
-import {LobsterVault, BASIS_POINT_SCALE} from "../../../../src/Vault/Vault.sol";
-import {UniswapV3VaultFlow} from "../../../../src/Modules/VaultFlow/UniswapV3VaultFlow.sol";
+import {UniV3LobsterVault, BASIS_POINT_SCALE} from "../../../../src/Vault/UniV3LobsterVault.sol";
 import {IUniswapV3PoolMinimal} from "../../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {INonFungiblePositionManager} from "../../../../src/interfaces/uniswapV3/INonFungiblePositionManager.sol";
 import {UniswapV3Infra} from "../../../Mocks/uniswapV3/UniswapV3Infra.sol";
@@ -33,13 +28,13 @@ struct UniswapV3Data {
     uint160 poolInitialSqrtPriceX96;
 }
 
-contract UniswapV3VaultFlowSetup is UniswapV3Infra {
+contract UniV3LobsterVaultTest is UniswapV3Infra {
     using Math for uint256;
 
     address public owner;
     address public alice;
     address public bob;
-    LobsterVault public vault;
+    UniV3LobsterVault public vault;
 
     UniswapV3Data public uniswapV3Data;
 
@@ -77,18 +72,22 @@ contract UniswapV3VaultFlowSetup is UniswapV3Infra {
         MockERC20(uniswapV3Data.tokenB).mint(bob, 10000 ether); // 1000 tokens with 18 decimals
 
         // module instantiation
-        IHook hook = IHook(address(0));
         IOpValidatorModule opValidator = new DummyValidator();
-        IVaultFlowModule vaultOperations = new UniswapV3VaultFlow(
-            pool, uniswapV3Data.positionManager, address(uniswapV3Data.router), uniV3feeCutCollector, 0
+        console.log("owner", owner);
+        console.log("OpValidator: ", address(opValidator));
+        console.log("pool: ", address(pool), "token0", pool.token0());
+        console.log("positionManager: ", address(positionManager));
+        console.log("uniV3feeCutCollector: ", uniV3feeCutCollector);
+        vault = new UniV3LobsterVault(
+            owner, 
+            opValidator,
+            pool,
+            positionManager,
+            uniV3feeCutCollector,
+            0 // 0% fee cut
         );
 
-        INav navModule = INav(address(vaultOperations)); // UniswapV3VaultFlow is also a Nav module
-
-        vault = new LobsterVault(
-            owner, MockERC20(address(0)), "Vault Token", "vTKN", opValidator, hook, navModule, vaultOperations
-        );
-
+        console.log("Vault address: ", address(vault)); 
         // Setup initial state
         MockERC20(uniswapV3Data.tokenA).mint(alice, 10000 ether);
         MockERC20(uniswapV3Data.tokenB).mint(bob, 10000 ether);
@@ -129,20 +128,19 @@ contract UniswapV3VaultFlowSetup is UniswapV3Infra {
     {
         uint256 packedAmounts = packUint128(uint128(amount0), uint128(amount1));
 
-        UniswapV3VaultFlow vaultFlow = UniswapV3VaultFlow(address(vault.vaultFlow()));
         vm.startPrank(depositor);
 
         // Approve the vault to spend the assets
-        vaultFlow.vaultAsset0().approve(address(vault), type(uint256).max);
-        vaultFlow.vaultAsset1().approve(address(vault), type(uint256).max);
+        vault.vaultAsset0().approve(address(vault), type(uint256).max);
+        vault.vaultAsset1().approve(address(vault), type(uint256).max);
 
-        uint256 depositorInitialAsset0Balance = vaultFlow.vaultAsset0().balanceOf(depositor);
-        uint256 depositorInitialAsset1Balance = vaultFlow.vaultAsset1().balanceOf(depositor);
+        uint256 depositorInitialAsset0Balance = vault.vaultAsset0().balanceOf(depositor);
+        uint256 depositorInitialAsset1Balance = vault.vaultAsset1().balanceOf(depositor);
         uint256 initialDepositorShares = vault.balanceOf(depositor);
 
         uint256 vaultTotalSupplyBeforeDeposit = vault.totalSupply();
-        uint256 vaultInitialAsset0Balance = vaultFlow.vaultAsset0().balanceOf(address(vault));
-        uint256 vaultInitialAsset1Balance = vaultFlow.vaultAsset1().balanceOf(address(vault));
+        uint256 vaultInitialAsset0Balance = vault.vaultAsset0().balanceOf(address(vault));
+        uint256 vaultInitialAsset1Balance = vault.vaultAsset1().balanceOf(address(vault));
 
         uint256 expectedMintedShares = vault.previewDeposit(packedAmounts);
 
@@ -154,10 +152,10 @@ contract UniswapV3VaultFlowSetup is UniswapV3Infra {
         vm.assertEq(expectedMintedShares, mintedShares);
 
         // ensure the transfers happened
-        vm.assertEq(vaultFlow.vaultAsset0().balanceOf(alice), depositorInitialAsset0Balance - amount0);
-        vm.assertEq(vaultFlow.vaultAsset1().balanceOf(alice), depositorInitialAsset1Balance - amount1);
-        vm.assertEq(vaultFlow.vaultAsset0().balanceOf(address(vault)), vaultInitialAsset0Balance + amount0);
-        vm.assertEq(vaultFlow.vaultAsset1().balanceOf(address(vault)), vaultInitialAsset1Balance + amount1);
+        vm.assertEq(vault.vaultAsset0().balanceOf(alice), depositorInitialAsset0Balance - amount0);
+        vm.assertEq(vault.vaultAsset1().balanceOf(alice), depositorInitialAsset1Balance - amount1);
+        vm.assertEq(vault.vaultAsset0().balanceOf(address(vault)), vaultInitialAsset0Balance + amount0);
+        vm.assertEq(vault.vaultAsset1().balanceOf(address(vault)), vaultInitialAsset1Balance + amount1);
 
         vm.assertEq(vault.balanceOf(alice), initialDepositorShares + mintedShares);
 
@@ -170,13 +168,13 @@ contract UniswapV3VaultFlowSetup is UniswapV3Infra {
     // Function to mint vault shares and verify results
     function mintVaultShares(address user, uint256 sharesToMint) internal returns (uint256 assetsDeposited) {
         vm.startPrank(user);
-        UniswapV3VaultFlow vaultFlow = UniswapV3VaultFlow(address(vault.vaultFlow()));
-        // Approve the vault to spend the assets
-        vaultFlow.vaultAsset0().approve(address(vault), type(uint256).max);
-        vaultFlow.vaultAsset1().approve(address(vault), type(uint256).max);
 
-        uint256 userBalance0BeforeMint = vaultFlow.vaultAsset0().balanceOf(user);
-        uint256 userBalance1BeforeMint = vaultFlow.vaultAsset1().balanceOf(user);
+        // Approve the vault to spend the assets
+        vault.vaultAsset0().approve(address(vault), type(uint256).max);
+        vault.vaultAsset1().approve(address(vault), type(uint256).max);
+
+        uint256 userBalance0BeforeMint = vault.vaultAsset0().balanceOf(user);
+        uint256 userBalance1BeforeMint = vault.vaultAsset1().balanceOf(user);
 
         uint256 expectedDeposit = vault.previewMint(sharesToMint);
 
@@ -191,8 +189,8 @@ contract UniswapV3VaultFlowSetup is UniswapV3Infra {
         // Ensure transfers happened
         (uint256 deposited0, uint256 deposited1) = decodePackedUint128(assetsDeposited);
 
-        assertEq(userBalance0BeforeMint - deposited0, vaultFlow.vaultAsset0().balanceOf(user));
-        assertEq(userBalance1BeforeMint - deposited1, vaultFlow.vaultAsset1().balanceOf(user));
+        assertEq(userBalance0BeforeMint - deposited0, vault.vaultAsset0().balanceOf(user));
+        assertEq(userBalance1BeforeMint - deposited1, vault.vaultAsset1().balanceOf(user));
 
         vm.stopPrank();
         return assetsDeposited;
@@ -403,7 +401,7 @@ contract UniswapV3VaultFlowSetup is UniswapV3Infra {
     }
 
     // manually compute the vault tvl in order to compare it with the value returned by the vault
-    function getVaultTVL(LobsterVault vault_)
+    function getVaultTVL(UniV3LobsterVault vault_)
         internal
         view
         returns (uint256 totalAssets0, uint256 totalAssets1, uint256 feeCut0, uint256 feeCut1)
@@ -449,9 +447,7 @@ contract UniswapV3VaultFlowSetup is UniswapV3Infra {
             totalFees1 += fee1;
         }
 
-        UniswapV3VaultFlow vaultFlow = UniswapV3VaultFlow(address(vault_.vaultFlow()));
-
-        uint256 basisPointFeeCut = vaultFlow.feeCutBasisPoint();
+        uint256 basisPointFeeCut = vault.feeCutBasisPoint();
 
         // Calculate the total assets in the vault
         totalAssets0 = vaultBalance0 + totalPositions0
