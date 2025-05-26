@@ -14,7 +14,6 @@ import {IUniswapV3PoolMinimal} from "../../../../src/interfaces/uniswapV3/IUnisw
 import {INonFungiblePositionManager} from "../../../../src/interfaces/uniswapV3/INonFungiblePositionManager.sol";
 import {UniswapV3Infra} from "../../../Mocks/uniswapV3/UniswapV3Infra.sol";
 import {IUniswapV3FactoryMinimal} from "../../../../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
-import {IWETH} from "../../../../src/interfaces/IWETH.sol";
 import {DummyValidator} from "../../../Mocks/modules/DummyValidator.sol";
 import {IUniswapV3RouterMinimal} from "../../../../src/interfaces/uniswapV3/IUniswapV3RouterMinimal.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
