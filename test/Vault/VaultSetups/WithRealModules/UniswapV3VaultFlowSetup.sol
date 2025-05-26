@@ -207,8 +207,7 @@ contract UniswapV3VaultFlowSetup is UniswapV3Infra {
         uint256 aliceBalanceBeforeWithdraw1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
 
         uint256 expectedWithdraw = vault.previewRedeem(sharesToRedeem);
-        console.log("max redeem", vault.maxRedeem(alice), "shares to redeem", sharesToRedeem);
-        console.log("expected assets to withdraw", expectedWithdraw);
+
         // ensure the withdraw event is emitted
         // vm.expectEmit(true, true, true, true);
         emit IERC4626.Withdraw(user, user, user, expectedWithdraw, sharesToRedeem);
