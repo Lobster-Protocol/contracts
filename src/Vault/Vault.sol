@@ -347,7 +347,7 @@ contract LobsterVault is Modular {
      * @dev See {IERC4626-convertToShares}. - returns the amount of shares using the limiting token
      */
     function convertToShares(uint256 assets) public view override returns (uint256) {
-        if (vaultFlowOverridePolicy | ASSETS_SHARES_CONVERSION != 0) {
+        if (vaultFlowOverridePolicy & ASSETS_SHARES_CONVERSION != 0) {
             (bool success, bytes memory data) =
                 address(vaultFlow).staticcall(abi.encodeCall(vaultFlow.convertToShares, (assets)));
 
@@ -363,7 +363,7 @@ contract LobsterVault is Modular {
      * @dev See {IERC4626-convertToAssets}.
      */
     function convertToAssets(uint256 shares) public view override returns (uint256) {
-        if (vaultFlowOverridePolicy | ASSETS_SHARES_CONVERSION != 0) {
+        if (vaultFlowOverridePolicy & ASSETS_SHARES_CONVERSION != 0) {
             (bool success, bytes memory data) =
                 address(vaultFlow).staticcall(abi.encodeCall(vaultFlow.convertToAssets, (shares)));
 

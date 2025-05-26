@@ -453,35 +453,6 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
     // assume msg.sender is the vault
     function maxWithdraw(address owner) external view returns (uint256 maxValuesPacked) {
         return _convertToAssets(LobsterVault(msg.sender).balanceOf(owner), Math.Rounding.Floor);
-        // // (
-        // //     Position memory position0,
-        // //     Position memory position1
-        // // ) = getAllUniswapV3Positions(address(msg.sender));
-
-        // uint256 userShares = LobsterVault(msg.sender).balanceOf(user);
-        // uint256 totalShares = LobsterVault(msg.sender).totalSupply();
-
-        // (uint256 value0, uint256 value1) = totalVaultAssets_(
-        //     LobsterVault(msg.sender)
-        // );
-        // uint256 totalAssetsPacked = packUint128(
-        //     uint128(value0),
-        //     uint128(value1)
-        // );
-        // (uint256 totalValue0, uint256 totalValue1) = unpackUint128(
-        //     totalAssetsPacked
-        // );
-
-        // // Calculate each user's share
-        // uint128 userValue0 = uint128(
-        //     totalValue0.mulDiv(userShares, totalShares, Math.Rounding.Floor)
-        // );
-        // uint128 userValue1 = uint128(
-        //     totalValue1.mulDiv(userShares, totalShares, Math.Rounding.Floor)
-        // );
-
-        // // Pack the two uint128 values into a single uint256
-        // maxValuesPacked = packUint128(userValue0, userValue1);
     }
 
     function maxRedeem(address) external pure returns (uint256) {
@@ -524,6 +495,7 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
      * returns the amount of shares using the limiting token
      */
     function _convertToShares(uint256 assets, Math.Rounding rounding) internal view virtual returns (uint256) {
+        // Todo: fix this fcking fct
         uint256 sharesSupply = LobsterVault(msg.sender).totalSupply();
         uint256 decimalsOffset = LobsterVault(msg.sender).decimalsOffset();
         (uint256 totalAssets0, uint256 totalAssets1) = totalVaultAssets_(LobsterVault(msg.sender));
@@ -533,8 +505,10 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
         uint256 shares0 = asset0.mulDiv(sharesSupply + 10 ** decimalsOffset, totalAssets0 + 1, rounding);
         uint256 shares1 = asset1.mulDiv(sharesSupply + 10 ** decimalsOffset, totalAssets1 + 1, rounding);
 
+        console.log("shares0", shares0, "shares1", shares1);
+
         // return the minimal value
-        return shares0 < shares1 ? shares0 : shares1;
+        return shares0 > shares1 ? shares0 : shares1;
     }
 
     /**

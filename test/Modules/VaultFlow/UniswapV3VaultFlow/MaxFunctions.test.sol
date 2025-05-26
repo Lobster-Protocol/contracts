@@ -60,8 +60,8 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
 
         // Create a new position with the swapped tokens
         vaultOpMintUniswapPosition(
-            uniswapV3Data.tokenA > uniswapV3Data.tokenB ? aliceDeposit0 : aliceDeposit1,
-            uniswapV3Data.tokenA > uniswapV3Data.tokenB ? aliceDeposit0 : aliceDeposit1,
+            uniswapV3Data.tokenA > uniswapV3Data.tokenB ? aliceDeposit1 : aliceDeposit0,
+            uniswapV3Data.tokenA > uniswapV3Data.tokenB ? aliceDeposit1 : aliceDeposit0,
             -6000,
             6000,
             100

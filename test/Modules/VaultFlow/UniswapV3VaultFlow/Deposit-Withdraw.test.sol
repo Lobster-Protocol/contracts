@@ -34,11 +34,15 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
         uint256 mintedShares = depositToVault(alice, aliceDeposit0, aliceDeposit1);
 
         // Alice withdraws all her shares
-        uint256 expectedAssets = vault.previewWithdraw(mintedShares);
+        uint256 expectedAssets = packUint128(uint128(aliceDeposit0), uint128(aliceDeposit1)); // vault.previewRedeem(mintedShares);
+
+        (uint128 u0, uint128 u1) = decodePackedUint128(expectedAssets);
+
+        console.log("_______________ ok: ", u0, u1);
 
         uint256 redeemedShares = withdrawFromVault(alice, expectedAssets);
 
-        vm.assertEq(expectedAssets, redeemedShares);
+        vm.assertEq(mintedShares, redeemedShares);
     }
 
     // Should withdraw the necessary funds from the uniswap positions
@@ -52,8 +56,6 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
         // get both token amounts
         uint256 tokenAInVault = IERC20(uniswapV3Data.tokenA).balanceOf(address(vault));
         uint256 tokenBInVault = IERC20(uniswapV3Data.tokenB).balanceOf(address(vault));
-
-        console.log("tokenAInVault: ", tokenAInVault, "tokenAInVaultB", tokenBInVault);
 
         // allow the position manager to spend the tokens
         vaultOpApproveToken(uniswapV3Data.tokenA, address(uniswapV3Data.positionManager));
@@ -72,15 +74,12 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
         // Alice withdraws all her shares
         uint256 expectedAssets = vault.maxWithdraw(alice);
 
-        console.log("expected assets: ", expectedAssets);
-        (uint256 unpack0, uint256 unpack1) = decodePackedUint128(expectedAssets);
-        console.log("unpacked0: ", unpack0, " unpacked1: ", unpack1);
-        uint256 redeemedShares = withdrawFromVault(alice, expectedAssets);
+        uint256 burntShares = withdrawFromVault(alice, expectedAssets);
 
-        console.log("final alice shares: ", vault.balanceOf(alice));
-        console.log("final vault assets: ", vault.totalAssets());
-
-        revert("voluntary revert");
+        // Ensure all the assets have been withdrawn
+        vm.assertEq(vault.totalAssets(), 0);
+        vm.assertEq(mintedShares, burntShares);
+        vm.assertEq(vault.balanceOf(alice), mintedShares - burntShares);
     }
 
     // function testWithdrawWithHighVolatilityAndNoWithdrawerAdvantage() public {

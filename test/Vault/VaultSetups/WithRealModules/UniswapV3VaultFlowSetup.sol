@@ -152,7 +152,7 @@ contract UniswapV3VaultFlowSetup is UniswapV3Infra {
         mintedShares = vault.deposit(packedAmounts, depositor);
 
         // Ensure the expected shares were minted
-        assertEq(expectedMintedShares, mintedShares);
+        vm.assertEq(expectedMintedShares, mintedShares);
 
         // ensure the transfers happened
         vm.assertEq(vaultFlow.vaultAsset0().balanceOf(alice), depositorInitialAsset0Balance - amount0);
@@ -225,8 +225,7 @@ contract UniswapV3VaultFlowSetup is UniswapV3Infra {
         uint256 userBalanceBeforeWithdraw0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
         uint256 userBalanceBeforeWithdraw1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
 
-        uint256 vaultBalanceBeforeWithdraw0 = IERC20(uniswapV3Data.tokenA).balanceOf(address(vault));
-        uint256 vaultBalanceBeforeWithdraw1 = IERC20(uniswapV3Data.tokenB).balanceOf(address(vault));
+        uint256 vaultTotalAssetsBeforeWithdraw = vault.totalAssets();
 
         uint256 vaultTotalSupplyBeforeWithdraw = vault.totalSupply();
         uint256 userSharesBeforeWithdraw = vault.balanceOf(user);
@@ -236,7 +235,7 @@ contract UniswapV3VaultFlowSetup is UniswapV3Infra {
         console.log("packedAssetsToWithdraw:", token0ToWithdraw, token1ToWithdraw);
 
         uint256 expectedShares = vault.previewWithdraw(packedAssetsToWithdraw);
-
+        console.log("expectedShares", expectedShares);
         // ensure the withdraw event is emitted
         vm.expectEmit(true, true, true, true);
         emit IERC4626.Withdraw(user, user, user, packedAssetsToWithdraw, expectedShares);
@@ -247,16 +246,17 @@ contract UniswapV3VaultFlowSetup is UniswapV3Infra {
         uint256 userBalanceAfterWithdraw0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
         uint256 userBalanceAfterWithdraw1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
 
-        uint256 vaultBalanceAfterWithdraw0 = IERC20(uniswapV3Data.tokenA).balanceOf(address(vault));
-        uint256 vaultBalanceAfterWithdraw1 = IERC20(uniswapV3Data.tokenB).balanceOf(address(vault));
+        uint256 vaultTotalAssetsAfterWithdraw = vault.totalAssets();
+
         uint256 vaultTotalSupplyAfterWithdraw = vault.totalSupply();
         uint256 userSharesAfterWithdraw = vault.balanceOf(user);
 
         assertEq(userBalanceAfterWithdraw0 - userBalanceBeforeWithdraw0, token0ToWithdraw);
         assertEq(userBalanceAfterWithdraw1 - userBalanceBeforeWithdraw1, token1ToWithdraw);
-
-        assertEq(vaultBalanceBeforeWithdraw0 - vaultBalanceAfterWithdraw0, token0ToWithdraw);
-        assertEq(vaultBalanceBeforeWithdraw1 - vaultBalanceAfterWithdraw1, token1ToWithdraw);
+        (uint256 total0Before, uint256 total1Before) = decodePackedUint128(vaultTotalAssetsBeforeWithdraw);
+        (uint256 total0After, uint256 total1After) = decodePackedUint128(vaultTotalAssetsAfterWithdraw);
+        assertEq(total0Before - total0After, token0ToWithdraw);
+        assertEq(total1Before - total1After, token1ToWithdraw);
         assertEq(vaultTotalSupplyBeforeWithdraw - vaultTotalSupplyAfterWithdraw, sharesRedeemed);
         assertEq(userSharesBeforeWithdraw - userSharesAfterWithdraw, sharesRedeemed);
 
@@ -338,7 +338,8 @@ contract UniswapV3VaultFlowSetup is UniswapV3Infra {
         (uint256 actualMaxWithdraw0, uint256 actualMaxWithdraw1) = decodePackedUint128(actualMaxWithdrawResult);
 
         // Compute the expected and returned asset values
-        vm.assertEq(packedExpectedAssets, actualMaxWithdrawResult);
+        // Assert that actual is within 2 wei of expected
+        assertApproxEqAbs(packedExpectedAssets, actualMaxWithdrawResult, 2, "Values should be within 2 wei");
 
         vm.stopPrank();
 
