@@ -24,14 +24,14 @@ contract NavWithRebase is INav, Ownable {
 
     /// @notice Address of the vault contract this module serves
     address public vault;
-    
+
     /// @notice The total assets of the vault (without the vault's assets balance)
     /// @dev This represents assets that are deployed externally and not held directly in the vault
     uint256 public totalAssets_;
-    
+
     /// @notice Timestamp of the last successful rebase operation
     uint256 public lastRebaseTimestamp;
-    
+
     /// @notice Timestamp until which the current rebase is considered valid
     /// @dev After this timestamp, totalAssets() falls back to vault's direct balance
     uint256 public rebaseValidUntil;
@@ -39,14 +39,14 @@ contract NavWithRebase is INav, Ownable {
     /// @notice Mapping of addresses authorized to sign rebase operations
     /// @dev Only addresses with true value can provide valid rebase signatures
     mapping(address => bool) public rebasers;
-    
+
     /// @notice Mapping to track if a user has accepted the no rebase condition: address => approval deadline
     /// @dev When set, allows users to bypass rebase calculations for withdrawals
     mapping(address => uint256) public acceptNoRebase;
 
     /// @notice Thrown when trying to initialize an already initialized contract
     error AlreadyInitialized();
-    
+
     /// @notice Thrown when a rebase signature is invalid or from unauthorized signer
     error InvalidSignature();
 
@@ -124,7 +124,7 @@ contract NavWithRebase is INav, Ownable {
         external
     {
         require(validUntil >= block.timestamp && validUntil >= rebaseValidUntil, "NavWithRebase: Invalid validUntil");
-        
+
         // Ensure the signature is valid and from authorized rebaser
         address signer = _validateRebaseSignature(validationData, newTotalAssets, validUntil, operationData);
         require(rebasers[signer], InvalidSignature());
@@ -176,7 +176,7 @@ contract NavWithRebase is INav, Ownable {
         // Recover signer from signature and message hash
         address signer = ecrecover(getMessage(newTotalAssets, validUntil, operationData), v, r, s);
         require(signer != address(0), InvalidSignature());
-        
+
         return signer;
     }
 

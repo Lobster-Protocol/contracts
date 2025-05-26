@@ -136,7 +136,7 @@ interface IVaultFlowModule {
 
     /**
      * @notice Returns the amount of shares that the Vault would exchange for the amount of assets provided.
-     * 
+     *
      * @param assets - The amount of assets to convert
      * @return shares - The shares amount matching the provided assets value
      */
@@ -144,9 +144,9 @@ interface IVaultFlowModule {
 
     /**
      * @notice Returns the amount of assets that the Vault would exchange for the amount of shares provided.
-     * 
+     *
      * @param shares - The amount of shares to convert
-     * @return assets - The assets amount matching the provided shares value 
+     * @return assets - The assets amount matching the provided shares value
      */
     function convertToAssets(uint256 shares) external view returns (uint256);
 }
