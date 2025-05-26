@@ -58,7 +58,7 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
 
         // Alice deposits 1 ether into the vault
         uint256 aliceDeposit0 = 1 ether;
-        uint256 aliceDeposit1 = 3 ether;
+        uint256 aliceDeposit1 = 1 ether; // First depositor can deposit the ratio they want
         uint256 mintedShares = depositToVault(alice, aliceDeposit0, aliceDeposit1);
 
         // get both token amounts

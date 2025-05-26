@@ -414,7 +414,7 @@ contract UniswapV3VaultFlowSetup is UniswapV3Infra {
         uint256 amount1Desired,
         int24 tickLower,
         int24 tickUpper,
-        uint256 slippagePercentage
+        uint256 slippagePercentageBp
     )
         internal
     {
@@ -424,8 +424,8 @@ contract UniswapV3VaultFlowSetup is UniswapV3Infra {
         address token0 = uniswapV3Data.tokenA < uniswapV3Data.tokenB ? uniswapV3Data.tokenA : uniswapV3Data.tokenB;
         address token1 = uniswapV3Data.tokenA < uniswapV3Data.tokenB ? uniswapV3Data.tokenB : uniswapV3Data.tokenA;
 
-        uint256 amount0Min = (amount0Desired * (BASIS_POINT_SCALE - slippagePercentage)) / BASIS_POINT_SCALE;
-        uint256 amount1Min = (amount1Desired * (BASIS_POINT_SCALE - slippagePercentage)) / BASIS_POINT_SCALE;
+        uint256 amount0Min = (amount0Desired * (BASIS_POINT_SCALE - slippagePercentageBp)) / BASIS_POINT_SCALE;
+        uint256 amount1Min = (amount1Desired * (BASIS_POINT_SCALE - slippagePercentageBp)) / BASIS_POINT_SCALE;
 
         BaseOp memory op = BaseOp({
             target: address(uniswapV3Data.positionManager),
