@@ -285,57 +285,7 @@ contract UniswapV3VaultFlowSetup is UniswapV3Infra {
         uint256 totalSharesSupply = vault.totalSupply();
         uint256 userShares = vault.balanceOf(user);
 
-        // Manually calculate the expected max assets to withdraw
-        // Take into account: vault balance for both tokens, uniswap position
-        // (only) in the supported pool (active positions and unclaimed fees)
-
-        uint256 vaultBalance0 = IERC20(uniswapV3Data.tokenA).balanceOf(address(vault));
-        uint256 vaultBalance1 = IERC20(uniswapV3Data.tokenB).balanceOf(address(vault));
-
-        uint256 uniswapPositionBalance = uniswapV3Data.positionManager.balanceOf(address(vault));
-
-        uint256 totalPositions0 = 0;
-        uint256 totalPositions1 = 0;
-        uint256 totalFees0 = 0;
-        uint256 totalFees1 = 0;
-
-        for (uint256 i = 0; i < uniswapPositionBalance; i++) {
-            uint256 tokenId = uniswapV3Data.positionManager.tokenOfOwnerByIndex(address(vault), i);
-            (,, address token0, address token1, uint24 fee,,,,,,,) = uniswapV3Data.positionManager.positions(tokenId);
-            // Compute the pool address for this position
-            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(token0, token1, fee);
-            address computedPoolAddress = PoolAddress.computeAddress(address(uniswapV3Data.factory), key);
-
-            PoolAddress.PoolKey memory wantedPoolkey =
-                PoolAddress.getPoolKey(uniswapV3Data.tokenA, uniswapV3Data.tokenB, uniswapV3Data.poolFee);
-            address wantedPoolAddress = PoolAddress.computeAddress(address(uniswapV3Data.factory), wantedPoolkey);
-
-            if (computedPoolAddress != wantedPoolAddress) {
-                continue;
-            }
-
-            // Get the current sqrt price from the pool
-            (uint160 sqrtPriceX96,,,,,,) = IUniswapV3PoolMinimal(computedPoolAddress).slot0();
-
-            (uint256 amount0, uint256 fee0, uint256 amount1, uint256 fee1) =
-                PositionValue.total(uniswapV3Data.positionManager, tokenId, sqrtPriceX96);
-
-            totalPositions0 += amount0;
-            totalPositions1 += amount1;
-            totalFees0 += fee0;
-            totalFees1 += fee1;
-        }
-
-        UniswapV3VaultFlow vaultFlow = UniswapV3VaultFlow(address(vault.vaultFlow()));
-
-        uint256 basisPointFeeCut = vaultFlow.feeCutBasisPoint();
-
-        // Calculate the total assets in the vault
-        uint256 totalAssets0 = vaultBalance0 + totalPositions0
-            + totalFees0.mulDiv(BASIS_POINT_SCALE - basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
-
-        uint256 totalAssets1 = vaultBalance1 + totalPositions1
-            + totalFees1.mulDiv(BASIS_POINT_SCALE - basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
+        (uint256 totalAssets0, uint256 totalAssets1,,) = getVaultTVL(vault);
 
         // Calculate the expected total assets to withdraw
         uint256 expectedTotalAssetsToWithdraw0 = userShares.mulDiv(totalAssets0, totalSharesSupply, Math.Rounding.Floor);
@@ -451,5 +401,67 @@ contract UniswapV3VaultFlowSetup is UniswapV3Infra {
         });
 
         vault.executeOp(Op(op, ""));
+    }
+
+    // manually compute the vault tvl in order to compare it with the value returned by the vault
+    function getVaultTVL(LobsterVault vault_)
+        internal
+        view
+        returns (uint256 totalAssets0, uint256 totalAssets1, uint256 feeCut0, uint256 feeCut1)
+    {
+        // Manually calculate the expected max assets to withdraw
+        // Take into account: vault balance for both tokens, uniswap position
+        // (only) in the supported pool (active positions and unclaimed fees)
+
+        uint256 vaultBalance0 = IERC20(uniswapV3Data.tokenA).balanceOf(address(vault_));
+        uint256 vaultBalance1 = IERC20(uniswapV3Data.tokenB).balanceOf(address(vault_));
+
+        uint256 uniswapPositionBalance = uniswapV3Data.positionManager.balanceOf(address(vault_));
+
+        uint256 totalPositions0 = 0;
+        uint256 totalPositions1 = 0;
+        uint256 totalFees0 = 0;
+        uint256 totalFees1 = 0;
+
+        for (uint256 i = 0; i < uniswapPositionBalance; i++) {
+            uint256 tokenId = uniswapV3Data.positionManager.tokenOfOwnerByIndex(address(vault_), i);
+            (,, address token0, address token1, uint24 fee,,,,,,,) = uniswapV3Data.positionManager.positions(tokenId);
+            // Compute the pool address for this position
+            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(token0, token1, fee);
+            address computedPoolAddress = PoolAddress.computeAddress(address(uniswapV3Data.factory), key);
+
+            PoolAddress.PoolKey memory wantedPoolKey =
+                PoolAddress.getPoolKey(uniswapV3Data.tokenA, uniswapV3Data.tokenB, uniswapV3Data.poolFee);
+            address wantedPoolAddress = PoolAddress.computeAddress(address(uniswapV3Data.factory), wantedPoolKey);
+
+            if (computedPoolAddress != wantedPoolAddress) {
+                continue;
+            }
+
+            // Get the current sqrt price from the pool
+            (uint160 sqrtPriceX96,,,,,,) = IUniswapV3PoolMinimal(computedPoolAddress).slot0();
+
+            (uint256 amount0, uint256 fee0, uint256 amount1, uint256 fee1) =
+                PositionValue.total(uniswapV3Data.positionManager, tokenId, sqrtPriceX96);
+
+            totalPositions0 += amount0;
+            totalPositions1 += amount1;
+            totalFees0 += fee0;
+            totalFees1 += fee1;
+        }
+
+        UniswapV3VaultFlow vaultFlow = UniswapV3VaultFlow(address(vault_.vaultFlow()));
+
+        uint256 basisPointFeeCut = vaultFlow.feeCutBasisPoint();
+
+        // Calculate the total assets in the vault
+        totalAssets0 = vaultBalance0 + totalPositions0
+            + totalFees0.mulDiv(BASIS_POINT_SCALE - basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
+
+        totalAssets1 = vaultBalance1 + totalPositions1
+            + totalFees1.mulDiv(BASIS_POINT_SCALE - basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
+
+        feeCut0 = totalFees0.mulDiv(basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
+        feeCut1 = totalFees1.mulDiv(basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
     }
 }

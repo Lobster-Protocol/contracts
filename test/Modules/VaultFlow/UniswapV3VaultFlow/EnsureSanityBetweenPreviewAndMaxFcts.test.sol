@@ -100,4 +100,18 @@ contract UniswapV3VaultFlowTest is UniswapV3VaultFlowSetup {
         // Ensure the max withdrawable asset amount is the same as the deposit
         // vm.assertEq(previewMaxWithdrawResultAssets, aliceDeposit); // todo: get expected token 0 and token 1 amounts (see alexis for)
     }
+
+    // function testPreviewMintMatchesPreviewMintNoPositionsNoFees() public {} // todo
+
+    // function testPreviewMintMatchesPreviewMintPositionsNoFees() public {} // todo
+
+    // function testPreviewDepositMatchesPreviewDepositNoPositionsNoFees()
+    //     public
+    // {} // todo
+
+    // function testPreviewDepositMatchesPreviewDepositPositionsNoFees() public {} // todo
+
+    // function testPreviewRedeemMatchesPreviewRedeemNoPositionsNoFees() public {} // todo
+
+    // function testPreviewRedeemMatchesPreviewRedeemPositionsNoFees() public {} // todo
 }
