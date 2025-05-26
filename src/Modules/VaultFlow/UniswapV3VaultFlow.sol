@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPLv3
 pragma solidity ^0.8.28;
 
-import "forge-std/Test.sol";
-
 import {
     IVaultFlowModule,
     _DEPOSIT_OVERRIDE_ENABLED,
@@ -20,19 +18,14 @@ import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/interfaces/IERC20Metadata.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IUniswapV3PoolMinimal} from "../../interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
-import {BaseOp, Op, BatchOp} from "../../interfaces/modules/IOpValidatorModule.sol";
+import {BaseOp, Op} from "../../interfaces/modules/IOpValidatorModule.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {LobsterVault} from "../../../src/Vault/Vault.sol";
-import {UniswapUtils, Position} from "../../libraries/uniswapV3/UniswapUtils.sol";
+import {Position} from "../../libraries/uniswapV3/UniswapUtils.sol";
 import {INonFungiblePositionManager} from "../../interfaces/uniswapV3/INonFungiblePositionManager.sol";
 import {PositionValue} from "../../libraries/uniswapV3/PositionValue.sol";
 import {PoolAddress} from "../../libraries/uniswapV3/PoolAddress.sol";
-import {IUniswapV3RouterMinimal} from "../../interfaces/uniswapV3/IUniswapV3RouterMinimal.sol";
-
-/**
- * @dev Basis points scale used for percentage calculations (100% = 10,000 basis points)
- */
-uint16 constant BASIS_POINT_SCALE = 10_000;
+import {BASIS_POINT_SCALE} from "../../Vault/Constants.sol";
 
 /**
  * @title UniswapV3VaultFlow
