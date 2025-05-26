@@ -104,10 +104,6 @@ contract LobsterVault is Modular {
         }
 
         uint256 shares = previewDeposit(assets);
-        console.log("deposit, shares", shares);
-        uint256 asset0 = assets >> 128;
-        uint256 asset1 = uint128(assets);
-        console.log("deposit ", asset0, asset1);
         _deposit(_msgSender(), receiver, assets, shares);
 
         return shares;
@@ -126,9 +122,6 @@ contract LobsterVault is Modular {
             // The flow module uses 2 tokens so maxWithdraw is a packed value of the two tokens
             (uint128 maxAssets0, uint128 maxAssets1) = decodePackedUint128(maxAssets);
             (uint128 assets0, uint128 assets1) = decodePackedUint128(assets);
-
-            console.log("withdraw: assets0", assets0, "maxAssets0", maxAssets0);
-            console.log("withdraw: assets1", assets1, "maxAssets1", maxAssets1);
 
             if (assets0 > maxAssets0 || assets1 > maxAssets1) {
                 revert ERC4626ExceededMaxWithdraw(owner, assets, maxAssets);

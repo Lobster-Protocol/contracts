@@ -12,6 +12,7 @@ import {
     PREVIEW_DEPOSIT_OVERRIDE_ENABLED,
     PREVIEW_MINT_OVERRIDE_ENABLED,
     PREVIEW_WITHDRAW_OVERRIDE_ENABLED,
+    PREVIEW_REDEEM_OVERRIDE_ENABLED,
     ASSETS_SHARES_CONVERSION
 } from "../../interfaces/modules/IVaultFlowModule.sol";
 import {INav} from "../../interfaces/modules/INav.sol";
@@ -119,7 +120,7 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
     function overridePolicy() external pure override returns (uint16) {
         return _DEPOSIT_OVERRIDE_ENABLED | _WITHDRAW_OVERRIDE_ENABLED | MAX_WITHDRAW_OVERRIDE_ENABLED
             | PREVIEW_DEPOSIT_OVERRIDE_ENABLED | PREVIEW_MINT_OVERRIDE_ENABLED | PREVIEW_WITHDRAW_OVERRIDE_ENABLED
-            | TWO_TOKEN_SUPPORT_ENABLED | ASSETS_SHARES_CONVERSION;
+            | PREVIEW_REDEEM_OVERRIDE_ENABLED | TWO_TOKEN_SUPPORT_ENABLED | ASSETS_SHARES_CONVERSION;
     }
 
     /**
@@ -137,7 +138,6 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
         external
         returns (bool success)
     {
-        console.log("_deposit, shares", shares);
         LobsterVault vault = LobsterVault(msg.sender);
 
         (uint128 assets0, uint128 assets1) = unpackUint128(assets);
@@ -170,7 +170,7 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
         address caller,
         address receiver,
         address owner,
-        uint256 assets,
+        uint256, /* assets */
         uint256 shares
     )
         external
@@ -294,7 +294,6 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
         // Compute fee cut
         uint256 feeCut0 = allCollectedFee0.mulDiv(feeCutBasisPoint, BASIS_POINT_SCALE);
         uint256 feeCut1 = allCollectedFee1.mulDiv(feeCutBasisPoint, BASIS_POINT_SCALE);
-        (uint256 v0, uint256 v1) = unpackUint128(assets);
 
         uint256 valueToWithdraw0 = totalWithdrawnFromPosition0
         // todo: merge the mulDivs
@@ -321,8 +320,6 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
         }
 
         uint256 withdrawnAssets = packUint128(uint128(valueToWithdraw0), uint128(valueToWithdraw1));
-
-        console.log("valueToWithdraw0", valueToWithdraw0, "valueToWithdraw1", valueToWithdraw1);
 
         emit IERC4626.Withdraw(caller, receiver, owner, withdrawnAssets, shares);
 
@@ -504,8 +501,6 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
 
         uint256 shares0 = asset0.mulDiv(sharesSupply + 10 ** decimalsOffset, totalAssets0 + 1, rounding);
         uint256 shares1 = asset1.mulDiv(sharesSupply + 10 ** decimalsOffset, totalAssets1 + 1, rounding);
-
-        console.log("shares0", shares0, "shares1", shares1);
 
         // return the minimal value
         return shares0 > shares1 ? shares0 : shares1;
