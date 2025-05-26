@@ -10,7 +10,8 @@ import {BaseOp} from "./IOpValidatorModule.sol";
  * The hook contains pieces of code to be executed before and after any vault operation execution.
  * This allows for additional validation, state modification, or other actions to be performed
  * in conjunction with the primary vault operation.
- * A Hook can also execute operations through the vault without triggering itself.
+ * 
+ * @dev A Hook execute operations through the vault without triggering itself.
  */
 interface IHook {
     /**

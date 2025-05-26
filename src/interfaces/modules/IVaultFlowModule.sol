@@ -14,13 +14,13 @@ pragma solidity ^0.8.28;
 interface IVaultFlowModule {
     /**
      * @notice Returns the policy for overriding vault functions
-     * @dev This function returns a bitmask indicating which vault functions are overridden.
-     *      Each bit in the mask corresponds to a specific function override.
+     * @dev This function returns a bit mask indicating which vault functions are overridden.
+     *     Each bit in the mask corresponds to a specific function override.
      *     If a bit is set, the corresponding function is overridden.
      *     For example, if the _DEPOSIT_OVERRIDE_ENABLED bit is set,
      *     the vault's deposit function is overridden by this module's _deposit function.
      *     The bits are defined as constants after the interface.
-     *     @return overridePolicy A bitmask indicating which vault functions are overridden
+     *     @return overridePolicy A bit mask indicating which vault functions are overridden
      */
     function overridePolicy() external view returns (uint16 overridePolicy);
 
@@ -135,30 +135,83 @@ interface IVaultFlowModule {
     function previewRedeem(uint256 shares) external view returns (uint256 assets);
 
     /**
-     * @dev See {IERC4626-convertToShares}.
+     * @notice Returns the amount of shares that the Vault would exchange for the amount of assets provided.
+     * 
+     * @param assets - The amount of assets to convert
+     * @return shares - The shares amount matching the provided assets value
      */
-    function convertToShares(uint256 assets) external view returns (uint256);
+    function convertToShares(uint256 assets) external view returns (uint256 shares);
 
     /**
-     * @dev See {IERC4626-convertToAssets}.
+     * @notice Returns the amount of assets that the Vault would exchange for the amount of shares provided.
+     * 
+     * @param shares - The amount of shares to convert
+     * @return assets - The assets amount matching the provided shares value 
      */
     function convertToAssets(uint256 shares) external view returns (uint256);
 }
 
-// Authorization bit constants for IVaultFlowModule overrides on vault functions
+// ========================================
+// VAULT FLOW MODULE OVERRIDE CONSTANTS
+// ========================================
+
+// Override constants for IVaultFlowModule function overrides on vault operations
+// These constants define bit flags used in the overridePolicy() function to indicate
+// which vault functions should be overridden by the VaultFlowModule implementation.
+// Multiple flags can be combined using bitwise OR operations.
+
+// Core vault operation overrides
+// Bit flag to enable override of the vault's internal _deposit function (bit 0)
 uint16 constant _DEPOSIT_OVERRIDE_ENABLED = 1 << 0;
+
+// Bit flag to enable override of the vault's internal _withdraw function (bit 1)
 uint16 constant _WITHDRAW_OVERRIDE_ENABLED = 1 << 1;
-// Max functions
+
+// Maximum operation limit overrides
+// Bit flag to enable override of the vault's maxDeposit function (bit 2)
+// When enabled, the module's maxDeposit function determines deposit limits instead of the vault's default
 uint16 constant MAX_DEPOSIT_OVERRIDE_ENABLED = 1 << 2;
+
+// Bit flag to enable override of the vault's maxMint function (bit 3)
+// When enabled, the module's maxMint function determines minting limits instead of the vault's default
 uint16 constant MAX_MINT_OVERRIDE_ENABLED = 1 << 3;
+
+// Bit flag to enable override of the vault's maxWithdraw function (bit 4)
+// When enabled, the module's maxWithdraw function determines withdrawal limits instead of the vault's default
 uint16 constant MAX_WITHDRAW_OVERRIDE_ENABLED = 1 << 4;
+
+// Bit flag to enable override of the vault's maxRedeem function (bit 5)
+// When enabled, the module's maxRedeem function determines redemption limits instead of the vault's default
 uint16 constant MAX_REDEEM_OVERRIDE_ENABLED = 1 << 5;
-// Preview functions // todo: override actually useful ?
+
+// Preview operation overrides
+// Bit flag to enable override of the vault's previewDeposit function (bit 6)
+// When enabled, the module's previewDeposit function simulates deposits instead of the vault's default
 uint16 constant PREVIEW_DEPOSIT_OVERRIDE_ENABLED = 1 << 6;
+
+// Bit flag to enable override of the vault's previewMint function (bit 7)
+// When enabled, the module's previewMint function simulates minting instead of the vault's default
 uint16 constant PREVIEW_MINT_OVERRIDE_ENABLED = 1 << 7;
+
+// Bit flag to enable override of the vault's previewWithdraw function (bit 8)
+// When enabled, the module's previewWithdraw function simulates withdrawals instead of the vault's default
 uint16 constant PREVIEW_WITHDRAW_OVERRIDE_ENABLED = 1 << 8;
+
+// Bit flag to enable override of the vault's previewRedeem function (bit 9)
+// When enabled, the module's previewRedeem function simulates redemptions instead of the vault's default
 uint16 constant PREVIEW_REDEEM_OVERRIDE_ENABLED = 1 << 9;
-// Other
+
+// Special functionality flags
+// Bit flag to enable override of the vault's spend allowance functionality (bit 10)
+// When enabled, the module handles custom allowance spending logic during operations
 uint16 constant _SPEND_ALLOWANCE_OVERRIDE_ENABLED = 1 << 10;
+
+// Bit flag to enable two-token vault support (bit 11)
+// When enabled, the vault can handle operations with two different asset tokens instead of just one
+// This is typically used for LP token vaults or multi-asset strategies
 uint16 constant TWO_TOKEN_SUPPORT_ENABLED = 1 << 11;
+
+// Bit flag to enable custom assets-to-shares conversion logic (bit 12)
+// When enabled, the module's convertToShares and convertToAssets functions override the vault's default conversion logic
+// This allows for complex conversion calculations that may involve multiple assets or custom ratios
 uint16 constant ASSETS_SHARES_CONVERSION = 1 << 12;

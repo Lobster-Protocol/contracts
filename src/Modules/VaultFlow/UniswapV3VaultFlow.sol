@@ -1,18 +1,7 @@
 // SPDX-License-Identifier: GPLv3
 pragma solidity ^0.8.28;
 
-import {
-    IVaultFlowModule,
-    _DEPOSIT_OVERRIDE_ENABLED,
-    _WITHDRAW_OVERRIDE_ENABLED,
-    MAX_WITHDRAW_OVERRIDE_ENABLED,
-    TWO_TOKEN_SUPPORT_ENABLED,
-    PREVIEW_DEPOSIT_OVERRIDE_ENABLED,
-    PREVIEW_MINT_OVERRIDE_ENABLED,
-    PREVIEW_WITHDRAW_OVERRIDE_ENABLED,
-    PREVIEW_REDEEM_OVERRIDE_ENABLED,
-    ASSETS_SHARES_CONVERSION
-} from "../../interfaces/modules/IVaultFlowModule.sol";
+import {IVaultFlowModule, _DEPOSIT_OVERRIDE_ENABLED, _WITHDRAW_OVERRIDE_ENABLED, MAX_WITHDRAW_OVERRIDE_ENABLED, TWO_TOKEN_SUPPORT_ENABLED, PREVIEW_DEPOSIT_OVERRIDE_ENABLED, PREVIEW_MINT_OVERRIDE_ENABLED, PREVIEW_WITHDRAW_OVERRIDE_ENABLED, PREVIEW_REDEEM_OVERRIDE_ENABLED, ASSETS_SHARES_CONVERSION} from "../../interfaces/modules/IVaultFlowModule.sol";
 import {INav} from "../../interfaces/modules/INav.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/interfaces/IERC20Metadata.sol";
@@ -111,9 +100,16 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
      * @inheritdoc IVaultFlowModule
      */
     function overridePolicy() external pure override returns (uint16) {
-        return _DEPOSIT_OVERRIDE_ENABLED | _WITHDRAW_OVERRIDE_ENABLED | MAX_WITHDRAW_OVERRIDE_ENABLED
-            | PREVIEW_DEPOSIT_OVERRIDE_ENABLED | PREVIEW_MINT_OVERRIDE_ENABLED | PREVIEW_WITHDRAW_OVERRIDE_ENABLED
-            | PREVIEW_REDEEM_OVERRIDE_ENABLED | TWO_TOKEN_SUPPORT_ENABLED | ASSETS_SHARES_CONVERSION;
+        return
+            _DEPOSIT_OVERRIDE_ENABLED |
+            _WITHDRAW_OVERRIDE_ENABLED |
+            MAX_WITHDRAW_OVERRIDE_ENABLED |
+            PREVIEW_DEPOSIT_OVERRIDE_ENABLED |
+            PREVIEW_MINT_OVERRIDE_ENABLED |
+            PREVIEW_WITHDRAW_OVERRIDE_ENABLED |
+            PREVIEW_REDEEM_OVERRIDE_ENABLED |
+            TWO_TOKEN_SUPPORT_ENABLED |
+            ASSETS_SHARES_CONVERSION;
     }
 
     /**
@@ -127,20 +123,27 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
         address receiver,
         uint256 assets,
         uint256 shares
-    )
-        external
-        returns (bool success)
-    {
+    ) external returns (bool success) {
         LobsterVault vault = LobsterVault(msg.sender);
 
         (uint128 assets0, uint128 assets1) = unpackUint128(assets);
 
         // Execute the deposit
         if (assets0 > 0) {
-            vault.safeTransferFrom(vaultAsset0, caller, address(vault), assets0);
+            vault.safeTransferFrom(
+                vaultAsset0,
+                caller,
+                address(vault),
+                assets0
+            );
         }
         if (assets0 > 1) {
-            vault.safeTransferFrom(vaultAsset1, caller, address(vault), assets1);
+            vault.safeTransferFrom(
+                vaultAsset1,
+                caller,
+                address(vault),
+                assets1
+            );
         }
 
         vault.mintShares(receiver, shares);
@@ -163,12 +166,9 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
         address caller,
         address receiver,
         address owner,
-        uint256, /* assets */
+        uint256 /* assets */,
         uint256 shares
-    )
-        external
-        returns (bool success)
-    {
+    ) external returns (bool success) {
         LobsterVault vault = LobsterVault(msg.sender);
 
         if (caller != owner) {
@@ -186,7 +186,7 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
         // if we withdraw x% of the shares, we need to withdraw x% of each position
         uint256 totalShares = vault.totalSupply();
 
-        (uint160 sqrtPriceX96,,,,,,) = pool.slot0();
+        (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
 
         // Aggregate all the fees to be cut
         uint256 allCollectedFee0 = 0;
@@ -195,7 +195,10 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
         uint256 totalWithdrawnFromPosition1 = 0;
 
         for (uint256 i = 0; i < tokensCount; ++i) {
-            uint256 tokenId = positionManager.tokenOfOwnerByIndex(address(vault), i);
+            uint256 tokenId = positionManager.tokenOfOwnerByIndex(
+                address(vault),
+                i
+            );
 
             // Get the position details
             // todo: merge with PositionValue.total to also get the token0 & token1 amounts and save gas:
@@ -212,11 +215,19 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
                 ,
                 ,
                 ,
+
             ) = positionManager.positions(tokenId);
 
             // Only take the positions that are in the pool
-            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(token0, token1, fee);
-            address computedPoolAddress = PoolAddress.computeAddress(pool.factory(), key);
+            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(
+                token0,
+                token1,
+                fee
+            );
+            address computedPoolAddress = PoolAddress.computeAddress(
+                pool.factory(),
+                key
+            );
 
             if (computedPoolAddress != address(pool)) {
                 // Should not happen. Those positions would likely be lost
@@ -224,8 +235,12 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
             }
 
             // Get the position value
-            (uint256 position0, uint256 fee0, uint256 position1, uint256 fee1) =
-                PositionValue.total(positionManager, tokenId, sqrtPriceX96);
+            (
+                uint256 position0,
+                uint256 fee0,
+                uint256 position1,
+                uint256 fee1
+            ) = PositionValue.total(positionManager, tokenId, sqrtPriceX96);
 
             // Get the amounts to extract
             uint256 toWithdraw0 = position0.mulDiv(shares, totalShares);
@@ -237,21 +252,25 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
 
             if (toWithdraw0 > 0 || toWithdraw1 > 0) {
                 // Decrease the liquidity of the position
-                INonFungiblePositionManager.DecreaseLiquidityParams memory params = INonFungiblePositionManager
-                    .DecreaseLiquidityParams({
-                    tokenId: tokenId,
-                    liquidity: liquidity,
-                    // todo: are those values ok or do we need a slippage ?
-                    amount0Min: toWithdraw0,
-                    amount1Min: toWithdraw1,
-                    deadline: block.timestamp
-                });
+                INonFungiblePositionManager.DecreaseLiquidityParams
+                    memory params = INonFungiblePositionManager
+                        .DecreaseLiquidityParams({
+                            tokenId: tokenId,
+                            liquidity: liquidity,
+                            // todo: are those values ok or do we need a slippage ?
+                            amount0Min: toWithdraw0,
+                            amount1Min: toWithdraw1,
+                            deadline: block.timestamp
+                        });
 
                 // Decrease liquidity
                 BaseOp memory decreaseLiquidity = BaseOp({
                     target: address(positionManager),
                     value: 0,
-                    data: abi.encodeCall(positionManager.decreaseLiquidity, (params))
+                    data: abi.encodeCall(
+                        positionManager.decreaseLiquidity,
+                        (params)
+                    )
                 });
 
                 vault.executeOp(Op(decreaseLiquidity, ""));
@@ -285,16 +304,24 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
         vault.burnShares(owner, shares);
 
         // Compute fee cut
-        uint256 feeCut0 = allCollectedFee0.mulDiv(feeCutBasisPoint, BASIS_POINT_SCALE);
-        uint256 feeCut1 = allCollectedFee1.mulDiv(feeCutBasisPoint, BASIS_POINT_SCALE);
+        uint256 feeCut0 = allCollectedFee0.mulDiv(
+            feeCutBasisPoint,
+            BASIS_POINT_SCALE
+        );
+        uint256 feeCut1 = allCollectedFee1.mulDiv(
+            feeCutBasisPoint,
+            BASIS_POINT_SCALE
+        );
 
-        uint256 valueToWithdraw0 = totalWithdrawnFromPosition0
-        // todo: merge the mulDivs
-        + initialToken0Balance.mulDiv(shares, totalShares) + (allCollectedFee0 - feeCut0).mulDiv(shares, totalShares);
+        uint256 valueToWithdraw0 = totalWithdrawnFromPosition0 +
+            // todo: merge the mulDivs
+            initialToken0Balance.mulDiv(shares, totalShares) +
+            (allCollectedFee0 - feeCut0).mulDiv(shares, totalShares);
 
-        uint256 valueToWithdraw1 = totalWithdrawnFromPosition1
-        // todo: merge the mulDivs
-        + initialToken1Balance.mulDiv(shares, totalShares) + (allCollectedFee1 - feeCut1).mulDiv(shares, totalShares);
+        uint256 valueToWithdraw1 = totalWithdrawnFromPosition1 +
+            // todo: merge the mulDivs
+            initialToken1Balance.mulDiv(shares, totalShares) +
+            (allCollectedFee1 - feeCut1).mulDiv(shares, totalShares);
 
         // Transfer the fees cut to fee collector
         // todo: mint shares instead
@@ -312,9 +339,18 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
             vault.safeTransfer(vaultAsset1, receiver, valueToWithdraw1);
         }
 
-        uint256 withdrawnAssets = packUint128(uint128(valueToWithdraw0), uint128(valueToWithdraw1));
+        uint256 withdrawnAssets = packUint128(
+            uint128(valueToWithdraw0),
+            uint128(valueToWithdraw1)
+        );
 
-        emit IERC4626.Withdraw(caller, receiver, owner, withdrawnAssets, shares);
+        emit IERC4626.Withdraw(
+            caller,
+            receiver,
+            owner,
+            withdrawnAssets,
+            shares
+        );
 
         return true;
     }
@@ -333,7 +369,9 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
     function totalAssets() external view returns (uint256 totalValue) {
         // Assumes the caller is the vault
 
-        (uint256 totalValue0, uint256 totalValue1) = totalVaultAssets_(LobsterVault(msg.sender));
+        (uint256 totalValue0, uint256 totalValue1) = totalVaultAssets_(
+            LobsterVault(msg.sender)
+        );
 
         // Pack the two uint128 values into a single uint256
         totalValue = packUint128(uint128(totalValue0), uint128(totalValue1));
@@ -349,7 +387,9 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
      * @return totalValue0 The total value of token0 owned by the vault
      * @return totalValue1 The total value of token1 owned by the vault
      */
-    function totalAssetsFor(LobsterVault vault) external view returns (uint256 totalValue0, uint256 totalValue1) {
+    function totalAssetsFor(
+        LobsterVault vault
+    ) external view returns (uint256 totalValue0, uint256 totalValue1) {
         return totalVaultAssets_(vault);
     }
 
@@ -364,7 +404,9 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
      * @return value1 The total value of token0 in the vault
      * @return value2 The total value of token1 in the vault
      */
-    function totalVaultAssets_(LobsterVault vault) internal view returns (uint256 value1, uint256 value2) {
+    function totalVaultAssets_(
+        LobsterVault vault
+    ) internal view returns (uint256 value1, uint256 value2) {
         // Get the direct pool token balances owned by the vault
         uint256 amount0 = vaultAsset0.balanceOf(address(vault));
         uint256 amount1 = vaultAsset1.balanceOf(address(vault));
@@ -386,7 +428,9 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
      * @return position0 The total value in token0 with fee adjustments
      * @return position1 The total value in token1 with fee adjustments
      */
-    function getAllUniswapV3Positions(address user)
+    function getAllUniswapV3Positions(
+        address user
+    )
         public
         view
         returns (Position memory position0, Position memory position1)
@@ -404,28 +448,58 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
             uint256 tokenId = positionManager.tokenOfOwnerByIndex(user, i);
 
             // Retrieve position details
-            (,, address token0, address token1, uint24 fee,,,,,,,) = positionManager.positions(tokenId);
+            (
+                ,
+                ,
+                address token0,
+                address token1,
+                uint24 fee,
+                ,
+                ,
+                ,
+                ,
+                ,
+                ,
+
+            ) = positionManager.positions(tokenId);
 
             // Compute the pool address for this position
-            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(token0, token1, fee);
-            address computedPoolAddress = PoolAddress.computeAddress(pool.factory(), key);
+            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(
+                token0,
+                token1,
+                fee
+            );
+            address computedPoolAddress = PoolAddress.computeAddress(
+                pool.factory(),
+                key
+            );
 
             // Only count positions in the relevant pool
             if (computedPoolAddress == address(pool)) {
                 // Get current price to value the position
-                (uint160 sqrtPriceX96,,,,,,) = pool.slot0();
+                (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
 
                 // Get total position value including fees
-                (uint256 amount0, uint256 fee0, uint256 amount1, uint256 fee1) =
-                    PositionValue.total(positionManager, tokenId, sqrtPriceX96);
+                (
+                    uint256 amount0,
+                    uint256 fee0,
+                    uint256 amount1,
+                    uint256 fee1
+                ) = PositionValue.total(positionManager, tokenId, sqrtPriceX96);
 
                 // Add principal amounts directly
                 position0.value += amount0;
                 position1.value += amount1;
 
                 // For fees, apply the fee cut before adding
-                position0.value += fee0.mulDiv(BASIS_POINT_SCALE - feeCutBasisPoint, BASIS_POINT_SCALE);
-                position1.value += fee1.mulDiv(BASIS_POINT_SCALE - feeCutBasisPoint, BASIS_POINT_SCALE);
+                position0.value += fee0.mulDiv(
+                    BASIS_POINT_SCALE - feeCutBasisPoint,
+                    BASIS_POINT_SCALE
+                );
+                position1.value += fee1.mulDiv(
+                    BASIS_POINT_SCALE - feeCutBasisPoint,
+                    BASIS_POINT_SCALE
+                );
             }
         }
 
@@ -441,24 +515,36 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
     }
 
     // assume msg.sender is the vault
-    function maxWithdraw(address owner) external view returns (uint256 maxValuesPacked) {
-        return _convertToAssets(LobsterVault(msg.sender).balanceOf(owner), Math.Rounding.Floor);
+    function maxWithdraw(
+        address owner
+    ) external view returns (uint256 maxValuesPacked) {
+        return
+            _convertToAssets(
+                LobsterVault(msg.sender).balanceOf(owner),
+                Math.Rounding.Floor
+            );
     }
 
     function maxRedeem(address) external pure returns (uint256) {
         revert("UniswapV3VaultFlow: maxRedeem not implemented");
     }
 
-    function previewDeposit(uint256 assets) public view virtual returns (uint256 shares) {
+    function previewDeposit(
+        uint256 assets
+    ) public view virtual returns (uint256 shares) {
         return _convertToShares(assets, Math.Rounding.Floor);
     }
 
-    function previewMint(uint256 shares) public view virtual returns (uint256 packedAssets) {
+    function previewMint(
+        uint256 shares
+    ) public view virtual returns (uint256 packedAssets) {
         return _convertToAssets(shares, Math.Rounding.Ceil);
     }
 
     // assume msg.sender is vault
-    function previewWithdraw(uint256 assets) public view returns (uint256 shares) {
+    function previewWithdraw(
+        uint256 assets
+    ) public view returns (uint256 shares) {
         return _convertToShares(assets, Math.Rounding.Ceil);
     }
 
@@ -484,16 +570,29 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
      * @dev Internal conversion function (from assets to shares) with support for rounding direction.
      * returns the amount of shares using the limiting token
      */
-    function _convertToShares(uint256 assets, Math.Rounding rounding) internal view virtual returns (uint256) {
+    function _convertToShares(
+        uint256 assets,
+        Math.Rounding rounding
+    ) internal view virtual returns (uint256) {
         // Todo: fix this fcking fct
         uint256 sharesSupply = LobsterVault(msg.sender).totalSupply();
         uint256 decimalsOffset = LobsterVault(msg.sender).decimalsOffset();
-        (uint256 totalAssets0, uint256 totalAssets1) = totalVaultAssets_(LobsterVault(msg.sender));
+        (uint256 totalAssets0, uint256 totalAssets1) = totalVaultAssets_(
+            LobsterVault(msg.sender)
+        );
 
         (uint256 asset0, uint256 asset1) = unpackUint128(assets);
 
-        uint256 shares0 = asset0.mulDiv(sharesSupply + 10 ** decimalsOffset, totalAssets0 + 1, rounding);
-        uint256 shares1 = asset1.mulDiv(sharesSupply + 10 ** decimalsOffset, totalAssets1 + 1, rounding);
+        uint256 shares0 = asset0.mulDiv(
+            sharesSupply + 10 ** decimalsOffset,
+            totalAssets0 + 1,
+            rounding
+        );
+        uint256 shares1 = asset1.mulDiv(
+            sharesSupply + 10 ** decimalsOffset,
+            totalAssets1 + 1,
+            rounding
+        );
 
         // return the minimal value
         return shares0 > shares1 ? shares0 : shares1;
@@ -502,24 +601,42 @@ contract UniswapV3VaultFlow is IVaultFlowModule, INav {
     /**
      * @dev Internal conversion function (from shares to assets) with support for rounding direction.
      */
-    function _convertToAssets(uint256 shares, Math.Rounding rounding) internal view virtual returns (uint256) {
+    function _convertToAssets(
+        uint256 shares,
+        Math.Rounding rounding
+    ) internal view virtual returns (uint256) {
         uint256 sharesSupply = LobsterVault(msg.sender).totalSupply();
         uint256 decimalsOffset = LobsterVault(msg.sender).decimalsOffset();
-        (uint256 totalAssets0, uint256 totalAssets1) = totalVaultAssets_(LobsterVault(msg.sender));
+        (uint256 totalAssets0, uint256 totalAssets1) = totalVaultAssets_(
+            LobsterVault(msg.sender)
+        );
 
-        uint256 asset0 = shares.mulDiv(totalAssets0 + 1, sharesSupply + 10 ** decimalsOffset, rounding);
-        uint256 asset1 = shares.mulDiv(totalAssets1 + 1, sharesSupply + 10 ** decimalsOffset, rounding);
+        uint256 asset0 = shares.mulDiv(
+            totalAssets0 + 1,
+            sharesSupply + 10 ** decimalsOffset,
+            rounding
+        );
+        uint256 asset1 = shares.mulDiv(
+            totalAssets1 + 1,
+            sharesSupply + 10 ** decimalsOffset,
+            rounding
+        );
 
         return packUint128(uint128(asset0), uint128(asset1));
     }
 
     // Pack two uint128 values into a single uint256
     // (val1 << 128) | val2
-    function packUint128(uint128 a, uint128 b) internal pure returns (uint256 packed) {
+    function packUint128(
+        uint128 a,
+        uint128 b
+    ) internal pure returns (uint256 packed) {
         packed = (uint256(a) << 128) | uint256(b);
     }
 
-    function unpackUint128(uint256 packed) internal pure returns (uint128 a, uint128 b) {
+    function unpackUint128(
+        uint256 packed
+    ) internal pure returns (uint128 a, uint128 b) {
         a = uint128(packed >> 128);
         b = uint128(packed);
     }
