@@ -18,21 +18,35 @@ import {TickMath} from "../libraries/uniswapV3/TickMath.sol";
 /**
  * @title UniV3LobsterVault
  * @author Lobster
- * @notice A modular ERC4626 vault with 2 underlying tokens and operation validation mechanism.
- * This vault is specifically designed to hold Uniswap V3 positions on behalf of the share holders.
+ * @notice A modular ERC4626 vault designed to manage Uniswap V3 positions with dual-token assets.
+ * This vault holds Uniswap V3 NFT positions on behalf of share holders and manages liquidity
+ * operations while implementing a fee structure for collected trading fees.
  */
 contract UniV3LobsterVault is LobsterVault {
     using Math for uint256;
 
+    /// @dev Q128 constant for fixed-point arithmetic in Uniswap V3 fee calculations
     uint256 internal constant Q128 = 0x100000000000000000000000000000000;
+
+    /// @notice The Uniswap V3 position manager contract for handling NFT positions
     INonFungiblePositionManager public immutable positionManager;
+
+    /// @notice The specific Uniswap V3 pool this vault operates on
     IUniswapV3PoolMinimal public immutable pool;
+
+    /// @notice The fee cut taken from collected fees, expressed in basis points
     uint256 public immutable feeCutBasisPoint;
+
+    /// @notice Address that receives the protocol fee cuts
     address public immutable feeCollector;
 
+    /// @dev The fee tier of the pool (cached for gas optimization)
     uint24 private immutable poolFee;
 
-    // Struct to avoid stack too deep errors in _withdraw
+    /**
+     * @dev Struct to avoid stack too deep errors in _withdraw function
+     * Contains all variables needed during the withdrawal process
+     */
     struct WithdrawVars {
         uint256 tokensCount;
         uint256 initialToken0Balance;
@@ -49,6 +63,10 @@ contract UniV3LobsterVault is LobsterVault {
         uint256 withdrawnAssets;
     }
 
+    /**
+     * @dev Struct to avoid stack too deep errors when processing individual positions
+     * Contains all variables needed for a single position's operations
+     */
     struct PositionVars {
         uint256 tokenId;
         address token0;
@@ -72,13 +90,33 @@ contract UniV3LobsterVault is LobsterVault {
         uint256 tokensOwed1;
     }
 
+    /**
+     * @notice Emitted when the vault is successfully set up with core parameters
+     * @param opValidator The operation validator module address
+     * @param pool The Uniswap V3 pool address
+     * @param positionManager The position manager address
+     */
     event UniV3LobsterVaultSetUp(
         IOpValidatorModule indexed opValidator,
         IUniswapV3PoolMinimal indexed pool,
         INonFungiblePositionManager indexed positionManager
     );
+
+    /**
+     * @notice Emitted when fee parameters are set
+     * @param feeCollector_ The address that will receive fee cuts
+     * @param feeCutBasisPoint_ The fee cut percentage in basis points
+     */
     event FeeSet(address indexed feeCollector_, uint256 indexed feeCutBasisPoint_);
 
+    /**
+     * @notice Constructs a new UniV3LobsterVault
+     * @param opValidator_ The operation validator module for transaction validation
+     * @param pool_ The Uniswap V3 pool to operate on
+     * @param positionManager_ The Uniswap V3 position manager contract
+     * @param feeCollector_ Address that will receive protocol fee cuts
+     * @param feeCutBasisPoint_ Fee cut percentage in basis points (must be <= BASIS_POINT_SCALE)
+     */
     constructor(
         IOpValidatorModule opValidator_,
         IUniswapV3PoolMinimal pool_,
@@ -109,12 +147,18 @@ contract UniV3LobsterVault is LobsterVault {
     }
 
     /**
-     * @dev Handles the withdrawal flow:
-     * - Extract the tokens from the Uniswap V3 positions
-     * - Burns shares from the caller
-     * - Transfers the assets to the receiver
-     *
-     * @dev Note: This function assumes the caller is the vault itself
+     * @dev Handles the withdrawal flow for Uniswap V3 positions:
+     * - Processes all vault's Uniswap V3 positions
+     * - Decreases liquidity proportionally based on shares being withdrawn
+     * - Collects tokens and fees from positions
+     * - Burns shares from the owner
+     * - Transfers fee cuts to the fee collector
+     * - Transfers remaining assets to the receiver
+     * @param caller Address initiating the withdrawal
+     * @param receiver Address to receive the withdrawn assets
+     * @param owner Address that owns the shares being burned
+     * @param assets Packed uint256 containing both asset amounts to withdraw
+     * @param shares Amount of shares to burn
      */
     function _withdraw(
         address caller,
@@ -155,7 +199,10 @@ contract UniV3LobsterVault is LobsterVault {
     }
 
     /**
-     * @dev Process all Uniswap V3 positions for withdrawal
+     * @dev Process all Uniswap V3 positions owned by the vault for withdrawal
+     * Iterates through each position, calculates withdrawal amounts, and executes operations
+     * @param shares The number of shares being withdrawn (used for proportional calculations)
+     * @param vars The withdrawal variables struct to accumulate totals
      */
     function _processPositions(uint256 shares, WithdrawVars memory vars) internal {
         for (uint256 i = 0; i < vars.tokensCount; ++i) {
@@ -179,7 +226,7 @@ contract UniV3LobsterVault is LobsterVault {
                 posVars.tokensOwed1
             ) = positionManager.positions(posVars.tokenId);
 
-            // Verify position is in our pool
+            // Verify position is in our pool - skip if not
             if (!_isPositionInPool(posVars.token0, posVars.token1, posVars.fee)) {
                 continue;
             }
@@ -205,33 +252,40 @@ contract UniV3LobsterVault is LobsterVault {
                 tickCurrent
             );
 
-            // Calculate withdrawal amounts
+            // Calculate proportional withdrawal amounts based on shares
             posVars.toWithdraw0 = posVars.position0.mulDiv(shares, totalSupply());
             posVars.toWithdraw1 = posVars.position1.mulDiv(shares, totalSupply());
 
-            // Accumulate totals
+            // Accumulate totals for final calculations
             vars.allCollectedFee0 += fee0;
             vars.allCollectedFee1 += fee1;
             vars.totalWithdrawnFromPosition0 += posVars.toWithdraw0;
             vars.totalWithdrawnFromPosition1 += posVars.toWithdraw1;
 
-            // Execute position operations
+            // Execute position operations (decrease liquidity and collect)
             _executePositionWithdrawal(posVars);
         }
     }
 
     /**
-     * @dev Check if position belongs to our pool
+     * @dev Check if a position belongs to this vault's designated pool
+     * @param token0 The first token of the position
+     * @param token1 The second token of the position
+     * @param fee The fee tier of the position
+     * @return result True if the position matches this vault's pool parameters
      */
     function _isPositionInPool(address token0, address token1, uint24 fee) internal view returns (bool result) {
         return token0 == address(asset0) && token1 == address(asset1) && fee == poolFee;
     }
 
     /**
-     * @dev Execute decrease liquidity and collect operations for a position
+     * @dev Execute decrease liquidity and collect operations for a single position
+     * First decreases liquidity by the calculated withdrawal amounts, then collects
+     * both the withdrawn tokens and any accumulated fees
+     * @param posVars The position variables containing all necessary data for the operations
      */
     function _executePositionWithdrawal(PositionVars memory posVars) internal {
-        // Decrease liquidity if needed
+        // Decrease liquidity if there are amounts to withdraw
         if (posVars.toWithdraw0 > 0 || posVars.toWithdraw1 > 0) {
             INonFungiblePositionManager.DecreaseLiquidityParams memory params = INonFungiblePositionManager
                 .DecreaseLiquidityParams({
@@ -251,7 +305,7 @@ contract UniV3LobsterVault is LobsterVault {
             call_(decreaseLiquidity);
         }
 
-        // Collect tokens and fees
+        // Collect tokens and fees (total = principal + fees)
         posVars.total0 = uint128(posVars.toWithdraw0 + posVars.fee0);
         posVars.total1 = uint128(posVars.toWithdraw1 + posVars.fee1);
 
@@ -276,14 +330,17 @@ contract UniV3LobsterVault is LobsterVault {
     }
 
     /**
-     * @dev Calculate fee cuts and transfer assets to receiver
+     * @dev Calculate protocol fee cuts from collected fees and transfer assets to receiver
+     * Separates collected fees into protocol cuts (sent to fee collector) and user portions
+     * @param receiver Address to receive the withdrawn assets
+     * @param vars The withdrawal variables containing all calculated amounts
      */
     function _transferWithdraws(address receiver, WithdrawVars memory vars) internal {
-        // Calculate fee cuts
+        // Calculate protocol fee cuts from total collected fees
         vars.feeCut0 = vars.allCollectedFee0.mulDiv(feeCutBasisPoint, BASIS_POINT_SCALE);
         vars.feeCut1 = vars.allCollectedFee1.mulDiv(feeCutBasisPoint, BASIS_POINT_SCALE);
 
-        // Transfer fee cuts to collector
+        // Transfer protocol fee cuts to collector
         if (vars.feeCut0 > 0) {
             SafeERC20.safeTransfer(asset0, feeCollector, vars.feeCut0);
         }
@@ -291,7 +348,7 @@ contract UniV3LobsterVault is LobsterVault {
             SafeERC20.safeTransfer(asset1, feeCollector, vars.feeCut1);
         }
 
-        // Transfer assets to receiver
+        // Transfer withdrawn assets to receiver
         if (vars.valueToWithdraw0 > 0) {
             SafeERC20.safeTransfer(asset0, receiver, vars.valueToWithdraw0);
         }
@@ -303,37 +360,35 @@ contract UniV3LobsterVault is LobsterVault {
     }
 
     /**
-     * @dev Calculates the total value of assets in the calling vault
+     * @dev Calculates the total value of assets controlled by the vault
      * This includes:
-     * - Direct token holdings
-     * - Value locked in active Uniswap V3 positions
-     * - Uncollected fees (minus the protocol fee cut)
-     * @dev Note: This function assumes the caller is the vault itself
-     *
-     * @return totalValue The total value of assets in the vault packed as a single uint256 = (token0Value << 128) | token1Value
+     * - Direct token holdings in the vault
+     * - Value locked in active Uniswap V3 positions (principal amounts)
+     * - Uncollected fees from positions (minus the protocol fee cut)
+     * @return totalValue The total value packed as uint256: (token0Value << 128) | token1Value
      */
     function totalAssets() public view override returns (uint256 totalValue) {
-        // Get the direct pool token balances owned by the vault
+        // Get direct token balances held by the vault
         uint256 amount0 = asset0.balanceOf(address(this));
         uint256 amount1 = asset1.balanceOf(address(this));
 
-        // Get all the positions in the pool (including non-collected fees)
+        // Get aggregated position values (includes principal + fees minus fee cuts)
         (
             Position memory position0, // contains fees - fee cut
-            Position memory position1 // contains fees - cut
+            Position memory position1 // contains fees - fee cut
         ) = getAllUniswapV3Positions(address(this));
 
-        // Pack the two uint128 values into a single uint256
+        // Pack the combined values into a single uint256
         totalValue = packUint128(uint128(amount0 + position0.value), uint128(amount1 + position1.value));
     }
 
     /**
-     * @dev Calculates the total value of a user's Uniswap V3 positions in the specified pool
+     * @dev Calculates the total value of a user's Uniswap V3 positions in this vault's pool
      * Includes both the principal token amounts and uncollected fees (minus the protocol fee cut)
-     *
+     * Only positions that match this vault's pool (token0, token1, fee) are included
      * @param user The address whose positions to calculate
-     * @return position0 The total value in token0 with fee adjustments
-     * @return position1 The total value in token1 with fee adjustments
+     * @return position0 The total value in token0 (principal + fees - fee cut)
+     * @return position1 The total value in token1 (principal + fees - fee cut)
      */
     function getAllUniswapV3Positions(address user)
         public
@@ -347,12 +402,12 @@ contract UniV3LobsterVault is LobsterVault {
         position0 = Position({token: address(asset0), value: 0});
         position1 = Position({token: address(asset1), value: 0});
 
-        // Iterate through all positions
+        // Iterate through all positions owned by the user
         for (uint256 i = 0; i < balance; i++) {
             // Get the tokenId for the current position
             uint256 tokenId = positionManager.tokenOfOwnerByIndex(user, i);
 
-            // Retrieve position details
+            // Retrieve position details from the position manager
             (
                 ,
                 ,
@@ -368,15 +423,16 @@ contract UniV3LobsterVault is LobsterVault {
                 uint256 tokensOwed1
             ) = positionManager.positions(tokenId);
 
-            // Only count positions in the relevant pool
-            // -> OTHER POSITIONS WILL BE IGNORED
+            // Only count positions that belong to this vault's pool
+            // Positions in other pools are ignored
             if (_isPositionInPool(token0, token1, fee)) {
-                // Get current price to value the position
-                // todo: can i manually compute the sqrtPrice and tickCurrent from positionManager.positions(tokenId) ??
+                // Get current pool state for position valuation
                 (uint160 sqrtPriceX96, int24 tickCurrent,,,,,) = pool.slot0();
 
-                // Get total position value and fees
+                // Calculate principal position value at current price
                 (uint256 amount0, uint256 amount1) = _principalPosition(sqrtPriceX96, tickLower, tickUpper, liquidity);
+
+                // Calculate uncollected fees for the position
                 (uint256 fee0, uint256 fee1) = _feePosition(
                     FeeParams({
                         token0: token0,
@@ -393,11 +449,12 @@ contract UniV3LobsterVault is LobsterVault {
                     tickCurrent
                 );
 
-                // Add principal amounts directly
+                // Add principal amounts directly to position values
                 position0.value += amount0;
                 position1.value += amount1;
 
-                // For fees, apply the fee cut before adding
+                // For fees, subtract the protocol fee cut before adding to position value
+                // Users get (100% - feeCutBasisPoint) of the fees
                 position0.value += fee0.mulDiv(BASIS_POINT_SCALE - feeCutBasisPoint, BASIS_POINT_SCALE);
                 position1.value += fee1.mulDiv(BASIS_POINT_SCALE - feeCutBasisPoint, BASIS_POINT_SCALE);
             }
@@ -406,12 +463,26 @@ contract UniV3LobsterVault is LobsterVault {
         return (position0, position1);
     }
 
+    /**
+     * @dev Internal function to execute operations via the validator module
+     * @param op The operation to execute containing target, value, and calldata
+     * @return result The return data from the operation
+     */
     function call_(BaseOp memory op) internal returns (bytes memory result) {
         (bool success, bytes memory returnData) = op.target.call{value: op.value}(op.data);
         require(success, "UniV3LobsterVault: call failed");
         return returnData;
     }
 
+    /**
+     * @dev Calculate the principal token amounts for a position at the current price
+     * @param sqrtRatioX96 The current sqrt price of the pool
+     * @param tickLower The lower tick boundary of the position
+     * @param tickUpper The upper tick boundary of the position
+     * @param liquidity The liquidity amount of the position
+     * @return amount0 The amount of token0 in the position
+     * @return amount1 The amount of token1 in the position
+     */
     function _principalPosition(
         uint160 sqrtRatioX96,
         int24 tickLower,
@@ -427,6 +498,13 @@ contract UniV3LobsterVault is LobsterVault {
         );
     }
 
+    /**
+     * @dev Calculate the uncollected fees for a position
+     * @param feeParams Struct containing all fee calculation parameters
+     * @param tickCurrent The current tick of the pool
+     * @return fee0 The uncollected fees in token0
+     * @return fee1 The uncollected fees in token1
+     */
     function _feePosition(
         FeeParams memory feeParams,
         int24 tickCurrent
@@ -447,6 +525,16 @@ contract UniV3LobsterVault is LobsterVault {
         ) + feeParams.tokensOwed1;
     }
 
+    /**
+     * @dev Calculate the fee growth inside a position's tick range
+     * This is a core Uniswap V3 calculation that determines how much fees have
+     * accrued within the position's active range
+     * @param tickCurrent The current tick of the pool
+     * @param tickLower The lower tick boundary of the position
+     * @param tickUpper The upper tick boundary of the position
+     * @return feeGrowthInside0X128 Fee growth inside the range for token0
+     * @return feeGrowthInside1X128 Fee growth inside the range for token1
+     */
     function _getFeeGrowthInside(
         int24 tickCurrent,
         int24 tickLower,
@@ -456,22 +544,27 @@ contract UniV3LobsterVault is LobsterVault {
         view
         returns (uint256 feeGrowthInside0X128, uint256 feeGrowthInside1X128)
     {
+        // Get fee growth data from the pool's tick boundaries
         (,, uint256 lowerFeeGrowthOutside0X128, uint256 lowerFeeGrowthOutside1X128,,,,) = pool.ticks(tickLower);
         (,, uint256 upperFeeGrowthOutside0X128, uint256 upperFeeGrowthOutside1X128,,,,) = pool.ticks(tickUpper);
 
+        // Calculate fee growth inside based on current tick position
         if (tickCurrent < tickLower) {
+            // Current price is below the position range
             feeGrowthInside0X128 = lowerFeeGrowthOutside0X128 - upperFeeGrowthOutside0X128;
             feeGrowthInside1X128 = lowerFeeGrowthOutside1X128 - upperFeeGrowthOutside1X128;
         } else if (tickCurrent < tickUpper) {
+            // Current price is within the position range (position is active)
             uint256 feeGrowthGlobal0X128 = pool.feeGrowthGlobal0X128();
             uint256 feeGrowthGlobal1X128 = pool.feeGrowthGlobal1X128();
             feeGrowthInside0X128 = feeGrowthGlobal0X128 - lowerFeeGrowthOutside0X128 - upperFeeGrowthOutside0X128;
             feeGrowthInside1X128 = feeGrowthGlobal1X128 - lowerFeeGrowthOutside1X128 - upperFeeGrowthOutside1X128;
         } else {
+            // Current price is above the position range
             feeGrowthInside0X128 = upperFeeGrowthOutside0X128 - lowerFeeGrowthOutside0X128;
             feeGrowthInside1X128 = upperFeeGrowthOutside1X128 - lowerFeeGrowthOutside1X128;
         }
     }
 
-    // todo: add collect fee function
+    // TODO: Add collect fee function for manual fee collection without withdrawal
 }

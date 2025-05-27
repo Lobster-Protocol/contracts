@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GNU AGPL v3.0
 pragma solidity ^0.8.28;
 
+import "forge-std/Test.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ERC4626, ERC20} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
@@ -16,7 +17,7 @@ import {IOpValidatorModule} from "../interfaces/modules/IOpValidatorModule.sol";
 /**
  * @title LobsterVault
  * @author Lobster
- * @notice A modular ERC4626 vault with 2 underlying tokens and operation validation mechanism
+ * @notice A modular ERC4626 vault with dual-token asset support and operation validation mechanism
  */
 contract LobsterVault is Modular {
     using Math for uint256;
@@ -27,7 +28,7 @@ contract LobsterVault is Modular {
     error ZeroAddress();
 
     /**
-     * @dev The two tokens in the Uniswap V3 pool which are the vault's assets
+     * @dev The two tokens that compose the vault's dual-asset structure
      */
     IERC20 public immutable asset0;
     IERC20 public immutable asset1;
@@ -36,6 +37,9 @@ contract LobsterVault is Modular {
 
     /**
      * @notice Constructs a new LobsterVault
+     * @param opValidator_ The operation validator module for transaction validation
+     * @param asset0_ The first token of the dual-asset pair
+     * @param asset1_ The second token of the dual-asset pair
      */
     constructor(
         IOpValidatorModule opValidator_,
@@ -58,6 +62,9 @@ contract LobsterVault is Modular {
 
     /**
      * @dev See {IERC4626-deposit}.
+     * @param assets Packed uint256 containing both asset amounts: (asset0 << 128) | asset1
+     * @param receiver Address to receive the minted shares
+     * @return shares The amount of shares minted to the receiver
      */
     function deposit(uint256 assets, address receiver) public override returns (uint256) {
         uint256 maxAssets = maxDeposit(receiver);
@@ -77,6 +84,10 @@ contract LobsterVault is Modular {
 
     /**
      * @dev See {IERC4626-withdraw}.
+     * @param assets Packed uint256 containing both asset amounts: (asset0 << 128) | asset1
+     * @param receiver Address to receive the withdrawn assets
+     * @param owner Address that owns the shares being burned
+     * @return shares The amount of shares burned from the owner
      */
     function withdraw(uint256 assets, address receiver, address owner) public override returns (uint256) {
         uint256 maxAssets = maxWithdraw(owner);
@@ -97,8 +108,12 @@ contract LobsterVault is Modular {
 
     /**
      * @dev Handles the deposit flow:
-     * - Transfers 2 assets from caller to vault
+     * - Transfers both assets from caller to vault (if amounts > 0)
      * - Mints shares to the receiver
+     * @param caller Address initiating the deposit
+     * @param receiver Address to receive the minted shares
+     * @param assets Packed uint256 containing both asset amounts
+     * @param shares Amount of shares to mint
      */
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
         (uint128 assets0, uint128 assets1) = unpackUint128(assets);
@@ -107,7 +122,7 @@ contract LobsterVault is Modular {
         if (assets0 > 0) {
             SafeERC20.safeTransferFrom(asset0, caller, address(this), assets0);
         }
-        if (assets0 > 1) {
+        if (assets1 > 0) {
             SafeERC20.safeTransferFrom(asset1, caller, address(this), assets1);
         }
 
@@ -118,11 +133,13 @@ contract LobsterVault is Modular {
 
     /**
      * @dev Handles the withdrawal flow:
-     * - Extract the tokens from the Uniswap V3 positions
-     * - Burns shares from the caller
-     * - Transfers the assets to the receiver
-     *
-     * @dev Note: This function assumes the caller is the vault itself
+     * - Burns shares from the owner
+     * - Calculates proportional amounts of both tokens based on current balances
+     * - Transfers the calculated amounts to the receiver
+     * @param caller Address initiating the withdrawal
+     * @param receiver Address to receive the withdrawn assets
+     * @param owner Address that owns the shares being burned
+     * @param shares Amount of shares to burn
      */
     function _withdraw(
         address caller,
@@ -162,17 +179,11 @@ contract LobsterVault is Modular {
     }
 
     /**
-     * @dev Calculates the total value of assets in the calling vault
-     * This includes:
-     * - Direct token holdings
-     * - Value locked in active Uniswap V3 positions
-     * - Uncollected fees (minus the protocol fee cut)
-     * @dev Note: This function assumes the caller is the vault itself
-     *
-     * @return totalValue The total value of assets in the vault packed as a single uint256 = (token0Value << 128) | token1Value
+     * @dev Calculates the total value of assets held directly by the vault
+     * @return totalValue The total value of assets packed as uint256: (token0Balance << 128) | token1Balance
      */
     function totalAssets() public view virtual override returns (uint256 totalValue) {
-        // Get the direct pool token balances owned by the vault
+        // Get the direct token balances owned by the vault
         uint256 amount0 = asset0.balanceOf(address(this));
         uint256 amount1 = asset1.balanceOf(address(this));
 
@@ -182,7 +193,10 @@ contract LobsterVault is Modular {
 
     /**
      * @dev Internal conversion function (from assets to shares) with support for rounding direction.
-     * returns the amount of shares using the limiting token
+     * Uses the limiting token (whichever produces fewer shares) to determine the final share amount
+     * @param assets Packed uint256 containing both asset amounts
+     * @param rounding The rounding direction to use in calculations
+     * @return shares The amount of shares calculated using the limiting token
      */
     function _convertToShares(uint256 assets, Math.Rounding rounding) internal view override returns (uint256 shares) {
         (uint256 totalAssets0, uint256 totalAssets1) = unpackUint128(totalAssets());
@@ -198,6 +212,9 @@ contract LobsterVault is Modular {
 
     /**
      * @dev Internal conversion function (from shares to assets) with support for rounding direction.
+     * @param shares The amount of shares to convert
+     * @param rounding The rounding direction to use in calculations
+     * @return Packed uint256 containing both asset amounts: (asset0 << 128) | asset1
      */
     function _convertToAssets(uint256 shares, Math.Rounding rounding) internal view override returns (uint256) {
         (uint256 totalAssets0, uint256 totalAssets1) = unpackUint128(totalAssets());
@@ -208,12 +225,22 @@ contract LobsterVault is Modular {
         return packUint128(uint128(assets0), uint128(assets1));
     }
 
-    // Pack two uint128 values into a single uint256
-    // (val1 << 128) | val2
+    /**
+     * @dev Pack two uint128 values into a single uint256
+     * @param a First uint128 value (will be stored in upper 128 bits)
+     * @param b Second uint128 value (will be stored in lower 128 bits)
+     * @return packed The packed uint256 value: (a << 128) | b
+     */
     function packUint128(uint128 a, uint128 b) internal pure returns (uint256 packed) {
         packed = (uint256(a) << 128) | uint256(b);
     }
 
+    /**
+     * @dev Unpack a uint256 into two uint128 values
+     * @param packed The packed uint256 value
+     * @return a The upper 128 bits as uint128
+     * @return b The lower 128 bits as uint128
+     */
     function unpackUint128(uint256 packed) internal pure returns (uint128 a, uint128 b) {
         a = uint128(packed >> 128);
         b = uint128(packed);
