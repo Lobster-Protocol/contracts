@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 // Special address indicating that no parameter validation is needed
-// for the operation validation done by the GenericMuSigOpValidator.
+// for the operation validation done by the MuSigOpValidator.
 // When a SelectorAndChecker references this address as the paramsValidator,
 // the system will skip parameter validation for that function.
 address constant NO_PARAMS_CHECKS_ADDRESS = address(1);

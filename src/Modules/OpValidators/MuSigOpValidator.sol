@@ -17,14 +17,14 @@ import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/Messa
 uint256 constant NONCE_OFFSET = 32;
 
 /**
- * @title GenericMuSigOpValidator
+ * @title MuSigOpValidator
  * @author Lobster
  * @notice An operation validator module that uses multi-signature (musig) validation with quorum-based approval
  * @dev This validator implements whitelist-based operation validation with parameter verification
  *      and multi-signature authorization with customizable signer weights and quorum requirements
  * @dev Once deployed, it is no longer possible to update the call whitelist but you can still update the signers.
  */
-contract GenericMuSigOpValidator is IOpValidatorModule {
+contract MuSigOpValidator is IOpValidatorModule {
     // todo: support eip-712 signatures & message signing that are not vault transactions
     using MessageHashUtils for bytes32;
 
@@ -134,7 +134,7 @@ contract GenericMuSigOpValidator is IOpValidatorModule {
     }
 
     /**
-     * @notice Constructs a new GenericMuSigOpValidator
+     * @notice Constructs a new MuSigOpValidator
      * @param whitelist Array of whitelisted calls with their targets, permissions, and selectors
      * @param signers_ Array of signers with their weights
      * @param quorum_ Minimum signature weight required to approve operations
@@ -467,8 +467,7 @@ contract GenericMuSigOpValidator is IOpValidatorModule {
         require(_vault != address(0), ZeroAddress());
 
         // Create a message hash for signers to sign
-        bytes32 messageHash =
-            keccak256(abi.encodePacked("GenericMuSigOpValidator_SET_VAULT", _vault)).toEthSignedMessageHash();
+        bytes32 messageHash = keccak256(abi.encodePacked("MuSigOpValidator_SET_VAULT", _vault)).toEthSignedMessageHash();
 
         // Verify the signatures meet the quorum
         if (!isValidSignature(messageHash, signatures)) {
@@ -524,8 +523,7 @@ contract GenericMuSigOpValidator is IOpValidatorModule {
      * @return Hash of the signers data
      */
     function _hashSignersData(Signer calldata signer, uint256 newQuorum) internal pure returns (bytes32) {
-        return keccak256(
-            abi.encodePacked("GenericMuSigOpValidator_UPDATE_SIGNERS", signer.signer, signer.weight, newQuorum)
-        ).toEthSignedMessageHash();
+        return keccak256(abi.encodePacked("MuSigOpValidator_UPDATE_SIGNERS", signer.signer, signer.weight, newQuorum))
+            .toEthSignedMessageHash();
     }
 }
