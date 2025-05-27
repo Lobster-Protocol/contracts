@@ -113,6 +113,7 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
         uint256 vaultInitialAsset1
     )
         private
+        view
     {
         // Ensure the expected shares were minted
         vm.assertEq(expectedMintedShares, mintedShares);
@@ -182,6 +183,7 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
         uint256 userBalanceBefore1
     )
         private
+        view
     {
         uint256 userBalanceAfter0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
         uint256 userBalanceAfter1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
@@ -245,6 +247,7 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
         uint256 userSharesBefore
     )
         private
+        view
     {
         uint256 userBalanceAfter0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
         uint256 userBalanceAfter1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
