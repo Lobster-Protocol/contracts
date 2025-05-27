@@ -81,9 +81,7 @@ contract UniV3LobsterVaultTest is UniswapV3Infra {
             pool,
             positionManager,
             uniV3feeCutCollector,
-            0, // 0% fee cut,
-            IERC20(uniswapV3Data.tokenA),
-            IERC20(uniswapV3Data.tokenB)
+            0 // 0% fee cut,
         );
         // Setup initial state
         MockERC20(uniswapV3Data.tokenA).mint(alice, 10000 ether);

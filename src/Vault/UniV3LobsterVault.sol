@@ -72,22 +72,16 @@ contract UniV3LobsterVault is LobsterVault {
         IUniswapV3PoolMinimal _pool,
         INonFungiblePositionManager positionManager_,
         address feeCollector_,
-        uint256 feeCutBasisPoint_,
-        IERC20 poolAsset0_,
-        IERC20 poolAsset1_
+        uint256 feeCutBasisPoint_
     )
-        LobsterVault(initialOwner, opValidator_, poolAsset0_, poolAsset1_)
+        LobsterVault(initialOwner, opValidator_, IERC20(_pool.token0()), IERC20(_pool.token1()))
     {
         require(feeCutBasisPoint_ <= BASIS_POINT_SCALE, "UniV3LobsterVault: fee cut too high");
         require(
-            address(opValidator_) != address(0) && address(poolAsset0_) != address(0)
-                && address(poolAsset1_) != address(0) && address(_pool) != address(0)
+            address(opValidator_) != address(0) && address(_pool) != address(0)
                 && address(positionManager_) != address(0) && address(feeCollector_) != address(0),
             "UniV3LobsterVault: zero address"
         );
-
-        // ensure tokens are in the provided pool
-        require(pool.token0() == address(poolAsset0_) && pool.token0() == address(poolAsset1_));
 
         opValidator = opValidator_;
         pool = _pool;
