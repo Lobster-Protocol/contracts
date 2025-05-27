@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: GNU AGPL v3.0
 pragma solidity ^0.8.28;
 
-import {console} from "forge-std/console.sol";
-
 import {IUniswapV3PoolMinimal} from "../interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {LobsterVault} from "./LobsterVault.sol";
 import {Position} from "../libraries/uniswapV3/UniswapUtils.sol";
-import {PositionValue} from "../libraries/uniswapV3/PositionValue.sol";
+import {PositionValue, FeeParams} from "../libraries/uniswapV3/PositionValue.sol";
 import {INonFungiblePositionManager} from "../interfaces/uniswapV3/INonFungiblePositionManager.sol";
 import {IOpValidatorModule, BaseOp, Op, BatchOp} from "../interfaces/modules/IOpValidatorModule.sol";
 import {BASIS_POINT_SCALE} from "../Modules/Constants.sol";
@@ -14,6 +12,8 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {LiquidityAmounts} from "../libraries/uniswapV3/LiquidityAmounts.sol";
+import {TickMath} from "../libraries/uniswapV3/TickMath.sol";
 
 /**
  * @title UniV3LobsterVault
@@ -24,6 +24,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 contract UniV3LobsterVault is LobsterVault {
     using Math for uint256;
 
+    uint256 internal constant Q128 = 0x100000000000000000000000000000000;
     INonFungiblePositionManager public immutable positionManager;
     IUniswapV3PoolMinimal public immutable pool;
     uint256 public immutable feeCutBasisPoint;
@@ -63,6 +64,12 @@ contract UniV3LobsterVault is LobsterVault {
         uint256 toWithdraw1;
         uint128 total0;
         uint128 total1;
+        int24 tickLower;
+        int24 tickUpper;
+        uint256 feeGrowthInside0LastX128;
+        uint256 feeGrowthInside1LastX128;
+        uint256 tokensOwed0;
+        uint256 tokensOwed1;
     }
 
     event UniV3LobsterVaultSetUp(
@@ -162,25 +169,54 @@ contract UniV3LobsterVault is LobsterVault {
             posVars.tokenId = positionManager.tokenOfOwnerByIndex(address(this), i);
 
             // Get position details
-            (,, posVars.token0, posVars.token1, posVars.fee,,, posVars.liquidity,,,,) =
-                positionManager.positions(posVars.tokenId);
+            (
+                ,
+                ,
+                posVars.token0,
+                posVars.token1,
+                posVars.fee,
+                posVars.tickLower,
+                posVars.tickUpper,
+                posVars.liquidity,
+                posVars.feeGrowthInside0LastX128,
+                posVars.feeGrowthInside1LastX128,
+                posVars.tokensOwed0,
+                posVars.tokensOwed1
+            ) = positionManager.positions(posVars.tokenId);
 
             // Verify position is in our pool
             if (!_isPositionInPool(posVars.token0, posVars.token1, posVars.fee)) {
                 continue;
             }
 
+            (uint160 sqrtPriceX96, int24 tickCurrent,,,,,) = pool.slot0();
+
             // Get position value and fees
-            (posVars.position0, posVars.fee0, posVars.position1, posVars.fee1) =
-                PositionValue.total(positionManager, posVars.tokenId, vars.sqrtPriceX96);
+            (posVars.position0, posVars.position1) =
+                _principalPosition(sqrtPriceX96, posVars.tickLower, posVars.tickUpper, posVars.liquidity);
+            (uint256 fee0, uint256 fee1) = _feePosition(
+                FeeParams({
+                    token0: posVars.token0,
+                    token1: posVars.token1,
+                    fee: posVars.fee,
+                    tickLower: posVars.tickLower,
+                    tickUpper: posVars.tickUpper,
+                    liquidity: posVars.liquidity,
+                    positionFeeGrowthInside0LastX128: posVars.feeGrowthInside0LastX128,
+                    positionFeeGrowthInside1LastX128: posVars.feeGrowthInside1LastX128,
+                    tokensOwed0: posVars.tokensOwed0,
+                    tokensOwed1: posVars.tokensOwed1
+                }),
+                tickCurrent
+            );
 
             // Calculate withdrawal amounts
             posVars.toWithdraw0 = posVars.position0.mulDiv(shares, totalSupply());
             posVars.toWithdraw1 = posVars.position1.mulDiv(shares, totalSupply());
 
             // Accumulate totals
-            vars.allCollectedFee0 += posVars.fee0;
-            vars.allCollectedFee1 += posVars.fee1;
+            vars.allCollectedFee0 += fee0;
+            vars.allCollectedFee1 += fee1;
             vars.totalWithdrawnFromPosition0 += posVars.toWithdraw0;
             vars.totalWithdrawnFromPosition1 += posVars.toWithdraw1;
 
@@ -217,7 +253,7 @@ contract UniV3LobsterVault is LobsterVault {
                 data: abi.encodeCall(positionManager.decreaseLiquidity, (params))
             });
 
-            call(decreaseLiquidity);
+            call_(decreaseLiquidity);
         }
 
         // Collect tokens and fees
@@ -240,7 +276,7 @@ contract UniV3LobsterVault is LobsterVault {
                     )
                 )
             });
-            call(collectFees);
+            call_(collectFees);
         }
     }
 
@@ -288,8 +324,8 @@ contract UniV3LobsterVault is LobsterVault {
 
         // Get all the positions in the pool (including non-collected fees)
         (
-            Position memory position0, // contains fees
-            Position memory position1 // contains fees
+            Position memory position0, // contains fees - fee cut
+            Position memory position1 // contains fees - cut
         ) = getAllUniswapV3Positions(address(this));
 
         // Pack the two uint128 values into a single uint256
@@ -322,16 +358,45 @@ contract UniV3LobsterVault is LobsterVault {
             uint256 tokenId = positionManager.tokenOfOwnerByIndex(user, i);
 
             // Retrieve position details
-            (,, address token0, address token1, uint24 fee,,,,,,,) = positionManager.positions(tokenId);
+            (
+                ,
+                ,
+                address token0,
+                address token1,
+                uint24 fee,
+                int24 tickLower,
+                int24 tickUpper,
+                uint128 liquidity,
+                uint256 feeGrowthInside0LastX128,
+                uint256 feeGrowthInside1LastX128,
+                uint256 tokensOwed0,
+                uint256 tokensOwed1
+            ) = positionManager.positions(tokenId);
 
             // Only count positions in the relevant pool
+            // -> OTHER POSITIONS WILL BE IGNORED
             if (_isPositionInPool(token0, token1, fee)) {
                 // Get current price to value the position
-                (uint160 sqrtPriceX96,,,,,,) = pool.slot0();
+                // todo: can i manually compute the sqrtPrice and tickCurrent from positionManager.positions(tokenId) ??
+                (uint160 sqrtPriceX96, int24 tickCurrent,,,,,) = pool.slot0();
 
-                // Get total position value including fees
-                (uint256 amount0, uint256 fee0, uint256 amount1, uint256 fee1) =
-                    PositionValue.total(positionManager, tokenId, sqrtPriceX96);
+                // Get total position value and fees
+                (uint256 amount0, uint256 amount1) = _principalPosition(sqrtPriceX96, tickLower, tickUpper, liquidity);
+                (uint256 fee0, uint256 fee1) = _feePosition(
+                    FeeParams({
+                        token0: token0,
+                        token1: token1,
+                        fee: fee,
+                        tickLower: tickLower,
+                        tickUpper: tickUpper,
+                        liquidity: liquidity,
+                        positionFeeGrowthInside0LastX128: feeGrowthInside0LastX128,
+                        positionFeeGrowthInside1LastX128: feeGrowthInside1LastX128,
+                        tokensOwed0: tokensOwed0,
+                        tokensOwed1: tokensOwed1
+                    }),
+                    tickCurrent
+                );
 
                 // Add principal amounts directly
                 position0.value += amount0;
@@ -346,9 +411,72 @@ contract UniV3LobsterVault is LobsterVault {
         return (position0, position1);
     }
 
-    function call(BaseOp memory op) internal returns (bytes memory result) {
+    function call_(BaseOp memory op) internal returns (bytes memory result) {
         (bool success, bytes memory returnData) = op.target.call{value: op.value}(op.data);
         require(success, "UniV3LobsterVault: call failed");
         return returnData;
     }
+
+    function _principalPosition(
+        uint160 sqrtRatioX96,
+        int24 tickLower,
+        int24 tickUpper,
+        uint128 liquidity
+    )
+        internal
+        pure
+        returns (uint256 amount0, uint256 amount1)
+    {
+        return LiquidityAmounts.getAmountsForLiquidity(
+            sqrtRatioX96, TickMath.getSqrtRatioAtTick(tickLower), TickMath.getSqrtRatioAtTick(tickUpper), liquidity
+        );
+    }
+
+    function _feePosition(
+        FeeParams memory feeParams,
+        int24 tickCurrent
+    )
+        internal
+        view
+        returns (uint256 fee0, uint256 fee1)
+    {
+        (uint256 poolFeeGrowthInside0LastX128, uint256 poolFeeGrowthInside1LastX128) =
+            _getFeeGrowthInside(tickCurrent, feeParams.tickLower, feeParams.tickUpper);
+
+        fee0 = uint256(poolFeeGrowthInside0LastX128 - feeParams.positionFeeGrowthInside0LastX128).mulDiv(
+            feeParams.liquidity, Q128
+        ) + feeParams.tokensOwed0;
+
+        fee1 = (poolFeeGrowthInside1LastX128 - feeParams.positionFeeGrowthInside1LastX128).mulDiv(
+            feeParams.liquidity, Q128
+        ) + feeParams.tokensOwed1;
+    }
+
+    function _getFeeGrowthInside(
+        int24 tickCurrent,
+        int24 tickLower,
+        int24 tickUpper
+    )
+        private
+        view
+        returns (uint256 feeGrowthInside0X128, uint256 feeGrowthInside1X128)
+    {
+        (,, uint256 lowerFeeGrowthOutside0X128, uint256 lowerFeeGrowthOutside1X128,,,,) = pool.ticks(tickLower);
+        (,, uint256 upperFeeGrowthOutside0X128, uint256 upperFeeGrowthOutside1X128,,,,) = pool.ticks(tickUpper);
+
+        if (tickCurrent < tickLower) {
+            feeGrowthInside0X128 = lowerFeeGrowthOutside0X128 - upperFeeGrowthOutside0X128;
+            feeGrowthInside1X128 = lowerFeeGrowthOutside1X128 - upperFeeGrowthOutside1X128;
+        } else if (tickCurrent < tickUpper) {
+            uint256 feeGrowthGlobal0X128 = pool.feeGrowthGlobal0X128();
+            uint256 feeGrowthGlobal1X128 = pool.feeGrowthGlobal1X128();
+            feeGrowthInside0X128 = feeGrowthGlobal0X128 - lowerFeeGrowthOutside0X128 - upperFeeGrowthOutside0X128;
+            feeGrowthInside1X128 = feeGrowthGlobal1X128 - lowerFeeGrowthOutside1X128 - upperFeeGrowthOutside1X128;
+        } else {
+            feeGrowthInside0X128 = upperFeeGrowthOutside0X128 - lowerFeeGrowthOutside0X128;
+            feeGrowthInside1X128 = upperFeeGrowthOutside1X128 - lowerFeeGrowthOutside1X128;
+        }
+    }
+
+    // todo: add collect fee function
 }

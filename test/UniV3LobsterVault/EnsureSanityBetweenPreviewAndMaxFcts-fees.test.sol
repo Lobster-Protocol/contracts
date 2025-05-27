@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
-import {UniV3LobsterVaultNoFeesSetup} from "../Vault/VaultSetups/WithRealModules/UniswapV3VaultFlowNoFeesSetup.sol";
+import {UniV3LobsterVaultFeesSetup} from "../Vault/VaultSetups/WithRealModules/UniswapV3VaultFlowFeesSetup.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {MockERC20} from "../Mocks/MockERC20.sol";
 
-contract UniswapV3VaultFlowTest is UniV3LobsterVaultNoFeesSetup {
-    function testPreviewMaxWithdrawMatchesPreviewWithdrawNoPositionsNoFees() public {
+contract UniswapV3VaultFlowTest is UniV3LobsterVaultFeesSetup {
+    function testPreviewMaxWithdrawMatchesPreviewWithdrawNoPositionsFees() public {
         // Alice deposits
         uint256 depositedAmount0 = 1 ether;
         uint256 depositedAmount1 = 3 ether;
@@ -26,7 +26,7 @@ contract UniswapV3VaultFlowTest is UniV3LobsterVaultNoFeesSetup {
         vm.assertEq(previewMaxRedeemResultAssets, packUint128(uint128(depositedAmount0), uint128(depositedAmount1)));
     }
 
-    function testPreviewMaxWithdrawMatchesPreviewWithdrawPositionsNoFees() public {
+    function testPreviewMaxWithdrawMatchesPreviewWithdrawPositionsFees() public {
         uint256 amountA = 10_000 ether;
         uint256 amountB = 10_000 ether;
         // mint some tokens for the test
@@ -86,17 +86,17 @@ contract UniswapV3VaultFlowTest is UniV3LobsterVaultNoFeesSetup {
         // vm.assertEq(previewMaxWithdrawResultAssets, aliceDeposit); // todo: get expected token 0 and token 1 amounts (see alexis for)
     }
     //
-    // function testPreviewMintMatchesPreviewMintNoPositionsNoFees() public {} // todo
+    // function testPreviewMintMatchesPreviewMintNoPositionsFees() public {} // todo
 
-    // function testPreviewMintMatchesPreviewMintPositionsNoFees() public {} // todo
+    // function testPreviewMintMatchesPreviewMintPositionsFees() public {} // todo
 
-    // function testPreviewDepositMatchesPreviewDepositNoPositionsNoFees()
+    // function testPreviewDepositMatchesPreviewDepositNoPositionsFees()
     //     public
     // {} // todo
 
-    // function testPreviewDepositMatchesPreviewDepositPositionsNoFees() public {} // todo
+    // function testPreviewDepositMatchesPreviewDepositPositionsFees() public {} // todo
 
-    // function testPreviewRedeemMatchesPreviewRedeemNoPositionsNoFees() public {} // todo
+    // function testPreviewRedeemMatchesPreviewRedeemNoPositionsFees() public {} // todo
 
-    // function testPreviewRedeemMatchesPreviewRedeemPositionsNoFees() public {} // todo
+    // function testPreviewRedeemMatchesPreviewRedeemPositionsFees() public {} // todo
 }

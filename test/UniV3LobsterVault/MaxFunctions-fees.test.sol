@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
-import {UniV3LobsterVaultNoFeesSetup} from "../Vault/VaultSetups/WithRealModules/UniswapV3VaultFlowNoFeesSetup.sol";
+import {UniV3LobsterVaultFeesSetup} from "../Vault/VaultSetups/WithRealModules/UniswapV3VaultFlowFeesSetup.sol";
 import {MockERC20} from "../Mocks/MockERC20.sol";
 
-contract UniswapV3VaultFlowTest is UniV3LobsterVaultNoFeesSetup {
-    function testMaxWithdrawNoPositionsNoFees() public {
+contract UniswapV3VaultFlowTest is UniV3LobsterVaultFeesSetup {
+    function testMaxWithdrawNoPositionsFees() public {
         // Alice deposits
         uint256 depositedAmount0 = 1 ether;
         uint256 depositedAmount1 = 3 ether;
@@ -18,7 +18,7 @@ contract UniswapV3VaultFlowTest is UniV3LobsterVaultNoFeesSetup {
         vm.assertEq(maxWithdrawResult, packUint128(uint128(depositedAmount0), uint128(depositedAmount1)));
     }
 
-    function testMaxWithdrawWithPositionsNoFees() public {
+    function testMaxWithdrawWithPositionsFees() public {
         uint256 amountA = 10_000 ether;
         uint256 amountB = 10_000 ether;
         // mint some tokens for the test
@@ -59,7 +59,7 @@ contract UniswapV3VaultFlowTest is UniV3LobsterVaultNoFeesSetup {
         // vault.maxWithdraw result has been checked against the expected value in maxWithdraw()
     }
 
-    function testMaxRedeemNoPositionsNoFees() public {
+    function testMaxRedeemNoPositionsFees() public {
         // Alice deposits
         uint128 depositedAmount0 = 1 ether;
         uint128 depositedAmount1 = 3 ether;
@@ -72,7 +72,7 @@ contract UniswapV3VaultFlowTest is UniV3LobsterVaultNoFeesSetup {
         vm.assertEq(maxRedeemResult, mintedShares);
     }
 
-    function testRedeemWithPositionsNoFees() public {}
+    function testRedeemWithPositionsFees() public {}
 
     // todo:
     // function testMaxWithdrawNoPositionsWithFees() public {}

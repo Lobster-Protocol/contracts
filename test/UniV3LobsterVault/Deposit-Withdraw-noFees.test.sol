@@ -2,11 +2,11 @@
 pragma solidity ^0.8.28;
 
 import {UniV3LobsterVault} from "../../src/Vault/UniV3LobsterVault.sol";
-import {UniV3LobsterVaultTest} from "../Vault/VaultSetups/WithRealModules/UniswapV3VaultFlowSetup.sol";
+import {UniV3LobsterVaultNoFeesSetup} from "../Vault/VaultSetups/WithRealModules/UniswapV3VaultFlowNoFeesSetup.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {MockERC20} from "../Mocks/MockERC20.sol";
 
-contract UniV3LobsterVaultDepositMintWithdrawRedeemTest is UniV3LobsterVaultTest {
+contract UniV3LobsterVaultDepositMintWithdrawRedeemNoFeesTest is UniV3LobsterVaultNoFeesSetup {
     function testDepositNoFees() public {
         // alice deposit
         uint256 depositedAmount0 = 1 ether;

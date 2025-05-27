@@ -1,4 +1,4 @@
 
 
 
-// todo: test multiple fee collection at 1 time (to n-ensure they are all collected in the right order)
+> THE TESTS FOR UniV3LobsterVault WiTH FEES ARE USELESS SINCE THERE ARE NO SWAPS IN THE TESTS flow. We need to add some to generate fees.

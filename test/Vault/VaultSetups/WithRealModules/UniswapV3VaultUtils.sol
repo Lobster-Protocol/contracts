@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPLv3
-pragma solidity ^0.8.28;
+// SPDX-License-Identifier: GNUv3
+pragma solidity 0.8.28;
 
 import "forge-std/Test.sol";
 
@@ -29,71 +29,11 @@ struct UniswapV3Data {
     uint160 poolInitialSqrtPriceX96;
 }
 
-contract UniV3LobsterVaultTest is UniswapV3Infra {
+contract UniswapV3VaultUtils is UniswapV3Infra {
     using Math for uint256;
 
-    address public owner;
-    address public alice;
-    address public bob;
     UniV3LobsterVault public vault;
-
     UniswapV3Data public uniswapV3Data;
-
-    function setUp() public {
-        owner = makeAddr("owner");
-        alice = makeAddr("alice");
-        bob = makeAddr("bob");
-        address uniV3feeCutCollector = makeAddr("feeCollector");
-
-        (IUniswapV3FactoryMinimal factory,, INonFungiblePositionManager positionManager, IUniswapV3RouterMinimal router)
-        = deploy();
-
-        uniswapV3Data.poolFee = 3000; // 0.3%
-        uniswapV3Data.positionManager = positionManager;
-        uniswapV3Data.factory = factory;
-        uniswapV3Data.router = router;
-        uniswapV3Data.poolInitialSqrtPriceX96 = 2 ** 96; // = quote = 1:1 if both tokens have the same decimals value
-
-        // Deploy and initialize the pool weth/mocked token pool
-        IUniswapV3PoolMinimal pool = createPoolAndInitialize(
-            uniswapV3Data.factory,
-            address(new MockERC20()),
-            address(new MockERC20()),
-            uniswapV3Data.poolFee,
-            uniswapV3Data.poolInitialSqrtPriceX96
-        );
-
-        uniswapV3Data.tokenA = pool.token0();
-        uniswapV3Data.tokenB = pool.token1();
-
-        // mint some tokens for the alice and bob
-        MockERC20(uniswapV3Data.tokenA).mint(alice, 10000 ether); // 1000 tokens with 18 decimals
-        MockERC20(uniswapV3Data.tokenB).mint(alice, 10000 ether); // 1000 tokens with 18 decimals
-        MockERC20(uniswapV3Data.tokenA).mint(bob, 10000 ether); // 1000 tokens with 18 decimals
-        MockERC20(uniswapV3Data.tokenB).mint(bob, 10000 ether); // 1000 tokens with 18 decimals
-
-        // module instantiation
-        IOpValidatorModule opValidator = new DummyValidator();
-
-        vault = new UniV3LobsterVault(
-            opValidator,
-            pool,
-            positionManager,
-            uniV3feeCutCollector,
-            0 // 0% fee cut,
-        );
-        // Setup initial state
-        MockERC20(uniswapV3Data.tokenA).mint(alice, 10000 ether);
-        MockERC20(uniswapV3Data.tokenB).mint(bob, 10000 ether);
-
-        vm.startPrank(alice);
-        MockERC20(uniswapV3Data.tokenA).approve(address(vault), type(uint256).max);
-        vm.stopPrank();
-
-        vm.startPrank(bob);
-        MockERC20(uniswapV3Data.tokenB).approve(address(vault), type(uint256).max);
-        vm.stopPrank();
-    }
 
     /* ------------------------UTILS------------------------ */
     function packUint128(uint128 a, uint128 b) internal pure returns (uint256 packed) {
@@ -138,19 +78,19 @@ contract UniV3LobsterVaultTest is UniswapV3Infra {
         uint256 expectedMintedShares = vault.previewDeposit(packedAmounts);
 
         vm.expectEmit(true, true, true, true);
-        emit IERC4626.Deposit(alice, alice, packedAmounts, expectedMintedShares);
+        emit IERC4626.Deposit(depositor, depositor, packedAmounts, expectedMintedShares);
         mintedShares = vault.deposit(packedAmounts, depositor);
 
         // Ensure the expected shares were minted
         vm.assertEq(expectedMintedShares, mintedShares);
 
         // ensure the transfers happened
-        vm.assertEq(vault.asset0().balanceOf(alice), depositorInitialAsset0Balance - amount0);
-        vm.assertEq(vault.asset1().balanceOf(alice), depositorInitialAsset1Balance - amount1);
+        vm.assertEq(vault.asset0().balanceOf(depositor), depositorInitialAsset0Balance - amount0);
+        vm.assertEq(vault.asset1().balanceOf(depositor), depositorInitialAsset1Balance - amount1);
         vm.assertEq(vault.asset0().balanceOf(address(vault)), vaultInitialAsset0Balance + amount0);
         vm.assertEq(vault.asset1().balanceOf(address(vault)), vaultInitialAsset1Balance + amount1);
 
-        vm.assertEq(vault.balanceOf(alice), initialDepositorShares + mintedShares);
+        vm.assertEq(vault.balanceOf(depositor), initialDepositorShares + mintedShares);
 
         vm.assertEq(vault.totalSupply(), vaultTotalSupplyBeforeDeposit + mintedShares);
 
@@ -193,8 +133,8 @@ contract UniV3LobsterVaultTest is UniswapV3Infra {
     function redeemVaultShares(address user, uint256 sharesToRedeem) internal returns (uint256 assetsWithdrawn) {
         vm.startPrank(user);
 
-        uint256 aliceBalanceBeforeWithdraw0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
-        uint256 aliceBalanceBeforeWithdraw1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
+        uint256 userBalanceBeforeWithdraw0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
+        uint256 userBalanceBeforeWithdraw1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
 
         uint256 expectedWithdraw = vault.previewRedeem(sharesToRedeem);
 
@@ -205,12 +145,15 @@ contract UniV3LobsterVaultTest is UniswapV3Infra {
         assetsWithdrawn = vault.redeem(sharesToRedeem, user, user);
 
         // Verify asset balances
-        uint256 aliceBalanceAfterWithdraw0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
-        uint256 aliceBalanceAfterWithdraw1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
+        uint256 userBalanceAfterWithdraw0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
+        uint256 userBalanceAfterWithdraw1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
 
         (uint256 expectedWithdraw0, uint256 expectedWithdraw1) = decodePackedUint128(expectedWithdraw);
-        assertEq(aliceBalanceAfterWithdraw0, expectedWithdraw0 + aliceBalanceBeforeWithdraw0);
-        assertEq(aliceBalanceAfterWithdraw1, expectedWithdraw1 + aliceBalanceBeforeWithdraw1);
+        assertEq(userBalanceAfterWithdraw0, expectedWithdraw0 + userBalanceBeforeWithdraw0);
+        assertEq(userBalanceAfterWithdraw1, expectedWithdraw1 + userBalanceBeforeWithdraw1);
+
+        // Ensure the fee cut collector received the expected fees
+        // todo
 
         vm.stopPrank();
         return assetsWithdrawn;
@@ -264,6 +207,9 @@ contract UniV3LobsterVaultTest is UniswapV3Infra {
 
         // Ensure the expected shares were redeemed
         assertEq(expectedShares, sharesRedeemed);
+
+        // Ensure the fee cut collector received the expected fees
+        // todo
 
         vm.stopPrank();
         return sharesRedeemed;

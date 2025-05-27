@@ -12,6 +12,19 @@ import "./LiquidityAmounts.sol";
 import "./PoolAddress.sol";
 import "./PositionKey.sol";
 
+struct FeeParams {
+    address token0;
+    address token1;
+    uint24 fee;
+    int24 tickLower;
+    int24 tickUpper;
+    uint128 liquidity;
+    uint256 positionFeeGrowthInside0LastX128;
+    uint256 positionFeeGrowthInside1LastX128;
+    uint256 tokensOwed0;
+    uint256 tokensOwed1;
+}
+
 /// @title Returns information about the token value held in a Uniswap V3 NFT
 library PositionValue {
     using Math for uint256;
@@ -62,19 +75,6 @@ library PositionValue {
         return LiquidityAmounts.getAmountsForLiquidity(
             sqrtRatioX96, TickMath.getSqrtRatioAtTick(tickLower), TickMath.getSqrtRatioAtTick(tickUpper), liquidity
         );
-    }
-
-    struct FeeParams {
-        address token0;
-        address token1;
-        uint24 fee;
-        int24 tickLower;
-        int24 tickUpper;
-        uint128 liquidity;
-        uint256 positionFeeGrowthInside0LastX128;
-        uint256 positionFeeGrowthInside1LastX128;
-        uint256 tokensOwed0;
-        uint256 tokensOwed1;
     }
 
     /// @notice Calculates the total fees owed to the token owner
