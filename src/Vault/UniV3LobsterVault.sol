@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GNU AGPL v3.0
 pragma solidity ^0.8.28;
 
+import "forge-std/Test.sol";
+
 import {IUniswapV3PoolMinimal} from "../interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {LobsterVault} from "./LobsterVault.sol";
 import {Position} from "../libraries/uniswapV3/UniswapUtils.sol";
@@ -120,7 +122,7 @@ contract UniV3LobsterVault is LobsterVault {
         address caller,
         address receiver,
         address owner,
-        uint256, /* assets */
+        uint256 assets,
         uint256 shares
     )
         internal
@@ -143,19 +145,14 @@ contract UniV3LobsterVault is LobsterVault {
         _processPositions(shares, vars);
 
         // Calculate total withdrawal amounts
-        vars.valueToWithdraw0 = vars.totalWithdrawnFromPosition0
-            + vars.initialToken0Balance.mulDiv(shares, totalSupply())
-            + (vars.allCollectedFee0 - vars.feeCut0).mulDiv(shares, totalSupply());
-
-        vars.valueToWithdraw1 = vars.totalWithdrawnFromPosition1
-            + vars.initialToken1Balance.mulDiv(shares, totalSupply())
-            + (vars.allCollectedFee1 - vars.feeCut1).mulDiv(shares, totalSupply());
+        (vars.valueToWithdraw0, vars.valueToWithdraw1) = unpackUint128(assets);
 
         // Burn shares before transfers to avoid reentrancy
         _burn(owner, shares);
 
         // Calculate and distribute fees and withdrawals
         _transferWithdraws(receiver, vars);
+
         emit IERC4626.Withdraw(caller, receiver, owner, vars.withdrawnAssets, shares);
     }
 

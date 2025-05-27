@@ -207,7 +207,7 @@ contract UniV3LobsterVaultNoFeesSetup is UniswapV3Infra {
         uint256 expectedWithdraw = vault.previewRedeem(sharesToRedeem);
 
         // ensure the withdraw event is emitted
-        // vm.expectEmit(true, true, true, true);
+        vm.expectEmit(true, true, true, true);
         emit IERC4626.Withdraw(user, user, user, expectedWithdraw, sharesToRedeem);
 
         assetsWithdrawn = vault.redeem(sharesToRedeem, user, user);
@@ -247,7 +247,7 @@ contract UniV3LobsterVaultNoFeesSetup is UniswapV3Infra {
         uint256 expectedShares = vault.previewWithdraw(packedAssetsToWithdraw);
 
         // ensure the withdraw event is emitted
-        // vm.expectEmit(true, true, true, true);
+        vm.expectEmit(true, true, true, true);
         emit IERC4626.Withdraw(user, user, user, packedAssetsToWithdraw, expectedShares);
 
         sharesRedeemed = vault.withdraw(packedAssetsToWithdraw, user, user);
@@ -296,7 +296,7 @@ contract UniV3LobsterVaultNoFeesSetup is UniswapV3Infra {
         uint256 actualMaxWithdrawResult = vault.maxWithdraw(user);
 
         // Compute the expected and returned asset values
-        vm.assertEq(packedExpectedAssets, actualMaxWithdrawResult);
+        vm.assertApproxEqAbs(packedExpectedAssets, actualMaxWithdrawResult, 2); // accept error of 2 wei because of rounding
 
         vm.stopPrank();
         return actualMaxWithdrawResult;

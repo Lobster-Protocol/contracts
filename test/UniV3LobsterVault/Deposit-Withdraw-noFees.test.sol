@@ -24,7 +24,7 @@ contract UniV3LobsterVaultDepositMintWithdrawRedeemNoFeesTest is UniV3LobsterVau
         uint256 mintedShares = depositToVault(alice, aliceDeposit0, aliceDeposit1);
 
         // Alice withdraws all her shares
-        uint256 expectedAssets = packUint128(uint128(aliceDeposit0), uint128(aliceDeposit1));
+        uint256 expectedAssets = vault.previewRedeem(mintedShares);
 
         uint256 redeemedShares = withdrawFromVault(alice, expectedAssets);
 
@@ -63,7 +63,7 @@ contract UniV3LobsterVaultDepositMintWithdrawRedeemNoFeesTest is UniV3LobsterVau
         uint256 burntShares = withdrawFromVault(alice, expectedAssets);
 
         // Ensure all the assets have been withdrawn
-        vm.assertEq(vault.totalAssets(), 0);
+        vm.assertApproxEqAbs(vault.totalAssets(), 0, 2); // error de to rounding
         vm.assertEq(mintedShares, burntShares);
         vm.assertEq(vault.balanceOf(alice), mintedShares - burntShares);
     }

@@ -185,8 +185,7 @@ contract LobsterVault is Modular {
      * @dev Internal conversion function (from assets to shares) with support for rounding direction.
      * returns the amount of shares using the limiting token
      */
-    function _convertToShares(uint256 assets, Math.Rounding rounding) internal view override returns (uint256) {
-        // Todo: fix this fcking fct
+    function _convertToShares(uint256 assets, Math.Rounding rounding) internal view override returns (uint256 shares) {
         (uint256 totalAssets0, uint256 totalAssets1) = unpackUint128(totalAssets());
 
         (uint256 assets0, uint256 assets1) = unpackUint128(assets);
@@ -195,7 +194,7 @@ contract LobsterVault is Modular {
         uint256 shares1 = assets1.mulDiv(totalSupply() + 10 ** _decimalsOffset(), totalAssets1 + 1, rounding);
 
         // return the minimal value
-        return shares0 > shares1 ? shares0 : shares1;
+        return shares0 < shares1 ? shares0 : shares1;
     }
 
     /**

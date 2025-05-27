@@ -208,6 +208,7 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
         uint256 expectedShares = vault.previewWithdraw(packedAssetsToWithdraw);
 
         // Emit withdraw event
+        vm.expectEmit(true, true, true, true);
         emit IERC4626.Withdraw(user, user, user, packedAssetsToWithdraw, expectedShares);
 
         sharesRedeemed = vault.withdraw(packedAssetsToWithdraw, user, user);
@@ -247,8 +248,17 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
         view
     {
         // Verify user token balances increased correctly
-        assertEq(IERC20(uniswapV3Data.tokenA).balanceOf(user) - state.userBalance0Before, state.token0ToWithdraw);
-        assertEq(IERC20(uniswapV3Data.tokenB).balanceOf(user) - state.userBalance1Before, state.token1ToWithdraw);
+        assertApproxEqAbs(
+            IERC20(uniswapV3Data.tokenA).balanceOf(user) - state.userBalance0Before,
+            state.token0ToWithdraw,
+            2 // 2 wei tolerance because of rounding
+        );
+
+        assertApproxEqAbs(
+            IERC20(uniswapV3Data.tokenB).balanceOf(user) - state.userBalance1Before,
+            state.token1ToWithdraw,
+            2 // 2 wei tolerance because of rounding
+        );
 
         // Verify vault total assets decreased correctly
         (uint256 total0Before, uint256 total1Before) = decodePackedUint128(state.vaultTotalAssetsBefore);
@@ -341,10 +351,16 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
         (state.totalAssets0, state.totalAssets1,,) = getVaultTVL(vault);
 
         // Calculate the expected total assets to withdraw
-        state.expectedTotalAssetsToWithdraw0 =
-            state.userShares.mulDiv(state.totalAssets0, state.totalSharesSupply, Math.Rounding.Floor);
-        state.expectedTotalAssetsToWithdraw1 =
-            state.userShares.mulDiv(state.totalAssets1, state.totalSharesSupply, Math.Rounding.Floor);
+        state.expectedTotalAssetsToWithdraw0 = state.userShares.mulDiv(
+            state.totalAssets0 + 1,
+            state.totalSharesSupply + 1, // 10**decimalOffset = 1
+            Math.Rounding.Floor
+        );
+        state.expectedTotalAssetsToWithdraw1 = state.userShares.mulDiv(
+            state.totalAssets1 + 1,
+            state.totalSharesSupply + 1, // 10**decimalOffset = 1
+            Math.Rounding.Floor
+        );
     }
 
     function maxRedeem(address user) public view returns (uint256) {

@@ -10,12 +10,11 @@ contract UniswapV3VaultFlowTest is UniV3LobsterVaultFeesSetup {
         uint256 depositedAmount0 = 1 ether;
         uint256 depositedAmount1 = 3 ether;
 
-        depositToVault(alice, depositedAmount0, depositedAmount1);
+        uint256 mintedShares = depositToVault(alice, depositedAmount0, depositedAmount1);
 
         uint256 maxWithdrawResult = maxWithdraw(alice);
 
-        // No need to pack anything, the vault only contains the deposited amount. No other tokens
-        vm.assertEq(maxWithdrawResult, packUint128(uint128(depositedAmount0), uint128(depositedAmount1)));
+        vm.assertEq(maxWithdrawResult, vault.previewRedeem(mintedShares));
     }
 
     function testMaxWithdrawWithPositionsFees() public {

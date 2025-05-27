@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
+import "forge-std/Test.sol";
+
 import {UniV3LobsterVault} from "../../src/Vault/UniV3LobsterVault.sol";
 import {UniV3LobsterVaultFeesSetup} from "../Vault/VaultSetups/WithRealModules/UniswapV3VaultFlowFeesSetup.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
@@ -24,7 +26,7 @@ contract UniV3LobsterVaultDepositMintWithdrawRedeemFeesTest is UniV3LobsterVault
         uint256 mintedShares = depositToVault(alice, aliceDeposit0, aliceDeposit1);
 
         // Alice withdraws all her shares
-        uint256 expectedAssets = packUint128(uint128(aliceDeposit0), uint128(aliceDeposit1));
+        uint256 expectedAssets = maxWithdraw(alice);
 
         uint256 redeemedShares = withdrawFromVault(alice, expectedAssets);
 
@@ -63,7 +65,7 @@ contract UniV3LobsterVaultDepositMintWithdrawRedeemFeesTest is UniV3LobsterVault
         uint256 burntShares = withdrawFromVault(alice, expectedAssets);
 
         // Ensure all the assets have been withdrawn
-        vm.assertEq(vault.totalAssets(), 0);
+        vm.assertApproxEqAbs(vault.totalAssets(), 0, 2); // error de to rounding
         vm.assertEq(mintedShares, burntShares);
         vm.assertEq(vault.balanceOf(alice), mintedShares - burntShares);
     }

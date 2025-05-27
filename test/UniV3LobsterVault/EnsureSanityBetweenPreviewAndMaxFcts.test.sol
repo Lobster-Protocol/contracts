@@ -23,7 +23,7 @@ contract UniswapV3VaultFlowTest is UniV3LobsterVaultNoFeesSetup {
         vm.assertEq(maxRedeemResult, mintedShares);
 
         // Ensure the max withdrawable asset amount is the same as the deposit (since the vault does not have the second token)
-        vm.assertEq(previewMaxRedeemResultAssets, packUint128(uint128(depositedAmount0), uint128(depositedAmount1)));
+        vm.assertEq(previewMaxRedeemResultAssets, vault.maxWithdraw(alice));
     }
 
     function testPreviewMaxWithdrawMatchesPreviewWithdrawPositionsNoFees() public {
@@ -48,7 +48,7 @@ contract UniswapV3VaultFlowTest is UniV3LobsterVaultNoFeesSetup {
         // Alice deposits 1 ether into the vault
         uint256 aliceDeposit0 = 1 ether;
         uint256 aliceDeposit1 = 1 ether; // First depositor can deposit the ratio they want
-        uint256 mintedShares = depositToVault(alice, aliceDeposit0, aliceDeposit1);
+        depositToVault(alice, aliceDeposit0, aliceDeposit1);
 
         // get both token amounts
         uint256 tokenAInVaultAfterSwap = IERC20(uniswapV3Data.tokenA).balanceOf(address(vault));
@@ -67,25 +67,25 @@ contract UniswapV3VaultFlowTest is UniV3LobsterVaultNoFeesSetup {
             100
         );
 
-        uint256 maxWithdrawResult = maxWithdraw(alice);
-        (uint256 maxWithdrawable0, uint256 maxWithdrawable1) = decodePackedUint128(maxWithdrawResult);
+        uint256 value = 12345689;
+        // keep the 1:1 ratio
+        uint256 packedValue = packUint128(uint128(value), uint128(value));
 
-        bool isVaultAssetToken0 = vault.asset() == uniswapV3Data.tokenA;
+        uint256 previewDeposit = vault.previewDeposit(packedValue);
+        uint256 previewRedeem = vault.previewRedeem(previewDeposit);
 
-        // Convert the max withdrawable amount to shares
-        uint256 previewMaxWithdrawResult =
-            vault.previewWithdraw(isVaultAssetToken0 ? maxWithdrawable0 : maxWithdrawable1);
+        (uint256 previewRedeem0, uint256 previewRedeem1) = decodePackedUint128(previewRedeem);
 
-        // Convert the shares to assets
-        vault.convertToAssets(previewMaxWithdrawResult);
+        // accept 1 wei of error because of rounding
+        vm.assertApproxEqAbs(previewRedeem0, value, 1);
+        vm.assertApproxEqAbs(previewRedeem1, value, 1);
 
-        // Ensure minted shares are the max we could withdraw (after the conversions)
-        vm.assertEq(previewMaxWithdrawResult, mintedShares);
+        uint256 previewMint = vault.previewMint(value); // assets
+        uint256 previewWithdraw = vault.previewWithdraw(previewMint); // shares
 
-        // Ensure the max withdrawable asset amount is the same as the deposit
-        // vm.assertEq(previewMaxWithdrawResultAssets, aliceDeposit); // todo: get expected token 0 and token 1 amounts (see alexis for)
+        vm.assertApproxEqAbs(value, previewWithdraw, 1);
     }
-    //
+
     // function testPreviewMintMatchesPreviewMintNoPositionsNoFees() public {} // todo
 
     // function testPreviewMintMatchesPreviewMintPositionsNoFees() public {} // todo
