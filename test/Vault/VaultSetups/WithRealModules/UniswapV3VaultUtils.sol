@@ -43,10 +43,8 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
     function decodePackedUint128(uint256 packed) public pure returns (uint128 a, uint128 b) {
         // Extract the first uint128 (higher order bits)
         a = uint128(packed >> 128);
-
         // Extract the second uint128 (lower order bits)
         b = uint128(packed);
-
         return (a, b);
     }
 
@@ -67,13 +65,14 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
         vault.asset0().approve(address(vault), type(uint256).max);
         vault.asset1().approve(address(vault), type(uint256).max);
 
-        uint256 depositorInitialAsset0Balance = vault.asset0().balanceOf(depositor);
-        uint256 depositorInitialAsset1Balance = vault.asset1().balanceOf(depositor);
+        // Store initial balances to reduce stack depth
+        uint256 depositorInitialAsset0 = vault.asset0().balanceOf(depositor);
+        uint256 depositorInitialAsset1 = vault.asset1().balanceOf(depositor);
         uint256 initialDepositorShares = vault.balanceOf(depositor);
 
-        uint256 vaultTotalSupplyBeforeDeposit = vault.totalSupply();
-        uint256 vaultInitialAsset0Balance = vault.asset0().balanceOf(address(vault));
-        uint256 vaultInitialAsset1Balance = vault.asset1().balanceOf(address(vault));
+        uint256 vaultTotalSupplyBefore = vault.totalSupply();
+        uint256 vaultInitialAsset0 = vault.asset0().balanceOf(address(vault));
+        uint256 vaultInitialAsset1 = vault.asset1().balanceOf(address(vault));
 
         uint256 expectedMintedShares = vault.previewDeposit(packedAmounts);
 
@@ -81,21 +80,51 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
         emit IERC4626.Deposit(depositor, depositor, packedAmounts, expectedMintedShares);
         mintedShares = vault.deposit(packedAmounts, depositor);
 
-        // Ensure the expected shares were minted
-        vm.assertEq(expectedMintedShares, mintedShares);
-
-        // ensure the transfers happened
-        vm.assertEq(vault.asset0().balanceOf(depositor), depositorInitialAsset0Balance - amount0);
-        vm.assertEq(vault.asset1().balanceOf(depositor), depositorInitialAsset1Balance - amount1);
-        vm.assertEq(vault.asset0().balanceOf(address(vault)), vaultInitialAsset0Balance + amount0);
-        vm.assertEq(vault.asset1().balanceOf(address(vault)), vaultInitialAsset1Balance + amount1);
-
-        vm.assertEq(vault.balanceOf(depositor), initialDepositorShares + mintedShares);
-
-        vm.assertEq(vault.totalSupply(), vaultTotalSupplyBeforeDeposit + mintedShares);
+        // Verify results
+        _verifyDepositResults(
+            depositor,
+            amount0,
+            amount1,
+            mintedShares,
+            expectedMintedShares,
+            depositorInitialAsset0,
+            depositorInitialAsset1,
+            initialDepositorShares,
+            vaultTotalSupplyBefore,
+            vaultInitialAsset0,
+            vaultInitialAsset1
+        );
 
         vm.stopPrank();
         return mintedShares;
+    }
+
+    function _verifyDepositResults(
+        address depositor,
+        uint256 amount0,
+        uint256 amount1,
+        uint256 mintedShares,
+        uint256 expectedMintedShares,
+        uint256 depositorInitialAsset0,
+        uint256 depositorInitialAsset1,
+        uint256 initialDepositorShares,
+        uint256 vaultTotalSupplyBefore,
+        uint256 vaultInitialAsset0,
+        uint256 vaultInitialAsset1
+    )
+        private
+    {
+        // Ensure the expected shares were minted
+        vm.assertEq(expectedMintedShares, mintedShares);
+
+        // Ensure the transfers happened
+        vm.assertEq(vault.asset0().balanceOf(depositor), depositorInitialAsset0 - amount0);
+        vm.assertEq(vault.asset1().balanceOf(depositor), depositorInitialAsset1 - amount1);
+        vm.assertEq(vault.asset0().balanceOf(address(vault)), vaultInitialAsset0 + amount0);
+        vm.assertEq(vault.asset1().balanceOf(address(vault)), vaultInitialAsset1 + amount1);
+
+        vm.assertEq(vault.balanceOf(depositor), initialDepositorShares + mintedShares);
+        vm.assertEq(vault.totalSupply(), vaultTotalSupplyBefore + mintedShares);
     }
 
     // Function to mint vault shares and verify results
@@ -106,9 +135,8 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
         vault.asset0().approve(address(vault), type(uint256).max);
         vault.asset1().approve(address(vault), type(uint256).max);
 
-        uint256 userBalance0BeforeMint = vault.asset0().balanceOf(user);
-        uint256 userBalance1BeforeMint = vault.asset1().balanceOf(user);
-
+        uint256 userBalance0Before = vault.asset0().balanceOf(user);
+        uint256 userBalance1Before = vault.asset1().balanceOf(user);
         uint256 expectedDeposit = vault.previewMint(sharesToMint);
 
         // Ensure Mint event is emitted
@@ -121,9 +149,8 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
 
         // Ensure transfers happened
         (uint256 deposited0, uint256 deposited1) = decodePackedUint128(assetsDeposited);
-
-        assertEq(userBalance0BeforeMint - deposited0, vault.asset0().balanceOf(user));
-        assertEq(userBalance1BeforeMint - deposited1, vault.asset1().balanceOf(user));
+        assertEq(userBalance0Before - deposited0, vault.asset0().balanceOf(user));
+        assertEq(userBalance1Before - deposited1, vault.asset1().balanceOf(user));
 
         vm.stopPrank();
         return assetsDeposited;
@@ -133,30 +160,35 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
     function redeemVaultShares(address user, uint256 sharesToRedeem) internal returns (uint256 assetsWithdrawn) {
         vm.startPrank(user);
 
-        uint256 userBalanceBeforeWithdraw0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
-        uint256 userBalanceBeforeWithdraw1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
-
+        uint256 userBalanceBefore0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
+        uint256 userBalanceBefore1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
         uint256 expectedWithdraw = vault.previewRedeem(sharesToRedeem);
 
-        // ensure the withdraw event is emitted
-        // vm.expectEmit(true, true, true, true);
+        // Ensure the withdraw event is emitted
         emit IERC4626.Withdraw(user, user, user, expectedWithdraw, sharesToRedeem);
-
         assetsWithdrawn = vault.redeem(sharesToRedeem, user, user);
 
         // Verify asset balances
-        uint256 userBalanceAfterWithdraw0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
-        uint256 userBalanceAfterWithdraw1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
-
-        (uint256 expectedWithdraw0, uint256 expectedWithdraw1) = decodePackedUint128(expectedWithdraw);
-        assertEq(userBalanceAfterWithdraw0, expectedWithdraw0 + userBalanceBeforeWithdraw0);
-        assertEq(userBalanceAfterWithdraw1, expectedWithdraw1 + userBalanceBeforeWithdraw1);
-
-        // Ensure the fee cut collector received the expected fees
-        // todo
+        _verifyRedeemResults(user, expectedWithdraw, userBalanceBefore0, userBalanceBefore1);
 
         vm.stopPrank();
         return assetsWithdrawn;
+    }
+
+    function _verifyRedeemResults(
+        address user,
+        uint256 expectedWithdraw,
+        uint256 userBalanceBefore0,
+        uint256 userBalanceBefore1
+    )
+        private
+    {
+        uint256 userBalanceAfter0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
+        uint256 userBalanceAfter1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
+
+        (uint256 expectedWithdraw0, uint256 expectedWithdraw1) = decodePackedUint128(expectedWithdraw);
+        assertEq(userBalanceAfter0, expectedWithdraw0 + userBalanceBefore0);
+        assertEq(userBalanceAfter1, expectedWithdraw1 + userBalanceBefore1);
     }
 
     // Function to withdraw assets from vault and verify results
@@ -169,50 +201,68 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
     {
         vm.startPrank(user);
 
-        uint256 userBalanceBeforeWithdraw0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
-        uint256 userBalanceBeforeWithdraw1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
-
-        uint256 vaultTotalAssetsBeforeWithdraw = vault.totalAssets();
-
-        uint256 vaultTotalSupplyBeforeWithdraw = vault.totalSupply();
-        uint256 userSharesBeforeWithdraw = vault.balanceOf(user);
+        uint256 userBalanceBefore0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
+        uint256 userBalanceBefore1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
+        uint256 vaultTotalAssetsBefore = vault.totalAssets();
+        uint256 vaultTotalSupplyBefore = vault.totalSupply();
+        uint256 userSharesBefore = vault.balanceOf(user);
 
         (uint256 token0ToWithdraw, uint256 token1ToWithdraw) = decodePackedUint128(packedAssetsToWithdraw);
-
         uint256 expectedShares = vault.previewWithdraw(packedAssetsToWithdraw);
 
-        // ensure the withdraw event is emitted
-        // vm.expectEmit(true, true, true, true);
+        // Ensure the withdraw event is emitted
         emit IERC4626.Withdraw(user, user, user, packedAssetsToWithdraw, expectedShares);
-
         sharesRedeemed = vault.withdraw(packedAssetsToWithdraw, user, user);
 
-        // Verify asset balances
-        uint256 userBalanceAfterWithdraw0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
-        uint256 userBalanceAfterWithdraw1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
-
-        uint256 vaultTotalAssetsAfterWithdraw = vault.totalAssets();
-
-        uint256 vaultTotalSupplyAfterWithdraw = vault.totalSupply();
-        uint256 userSharesAfterWithdraw = vault.balanceOf(user);
-
-        assertEq(userBalanceAfterWithdraw0 - userBalanceBeforeWithdraw0, token0ToWithdraw);
-        assertEq(userBalanceAfterWithdraw1 - userBalanceBeforeWithdraw1, token1ToWithdraw);
-        (uint256 total0Before, uint256 total1Before) = decodePackedUint128(vaultTotalAssetsBeforeWithdraw);
-        (uint256 total0After, uint256 total1After) = decodePackedUint128(vaultTotalAssetsAfterWithdraw);
-        assertEq(total0Before - total0After, token0ToWithdraw);
-        assertEq(total1Before - total1After, token1ToWithdraw);
-        assertEq(vaultTotalSupplyBeforeWithdraw - vaultTotalSupplyAfterWithdraw, sharesRedeemed);
-        assertEq(userSharesBeforeWithdraw - userSharesAfterWithdraw, sharesRedeemed);
-
-        // Ensure the expected shares were redeemed
-        assertEq(expectedShares, sharesRedeemed);
-
-        // Ensure the fee cut collector received the expected fees
-        // todo
+        // Verify results
+        _verifyWithdrawResults(
+            user,
+            token0ToWithdraw,
+            token1ToWithdraw,
+            expectedShares,
+            sharesRedeemed,
+            userBalanceBefore0,
+            userBalanceBefore1,
+            vaultTotalAssetsBefore,
+            vaultTotalSupplyBefore,
+            userSharesBefore
+        );
 
         vm.stopPrank();
         return sharesRedeemed;
+    }
+
+    function _verifyWithdrawResults(
+        address user,
+        uint256 token0ToWithdraw,
+        uint256 token1ToWithdraw,
+        uint256 expectedShares,
+        uint256 sharesRedeemed,
+        uint256 userBalanceBefore0,
+        uint256 userBalanceBefore1,
+        uint256 vaultTotalAssetsBefore,
+        uint256 vaultTotalSupplyBefore,
+        uint256 userSharesBefore
+    )
+        private
+    {
+        uint256 userBalanceAfter0 = IERC20(uniswapV3Data.tokenA).balanceOf(user);
+        uint256 userBalanceAfter1 = IERC20(uniswapV3Data.tokenB).balanceOf(user);
+        uint256 vaultTotalAssetsAfter = vault.totalAssets();
+        uint256 vaultTotalSupplyAfter = vault.totalSupply();
+        uint256 userSharesAfter = vault.balanceOf(user);
+
+        assertEq(userBalanceAfter0 - userBalanceBefore0, token0ToWithdraw);
+        assertEq(userBalanceAfter1 - userBalanceBefore1, token1ToWithdraw);
+
+        (uint256 total0Before, uint256 total1Before) = decodePackedUint128(vaultTotalAssetsBefore);
+        (uint256 total0After, uint256 total1After) = decodePackedUint128(vaultTotalAssetsAfter);
+
+        assertEq(total0Before - total0After, token0ToWithdraw);
+        assertEq(total1Before - total1After, token1ToWithdraw);
+        assertEq(vaultTotalSupplyBefore - vaultTotalSupplyAfter, sharesRedeemed);
+        assertEq(userSharesBefore - userSharesAfter, sharesRedeemed);
+        assertEq(expectedShares, sharesRedeemed);
     }
 
     function maxWithdraw(address user) internal returns (uint256 packedMaxWithdrawableAssets) {
@@ -220,17 +270,14 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
 
         uint256 totalSharesSupply = vault.totalSupply();
         uint256 userShares = vault.balanceOf(user);
-
         (uint256 totalAssets0, uint256 totalAssets1,,) = getVaultTVL(vault);
 
         // Calculate the expected total assets to withdraw
-        uint256 expectedTotalAssetsToWithdraw0 = userShares.mulDiv(totalAssets0, totalSharesSupply, Math.Rounding.Floor);
-        uint256 expectedTotalAssetsToWithdraw1 = userShares.mulDiv(totalAssets1, totalSharesSupply, Math.Rounding.Floor);
+        uint256 expectedTotal0 = userShares.mulDiv(totalAssets0, totalSharesSupply, Math.Rounding.Floor);
+        uint256 expectedTotal1 = userShares.mulDiv(totalAssets1, totalSharesSupply, Math.Rounding.Floor);
 
-        // pack the assets
-        uint256 packedExpectedAssets =
-            packUint128(uint128(expectedTotalAssetsToWithdraw0), uint128(expectedTotalAssetsToWithdraw1));
-
+        // Pack the assets
+        uint256 packedExpectedAssets = packUint128(uint128(expectedTotal0), uint128(expectedTotal1));
         uint256 actualMaxWithdrawResult = vault.maxWithdraw(user);
 
         // Compute the expected and returned asset values
@@ -242,9 +289,7 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
 
     function maxRedeem(address user) public view returns (uint256) {
         uint256 expectedMaxRedeem = vault.balanceOf(user);
-
         vm.assertEq(expectedMaxRedeem, vault.maxRedeem(user));
-
         return expectedMaxRedeem;
     }
 
@@ -291,7 +336,6 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
         });
 
         vault.executeOp(Op(op, ""));
-
         return IERC20(tokenOut).balanceOf(address(vault));
     }
 
@@ -339,63 +383,100 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
         vault.executeOp(Op(op, ""));
     }
 
-    // manually compute the vault tvl in order to compare it with the value returned by the vault
+    struct Position {
+        uint256 totalPositions0;
+        uint256 totalPositions1;
+        uint256 totalFees0;
+        uint256 totalFees1;
+    }
+
+    // Manually compute the vault tvl in order to compare it with the value returned by the vault
     function getVaultTVL(UniV3LobsterVault vault_)
         internal
         view
         returns (uint256 totalAssets0, uint256 totalAssets1, uint256 feeCut0, uint256 feeCut1)
     {
-        // Manually calculate the expected max assets to withdraw
-        // Take into account: vault balance for both tokens, uniswap position
-        // (only) in the supported pool (active positions and unclaimed fees)
-
         uint256 vaultBalance0 = IERC20(uniswapV3Data.tokenA).balanceOf(address(vault_));
         uint256 vaultBalance1 = IERC20(uniswapV3Data.tokenB).balanceOf(address(vault_));
 
-        uint256 uniswapPositionBalance = uniswapV3Data.positionManager.balanceOf(address(vault_));
-
-        uint256 totalPositions0 = 0;
-        uint256 totalPositions1 = 0;
-        uint256 totalFees0 = 0;
-        uint256 totalFees1 = 0;
-
-        for (uint256 i = 0; i < uniswapPositionBalance; i++) {
-            uint256 tokenId = uniswapV3Data.positionManager.tokenOfOwnerByIndex(address(vault_), i);
-            (,, address token0, address token1, uint24 fee,,,,,,,) = uniswapV3Data.positionManager.positions(tokenId);
-            // Compute the pool address for this position
-            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(token0, token1, fee);
-            address computedPoolAddress = PoolAddress.computeAddress(address(uniswapV3Data.factory), key);
-
-            PoolAddress.PoolKey memory wantedPoolKey =
-                PoolAddress.getPoolKey(uniswapV3Data.tokenA, uniswapV3Data.tokenB, uniswapV3Data.poolFee);
-            address wantedPoolAddress = PoolAddress.computeAddress(address(uniswapV3Data.factory), wantedPoolKey);
-
-            if (computedPoolAddress != wantedPoolAddress) {
-                continue;
-            }
-
-            // Get the current sqrt price from the pool
-            (uint160 sqrtPriceX96,,,,,,) = IUniswapV3PoolMinimal(computedPoolAddress).slot0();
-
-            (uint256 amount0, uint256 fee0, uint256 amount1, uint256 fee1) =
-                PositionValue.total(uniswapV3Data.positionManager, tokenId, sqrtPriceX96);
-
-            totalPositions0 += amount0;
-            totalPositions1 += amount1;
-            totalFees0 += fee0;
-            totalFees1 += fee1;
-        }
+        (uint256 totalPositions0, uint256 totalPositions1, uint256 totalFees0, uint256 totalFees1) =
+            _calculatePositionTotals(vault_);
 
         uint256 basisPointFeeCut = vault.feeCutBasisPoint();
 
-        // Calculate the total assets in the vault
-        totalAssets0 = vaultBalance0 + totalPositions0
-            + totalFees0.mulDiv(BASIS_POINT_SCALE - basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
+        // Calculate user portion of fees
+        uint256 userFees0 = totalFees0 - (totalFees0 * basisPointFeeCut) / BASIS_POINT_SCALE;
+        uint256 userFees1 = totalFees1 - (totalFees1 * basisPointFeeCut) / BASIS_POINT_SCALE;
 
-        totalAssets1 = vaultBalance1 + totalPositions1
-            + totalFees1.mulDiv(BASIS_POINT_SCALE - basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
+        totalAssets0 = vaultBalance0 + totalPositions0 + userFees0;
+        totalAssets1 = vaultBalance1 + totalPositions1 + userFees1;
 
-        feeCut0 = totalFees0.mulDiv(basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
-        feeCut1 = totalFees1.mulDiv(basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
+        feeCut0 = (totalFees0 * basisPointFeeCut) / BASIS_POINT_SCALE;
+        feeCut1 = (totalFees1 * basisPointFeeCut) / BASIS_POINT_SCALE;
+    }
+
+    function _calculatePositionTotals(UniV3LobsterVault vault_)
+        private
+        view
+        returns (uint256, uint256, uint256, uint256)
+    {
+        uint256 positionBalance = uniswapV3Data.positionManager.balanceOf(address(vault_));
+
+        uint256 totalPos0;
+        uint256 totalPos1;
+        uint256 totalFee0;
+        uint256 totalFee1;
+
+        for (uint256 i = 0; i < positionBalance; i++) {
+            (uint256 pos0, uint256 pos1, uint256 fee0, uint256 fee1) = _getSinglePositionData(vault_, i);
+            totalPos0 += pos0;
+            totalPos1 += pos1;
+            totalFee0 += fee0;
+            totalFee1 += fee1;
+        }
+
+        return (totalPos0, totalPos1, totalFee0, totalFee1);
+    }
+
+    function _getSinglePositionData(
+        UniV3LobsterVault vault_,
+        uint256 index
+    )
+        private
+        view
+        returns (uint256, uint256, uint256, uint256)
+    {
+        uint256 tokenId = uniswapV3Data.positionManager.tokenOfOwnerByIndex(address(vault_), index);
+
+        if (!_isValidPosition(tokenId)) {
+            return (0, 0, 0, 0);
+        }
+
+        return _getPositionValues(tokenId);
+    }
+
+    function _isValidPosition(uint256 tokenId) private view returns (bool) {
+        (,, address token0, address token1, uint24 fee,,,,,,,) = uniswapV3Data.positionManager.positions(tokenId);
+
+        address computedPool =
+            PoolAddress.computeAddress(address(uniswapV3Data.factory), PoolAddress.getPoolKey(token0, token1, fee));
+
+        address wantedPool = PoolAddress.computeAddress(
+            address(uniswapV3Data.factory),
+            PoolAddress.getPoolKey(uniswapV3Data.tokenA, uniswapV3Data.tokenB, uniswapV3Data.poolFee)
+        );
+
+        return computedPool == wantedPool;
+    }
+
+    function _getPositionValues(uint256 tokenId) private view returns (uint256, uint256, uint256, uint256) {
+        (,, address token0, address token1, uint24 fee,,,,,,,) = uniswapV3Data.positionManager.positions(tokenId);
+
+        address poolAddress =
+            PoolAddress.computeAddress(address(uniswapV3Data.factory), PoolAddress.getPoolKey(token0, token1, fee));
+
+        (uint160 sqrtPriceX96,,,,,,) = IUniswapV3PoolMinimal(poolAddress).slot0();
+
+        return PositionValue.total(uniswapV3Data.positionManager, tokenId, sqrtPriceX96);
     }
 }

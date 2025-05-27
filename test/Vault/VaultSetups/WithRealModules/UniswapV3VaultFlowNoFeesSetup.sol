@@ -29,6 +29,14 @@ struct UniswapV3Data {
     uint160 poolInitialSqrtPriceX96;
 }
 
+// Struct to hold position totals to avoid stack too deep error
+struct PositionTotals {
+    uint256 totalPositions0;
+    uint256 totalPositions1;
+    uint256 totalFees0;
+    uint256 totalFees1;
+}
+
 contract UniV3LobsterVaultNoFeesSetup is UniswapV3Infra {
     using Math for uint256;
 
@@ -393,6 +401,33 @@ contract UniV3LobsterVaultNoFeesSetup is UniswapV3Infra {
         vault.executeOp(Op(op, ""));
     }
 
+    // Helper function to calculate position values and avoid stack too deep
+    function _calculatePositionValues(
+        uint256 tokenId,
+        address wantedPoolAddress
+    )
+        private
+        view
+        returns (uint256 amount0, uint256 fee0, uint256 amount1, uint256 fee1, bool isValidPool)
+    {
+        (,, address token0, address token1, uint24 fee,,,,,,,) = uniswapV3Data.positionManager.positions(tokenId);
+
+        // Compute the pool address for this position
+        PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(token0, token1, fee);
+        address computedPoolAddress = PoolAddress.computeAddress(address(uniswapV3Data.factory), key);
+
+        if (computedPoolAddress != wantedPoolAddress) {
+            return (0, 0, 0, 0, false);
+        }
+
+        // Get the current sqrt price from the pool
+        (uint160 sqrtPriceX96,,,,,,) = IUniswapV3PoolMinimal(computedPoolAddress).slot0();
+
+        (amount0, fee0, amount1, fee1) = PositionValue.total(uniswapV3Data.positionManager, tokenId, sqrtPriceX96);
+
+        return (amount0, fee0, amount1, fee1, true);
+    }
+
     // manually compute the vault tvl in order to compare it with the value returned by the vault
     function getVaultTVL(UniV3LobsterVault vault_)
         internal
@@ -408,48 +443,39 @@ contract UniV3LobsterVaultNoFeesSetup is UniswapV3Infra {
 
         uint256 uniswapPositionBalance = uniswapV3Data.positionManager.balanceOf(address(vault_));
 
-        uint256 totalPositions0 = 0;
-        uint256 totalPositions1 = 0;
-        uint256 totalFees0 = 0;
-        uint256 totalFees1 = 0;
+        // Use struct to avoid stack too deep
+        PositionTotals memory totals =
+            PositionTotals({totalPositions0: 0, totalPositions1: 0, totalFees0: 0, totalFees1: 0});
+
+        // Pre-compute the wanted pool address once
+        PoolAddress.PoolKey memory wantedPoolKey =
+            PoolAddress.getPoolKey(uniswapV3Data.tokenA, uniswapV3Data.tokenB, uniswapV3Data.poolFee);
+        address wantedPoolAddress = PoolAddress.computeAddress(address(uniswapV3Data.factory), wantedPoolKey);
 
         for (uint256 i = 0; i < uniswapPositionBalance; i++) {
             uint256 tokenId = uniswapV3Data.positionManager.tokenOfOwnerByIndex(address(vault_), i);
-            (,, address token0, address token1, uint24 fee,,,,,,,) = uniswapV3Data.positionManager.positions(tokenId);
-            // Compute the pool address for this position
-            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(token0, token1, fee);
-            address computedPoolAddress = PoolAddress.computeAddress(address(uniswapV3Data.factory), key);
 
-            PoolAddress.PoolKey memory wantedPoolKey =
-                PoolAddress.getPoolKey(uniswapV3Data.tokenA, uniswapV3Data.tokenB, uniswapV3Data.poolFee);
-            address wantedPoolAddress = PoolAddress.computeAddress(address(uniswapV3Data.factory), wantedPoolKey);
+            (uint256 amount0, uint256 fee0, uint256 amount1, uint256 fee1, bool isValid) =
+                _calculatePositionValues(tokenId, wantedPoolAddress);
 
-            if (computedPoolAddress != wantedPoolAddress) {
-                continue;
+            if (isValid) {
+                totals.totalPositions0 += amount0;
+                totals.totalPositions1 += amount1;
+                totals.totalFees0 += fee0;
+                totals.totalFees1 += fee1;
             }
-
-            // Get the current sqrt price from the pool
-            (uint160 sqrtPriceX96,,,,,,) = IUniswapV3PoolMinimal(computedPoolAddress).slot0();
-
-            (uint256 amount0, uint256 fee0, uint256 amount1, uint256 fee1) =
-                PositionValue.total(uniswapV3Data.positionManager, tokenId, sqrtPriceX96);
-
-            totalPositions0 += amount0;
-            totalPositions1 += amount1;
-            totalFees0 += fee0;
-            totalFees1 += fee1;
         }
 
         uint256 basisPointFeeCut = vault.feeCutBasisPoint();
 
         // Calculate the total assets in the vault
-        totalAssets0 = vaultBalance0 + totalPositions0
-            + totalFees0.mulDiv(BASIS_POINT_SCALE - basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
+        totalAssets0 = vaultBalance0 + totals.totalPositions0
+            + totals.totalFees0.mulDiv(BASIS_POINT_SCALE - basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
 
-        totalAssets1 = vaultBalance1 + totalPositions1
-            + totalFees1.mulDiv(BASIS_POINT_SCALE - basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
+        totalAssets1 = vaultBalance1 + totals.totalPositions1
+            + totals.totalFees1.mulDiv(BASIS_POINT_SCALE - basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
 
-        feeCut0 = totalFees0.mulDiv(basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
-        feeCut1 = totalFees1.mulDiv(basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
+        feeCut0 = totals.totalFees0.mulDiv(basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
+        feeCut1 = totals.totalFees1.mulDiv(basisPointFeeCut, BASIS_POINT_SCALE, Math.Rounding.Floor);
     }
 }
