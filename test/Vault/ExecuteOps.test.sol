@@ -8,7 +8,6 @@ import {Modular} from "../../src/Modules/Modular.sol";
 import {AUTHORIZED, UNAUTHORIZED} from "../Mocks/modules/DummyValidator.sol";
 
 contract ExecuteOpsTest is VaultWithOperationModuleTestSetup {
-
     /* --------------------SINGLE OP--------------------*/
     function testApprovedOp() public {
         uint256 initial_value = counter.value();

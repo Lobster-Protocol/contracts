@@ -27,12 +27,7 @@ contract VaultWithOperationModuleTestSetup is Test {
         asset = new MockERC20();
         counter = new Counter();
 
-        vault = new ERC4626WithOpValidator(
-            "receiptTokenName",
-            "receiptTokenSymbol",
-            asset,
-            opValidator
-        );
+        vault = new ERC4626WithOpValidator("receiptTokenName", "receiptTokenSymbol", asset, opValidator);
 
         // Setup initial state
         asset.mint(alice, 10000 ether);

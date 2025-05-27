@@ -396,7 +396,6 @@
 //     // todo: allow users to acceptNoRebase
 // }
 
-
 // // pragma solidity ^0.8.28;
 
 // // import {VaultWithNavWithRebaseSetup} from "../../Vault/VaultSetups/WithRealModules/VaultWithNavWithRebaseSetup.sol";

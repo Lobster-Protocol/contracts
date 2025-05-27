@@ -80,8 +80,7 @@ abstract contract Modular is ERC4626 {
 
         // Process all operations in batch
         uint256 length = batch.ops.length;
-        for (uint256 i = 0; i < length; ) {
-
+        for (uint256 i = 0; i < length;) {
             _call(batch.ops[i]);
 
             unchecked {
@@ -98,14 +97,10 @@ abstract contract Modular is ERC4626 {
      * @dev Reverts with the error message if the call fails
      */
     function _call(BaseOp calldata op) private returns (bytes memory result) {
-        (bool success, bytes memory returnData) = op.target.call{
-            value: op.value
-        }(op.data);
+        (bool success, bytes memory returnData) = op.target.call{value: op.value}(op.data);
 
         assembly {
-            if iszero(success) {
-                revert(add(returnData, 32), mload(returnData))
-            }
+            if iszero(success) { revert(add(returnData, 32), mload(returnData)) }
         }
 
         bytes4 selector = bytes4(0);
