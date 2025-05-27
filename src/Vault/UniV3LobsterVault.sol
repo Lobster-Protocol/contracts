@@ -6,7 +6,6 @@ import {console} from "forge-std/console.sol";
 import {IUniswapV3PoolMinimal} from "../interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {LobsterVault} from "./LobsterVault.sol";
 import {Position} from "../libraries/uniswapV3/UniswapUtils.sol";
-import {PoolAddress} from "../libraries/uniswapV3/PoolAddress.sol";
 import {PositionValue} from "../libraries/uniswapV3/PositionValue.sol";
 import {INonFungiblePositionManager} from "../interfaces/uniswapV3/INonFungiblePositionManager.sol";
 import {IOpValidatorModule, BaseOp, Op, BatchOp} from "../interfaces/modules/IOpValidatorModule.sol";
@@ -29,6 +28,8 @@ contract UniV3LobsterVault is LobsterVault {
     IUniswapV3PoolMinimal public immutable pool;
     uint256 public immutable feeCutBasisPoint;
     address public immutable feeCollector;
+
+    uint24 private immutable poolFee;
 
     // Struct to avoid stack too deep errors in _withdraw
     struct WithdrawVars {
@@ -96,6 +97,8 @@ contract UniV3LobsterVault is LobsterVault {
         feeCutBasisPoint = feeCutBasisPoint_;
         feeCollector = feeCollector_;
         emit FeeSet(feeCollector_, feeCutBasisPoint_);
+
+        poolFee = pool_.fee();
     }
 
     /**
@@ -189,10 +192,8 @@ contract UniV3LobsterVault is LobsterVault {
     /**
      * @dev Check if position belongs to our pool
      */
-    function _isPositionInPool(address token0, address token1, uint24 fee) internal view returns (bool) {
-        PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(token0, token1, fee);
-        address computedPoolAddress = PoolAddress.computeAddress(pool.factory(), key);
-        return computedPoolAddress == address(pool);
+    function _isPositionInPool(address token0, address token1, uint24 fee) internal view returns (bool result) {
+        return token0 == address(asset0) && token1 == address(asset1) && fee == poolFee;
     }
 
     /**
@@ -323,12 +324,8 @@ contract UniV3LobsterVault is LobsterVault {
             // Retrieve position details
             (,, address token0, address token1, uint24 fee,,,,,,,) = positionManager.positions(tokenId);
 
-            // Compute the pool address for this position
-            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(token0, token1, fee);
-            address computedPoolAddress = PoolAddress.computeAddress(pool.factory(), key);
-
             // Only count positions in the relevant pool
-            if (computedPoolAddress == address(pool)) {
+            if (_isPositionInPool(token0, token1, fee)) {
                 // Get current price to value the position
                 (uint160 sqrtPriceX96,,,,,,) = pool.slot0();
 
