@@ -10,7 +10,7 @@ pragma solidity ^0.8.28;
 /// @notice Base operation data shared across all operation types
 struct BaseOp {
     address target; // Target contract to call
-    uint256 value; // ETH value to send
+    uint256 value; // Native tokens to send
     bytes data; // Calldata for the operation
 }
 

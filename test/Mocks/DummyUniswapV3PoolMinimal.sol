@@ -13,8 +13,46 @@ contract DummyUniswapV3PoolMinimal is IUniswapV3PoolMinimal {
         token1_ = new MockERC20();
     }
 
+    function fee() external pure returns (uint24) {
+        revert("fee: Not implemented");
+    }
+
+    function initialize(uint160) external pure {
+        revert("initialize: Not implemented");
+    }
+
     function factory() external pure returns (address) {
         revert("factory: Not implemented");
+    }
+
+    function feeGrowthGlobal0X128() external pure returns (uint256) {
+        revert("feeGrowthGlobal0X128: Not implemented");
+    }
+
+    function feeGrowthGlobal1X128() external pure returns (uint256) {
+        revert("feeGrowthGlobal1X128: Not implemented");
+    }
+
+    function ticks(int24) external pure returns (uint128, int128, uint256, uint256, int56, uint160, uint32, bool) {
+        revert("ticks: Not implemented");
+    }
+
+    function swap(address, bool, int256, uint160, bytes calldata) external pure returns (int256, int256) {
+        revert("swap: Not implemented");
+    }
+
+    function positions(bytes32)
+        external
+        pure
+        returns (
+            uint128, /* liquidity */
+            uint256, /* feeGrowthInside0LastX128 */
+            uint256, /* feeGrowthInside1LastX128 */
+            uint128, /* tokensOwed0 */
+            uint128 /* tokensOwed1 */
+        )
+    {
+        revert("positions: Not implemented");
     }
 
     function slot0()

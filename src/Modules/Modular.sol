@@ -2,9 +2,10 @@
 pragma solidity ^0.8.28;
 
 import {IOpValidatorModule} from "../interfaces/modules/IOpValidatorModule.sol";
-import {IVaultFlowModule} from "../interfaces/modules/IVaultFlowModule.sol";
-import {IHook} from "../interfaces/modules/IHook.sol";
-import {INav} from "../interfaces/modules/INav.sol";
+import {BaseOp, Op, BatchOp} from "../interfaces/modules/IOpValidatorModule.sol";
+import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
+import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title Modular Base Contract
@@ -13,57 +14,12 @@ import {INav} from "../interfaces/modules/INav.sol";
  * @dev This contract provides the foundation for modular functionality in the vault system
  *      by defining core modules, error conditions, and events
  */
-contract Modular {
+abstract contract Modular is ERC4626 {
     /**
      * @notice Module responsible for validating vault operations
      * @dev If not set, the vault cannot execute any operations
      */
     IOpValidatorModule public immutable opValidator;
-
-    /**
-     * @notice Module responsible for custom deposit and withdrawal logic
-     * @dev Replaces the default _deposit and _withdraw functions
-     */
-    IVaultFlowModule public immutable vaultFlow;
-
-    /**
-     * @notice Hook for executing code before and after vault operations
-     * @dev Allows for additional validation, state modification, or other actions
-     * @dev todo: 1 hook for all calls or 1 hook per call?
-     */
-    // todo: 1 hook for all calls or 1 hook per call?
-    IHook public immutable hook;
-
-    /**
-     * @notice Module responsible for computing the totalAssets for the vault
-     * @dev Replaces the default totalAssets function if set
-     */
-    INav public immutable navModule;
-
-    /**
-     * @notice Thrown when the pre-operation hook check fails
-     */
-    error PreHookFailed();
-
-    /**
-     * @notice Thrown when the post-operation hook check fails
-     */
-    error PostHookFailed();
-
-    /**
-     * @notice Thrown when an operation is not approved by the opValidator
-     */
-    error OpNotApproved();
-
-    /**
-     * @notice Thrown when the deposit module fails to process a deposit
-     */
-    error DepositModuleFailed();
-
-    /**
-     * @notice Thrown when the withdraw module fails to process a withdrawal
-     */
-    error WithdrawModuleFailed();
 
     /**
      * @notice Emitted when a vault operation is executed
@@ -80,20 +36,80 @@ contract Modular {
     event OpValidatorSet(IOpValidatorModule opValidator);
 
     /**
-     * @notice Emitted when a hook module is set
-     * @param hook The address of the new hook module
+     * @notice Thrown when an operation is not approved by the opValidator
      */
-    event HookSet(IHook hook);
+    error OpNotApproved();
+
+    /* ------------------FUNCTIONS FOR CUSTOM CALLS------------------ */
 
     /**
-     * @notice Emitted when a NAV module is set
-     * @param navModule The address of the new NAV module
+     * @notice Executes a single operation after validation
+     * @param op The operation to execute
+     * @dev Requires an operation validator to be set
      */
-    event NavModuleSet(INav navModule);
+    function executeOp(Op calldata op) external {
+        // Always revert if validator is not set
+        address validator = address(opValidator);
+        if (validator == address(0)) {
+            revert OpNotApproved();
+        }
+
+        if (!opValidator.validateOp(op)) {
+            revert OpNotApproved();
+        }
+
+        _call(op.base);
+    }
 
     /**
-     * @notice Emitted when a vault operations module is set
-     * @param vaultFlow The address of the new vault flow module
+     * @notice Executes a batch of operations after validation
+     * @param batch The batch operation containing multiple operations
+     * @dev Requires an operation validator to be set
      */
-    event vaultFlowSet(IVaultFlowModule vaultFlow);
+    function executeOpBatch(BatchOp calldata batch) external {
+        // Always revert if validator is not set
+        address validator = address(opValidator);
+        if (validator == address(0)) {
+            revert OpNotApproved();
+        }
+
+        // Validate batch operation
+        if (!opValidator.validateBatchedOp(batch)) {
+            revert OpNotApproved();
+        }
+
+        // Process all operations in batch
+        uint256 length = batch.ops.length;
+        for (uint256 i = 0; i < length;) {
+            _call(batch.ops[i]);
+
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    /**
+     * @notice Internal function to perform the actual call in an operation
+     * @param op The base operation containing target, value, and data
+     * @return result The raw bytes data returned from the call
+     * @dev Emits an Executed event after successful execution
+     * @dev Reverts with the error message if the call fails
+     */
+    function _call(BaseOp calldata op) private returns (bytes memory result) {
+        (bool success, bytes memory returnData) = op.target.call{value: op.value}(op.data);
+
+        assembly {
+            if iszero(success) { revert(add(returnData, 32), mload(returnData)) }
+        }
+
+        bytes4 selector = bytes4(0);
+        if (op.data.length > 4) {
+            selector = bytes4(op.data[:4]);
+        }
+
+        emit Executed(op.target, op.value, selector);
+
+        return returnData;
+    }
 }

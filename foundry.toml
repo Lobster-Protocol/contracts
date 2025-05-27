@@ -10,6 +10,7 @@ via_ir = true
 optimizer = true
 
 [rpc_endpoints]
+sepolia = "${SEPOLIA_RPC_URL}"
 arb1 = "${ARBITRUM_RPC_URL}"
 
 # FOUNDRY_PROFILE=prod forge build
