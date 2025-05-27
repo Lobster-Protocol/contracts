@@ -39,7 +39,6 @@ contract LobsterVault is Modular {
      * @notice Constructs a new LobsterVault
      */
     constructor(
-        address initialOwner,
         IOpValidatorModule opValidator_,
         IERC20 asset0_,
         IERC20 asset1_
@@ -47,7 +46,7 @@ contract LobsterVault is Modular {
         ERC20("", "")
         ERC4626(IERC20(address(0)))
     {
-        if (initialOwner == address(0) || address(asset0_) == address(0) || address(asset1_) == address(0)) {
+        if ( address(asset0_) == address(0) || address(asset1_) == address(0)) {
             revert ZeroAddress();
         }
 

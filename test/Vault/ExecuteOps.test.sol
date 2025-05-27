@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import {VaultWithOperationModuleTestSetup} from "./VaultSetups/WithDummyModules/VaultWithOperationModuleTestSetup.sol";
-// import {SimpleVaultTestSetup} from "./VaultSetups/SimpleVaultTestSetup.sol";
 import {BaseOp, Op, BatchOp} from "../../src/interfaces/modules/IOpValidatorModule.sol";
 import {Modular} from "../../src/Modules/Modular.sol";
 import {AUTHORIZED, UNAUTHORIZED} from "../Mocks/modules/DummyValidator.sol";

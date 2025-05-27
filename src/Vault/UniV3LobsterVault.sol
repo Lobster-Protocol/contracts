@@ -64,27 +64,38 @@ contract UniV3LobsterVault is LobsterVault {
         uint128 total1;
     }
 
-    event FeeSet(address indexed feeCollector_, uint256 indexed feeCutBasisPoint_);
+    event FeeSet(
+        address indexed feeCollector_,
+        uint256 indexed feeCutBasisPoint_
+    );
 
     constructor(
-        address initialOwner,
         IOpValidatorModule opValidator_,
-        IUniswapV3PoolMinimal _pool,
+        IUniswapV3PoolMinimal pool_,
         INonFungiblePositionManager positionManager_,
         address feeCollector_,
         uint256 feeCutBasisPoint_
     )
-        LobsterVault(initialOwner, opValidator_, IERC20(_pool.token0()), IERC20(_pool.token1()))
+        LobsterVault(
+            opValidator_,
+            IERC20(pool_.token0()),
+            IERC20(pool_.token1())
+        )
     {
-        require(feeCutBasisPoint_ <= BASIS_POINT_SCALE, "UniV3LobsterVault: fee cut too high");
         require(
-            address(opValidator_) != address(0) && address(_pool) != address(0)
-                && address(positionManager_) != address(0) && address(feeCollector_) != address(0),
+            feeCutBasisPoint_ <= BASIS_POINT_SCALE,
+            "UniV3LobsterVault: fee cut too high"
+        );
+        require(
+            address(opValidator_) != address(0) &&
+                address(pool_) != address(0) &&
+                address(positionManager_) != address(0) &&
+                address(feeCollector_) != address(0),
             "UniV3LobsterVault: zero address"
         );
 
         opValidator = opValidator_;
-        pool = _pool;
+        pool = pool_;
         positionManager = positionManager_;
 
         feeCutBasisPoint = feeCutBasisPoint_;
@@ -104,12 +115,9 @@ contract UniV3LobsterVault is LobsterVault {
         address caller,
         address receiver,
         address owner,
-        uint256, /* assets */
+        uint256 /* assets */,
         uint256 shares
-    )
-        internal
-        override
-    {
+    ) internal override {
         if (caller != owner) {
             _spendAllowance(owner, caller, shares);
         }
@@ -121,53 +129,101 @@ contract UniV3LobsterVault is LobsterVault {
         vars.initialToken0Balance = asset0.balanceOf(address(this));
         vars.initialToken1Balance = asset1.balanceOf(address(this));
 
-        (vars.sqrtPriceX96,,,,,,) = pool.slot0();
+        (vars.sqrtPriceX96, , , , , , ) = pool.slot0();
 
         // Process all positions
         _processPositions(shares, vars);
 
         // Calculate total withdrawal amounts
-        vars.valueToWithdraw0 = vars.totalWithdrawnFromPosition0
-            + vars.initialToken0Balance.mulDiv(shares, totalSupply())
-            + (vars.allCollectedFee0 - vars.feeCut0).mulDiv(shares, totalSupply());
+        vars.valueToWithdraw0 =
+            vars.totalWithdrawnFromPosition0 +
+            vars.initialToken0Balance.mulDiv(shares, totalSupply()) +
+            (vars.allCollectedFee0 - vars.feeCut0).mulDiv(
+                shares,
+                totalSupply()
+            );
 
-        vars.valueToWithdraw1 = vars.totalWithdrawnFromPosition1
-            + vars.initialToken1Balance.mulDiv(shares, totalSupply())
-            + (vars.allCollectedFee1 - vars.feeCut1).mulDiv(shares, totalSupply());
+        vars.valueToWithdraw1 =
+            vars.totalWithdrawnFromPosition1 +
+            vars.initialToken1Balance.mulDiv(shares, totalSupply()) +
+            (vars.allCollectedFee1 - vars.feeCut1).mulDiv(
+                shares,
+                totalSupply()
+            );
 
         // Burn shares before transfers to avoid reentrancy
         _burn(owner, shares);
 
         // Calculate and distribute fees and withdrawals
         _transferWithdraws(receiver, vars);
-        emit IERC4626.Withdraw(caller, receiver, owner, vars.withdrawnAssets, shares);
+        emit IERC4626.Withdraw(
+            caller,
+            receiver,
+            owner,
+            vars.withdrawnAssets,
+            shares
+        );
     }
 
     /**
      * @dev Process all Uniswap V3 positions for withdrawal
      */
-    function _processPositions(uint256 shares, WithdrawVars memory vars) internal {
+    function _processPositions(
+        uint256 shares,
+        WithdrawVars memory vars
+    ) internal {
         for (uint256 i = 0; i < vars.tokensCount; ++i) {
             PositionVars memory posVars;
 
-            posVars.tokenId = positionManager.tokenOfOwnerByIndex(address(this), i);
+            posVars.tokenId = positionManager.tokenOfOwnerByIndex(
+                address(this),
+                i
+            );
 
             // Get position details
-            (,, posVars.token0, posVars.token1, posVars.fee,,, posVars.liquidity,,,,) =
-                positionManager.positions(posVars.tokenId);
+            (
+                ,
+                ,
+                posVars.token0,
+                posVars.token1,
+                posVars.fee,
+                ,
+                ,
+                posVars.liquidity,
+                ,
+                ,
+                ,
+
+            ) = positionManager.positions(posVars.tokenId);
 
             // Verify position is in our pool
-            if (!_isPositionInPool(posVars.token0, posVars.token1, posVars.fee)) {
+            if (
+                !_isPositionInPool(posVars.token0, posVars.token1, posVars.fee)
+            ) {
                 continue;
             }
 
             // Get position value and fees
-            (posVars.position0, posVars.fee0, posVars.position1, posVars.fee1) =
-                PositionValue.total(positionManager, posVars.tokenId, vars.sqrtPriceX96);
+            (
+                posVars.position0,
+                posVars.fee0,
+                posVars.position1,
+                posVars.fee1
+            ) = PositionValue.total(
+                positionManager,
+                posVars.tokenId,
+                vars.sqrtPriceX96
+            );
 
             // Calculate withdrawal amounts
-            posVars.toWithdraw0 = posVars.position0.mulDiv(shares, totalSupply());
-            posVars.toWithdraw1 = posVars.position1.mulDiv(shares, totalSupply());
+            posVars.toWithdraw0 = posVars.position0.mulDiv(
+                shares,
+                totalSupply()
+            );
+            posVars.toWithdraw1 = posVars.position1.mulDiv(
+                shares,
+                totalSupply()
+            );
 
             // Accumulate totals
             vars.allCollectedFee0 += posVars.fee0;
@@ -183,9 +239,20 @@ contract UniV3LobsterVault is LobsterVault {
     /**
      * @dev Check if position belongs to our pool
      */
-    function _isPositionInPool(address token0, address token1, uint24 fee) internal view returns (bool) {
-        PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(token0, token1, fee);
-        address computedPoolAddress = PoolAddress.computeAddress(pool.factory(), key);
+    function _isPositionInPool(
+        address token0,
+        address token1,
+        uint24 fee
+    ) internal view returns (bool) {
+        PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(
+            token0,
+            token1,
+            fee
+        );
+        address computedPoolAddress = PoolAddress.computeAddress(
+            pool.factory(),
+            key
+        );
         return computedPoolAddress == address(pool);
     }
 
@@ -195,19 +262,23 @@ contract UniV3LobsterVault is LobsterVault {
     function _executePositionWithdrawal(PositionVars memory posVars) internal {
         // Decrease liquidity if needed
         if (posVars.toWithdraw0 > 0 || posVars.toWithdraw1 > 0) {
-            INonFungiblePositionManager.DecreaseLiquidityParams memory params = INonFungiblePositionManager
-                .DecreaseLiquidityParams({
-                tokenId: posVars.tokenId,
-                liquidity: posVars.liquidity,
-                amount0Min: posVars.toWithdraw0,
-                amount1Min: posVars.toWithdraw1,
-                deadline: block.timestamp
-            });
+            INonFungiblePositionManager.DecreaseLiquidityParams
+                memory params = INonFungiblePositionManager
+                    .DecreaseLiquidityParams({
+                        tokenId: posVars.tokenId,
+                        liquidity: posVars.liquidity,
+                        amount0Min: posVars.toWithdraw0,
+                        amount1Min: posVars.toWithdraw1,
+                        deadline: block.timestamp
+                    });
 
             BaseOp memory decreaseLiquidity = BaseOp({
                 target: address(positionManager),
                 value: 0,
-                data: abi.encodeCall(positionManager.decreaseLiquidity, (params))
+                data: abi.encodeCall(
+                    positionManager.decreaseLiquidity,
+                    (params)
+                )
             });
 
             call(decreaseLiquidity);
@@ -240,10 +311,19 @@ contract UniV3LobsterVault is LobsterVault {
     /**
      * @dev Calculate fee cuts and transfer assets to receiver
      */
-    function _transferWithdraws(address receiver, WithdrawVars memory vars) internal {
+    function _transferWithdraws(
+        address receiver,
+        WithdrawVars memory vars
+    ) internal {
         // Calculate fee cuts
-        vars.feeCut0 = vars.allCollectedFee0.mulDiv(feeCutBasisPoint, BASIS_POINT_SCALE);
-        vars.feeCut1 = vars.allCollectedFee1.mulDiv(feeCutBasisPoint, BASIS_POINT_SCALE);
+        vars.feeCut0 = vars.allCollectedFee0.mulDiv(
+            feeCutBasisPoint,
+            BASIS_POINT_SCALE
+        );
+        vars.feeCut1 = vars.allCollectedFee1.mulDiv(
+            feeCutBasisPoint,
+            BASIS_POINT_SCALE
+        );
 
         // Transfer fee cuts to collector
         if (vars.feeCut0 > 0) {
@@ -261,7 +341,10 @@ contract UniV3LobsterVault is LobsterVault {
             SafeERC20.safeTransfer(asset1, receiver, vars.valueToWithdraw1);
         }
 
-        vars.withdrawnAssets = packUint128(uint128(vars.valueToWithdraw0), uint128(vars.valueToWithdraw1));
+        vars.withdrawnAssets = packUint128(
+            uint128(vars.valueToWithdraw0),
+            uint128(vars.valueToWithdraw1)
+        );
     }
 
     /**
@@ -286,7 +369,10 @@ contract UniV3LobsterVault is LobsterVault {
         ) = getAllUniswapV3Positions(address(this));
 
         // Pack the two uint128 values into a single uint256
-        totalValue = packUint128(uint128(amount0 + position0.value), uint128(amount1 + position1.value));
+        totalValue = packUint128(
+            uint128(amount0 + position0.value),
+            uint128(amount1 + position1.value)
+        );
     }
 
     /**
@@ -297,7 +383,9 @@ contract UniV3LobsterVault is LobsterVault {
      * @return position0 The total value in token0 with fee adjustments
      * @return position1 The total value in token1 with fee adjustments
      */
-    function getAllUniswapV3Positions(address user)
+    function getAllUniswapV3Positions(
+        address user
+    )
         public
         view
         returns (Position memory position0, Position memory position1)
@@ -315,28 +403,58 @@ contract UniV3LobsterVault is LobsterVault {
             uint256 tokenId = positionManager.tokenOfOwnerByIndex(user, i);
 
             // Retrieve position details
-            (,, address token0, address token1, uint24 fee,,,,,,,) = positionManager.positions(tokenId);
+            (
+                ,
+                ,
+                address token0,
+                address token1,
+                uint24 fee,
+                ,
+                ,
+                ,
+                ,
+                ,
+                ,
+
+            ) = positionManager.positions(tokenId);
 
             // Compute the pool address for this position
-            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(token0, token1, fee);
-            address computedPoolAddress = PoolAddress.computeAddress(pool.factory(), key);
+            PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(
+                token0,
+                token1,
+                fee
+            );
+            address computedPoolAddress = PoolAddress.computeAddress(
+                pool.factory(),
+                key
+            );
 
             // Only count positions in the relevant pool
             if (computedPoolAddress == address(pool)) {
                 // Get current price to value the position
-                (uint160 sqrtPriceX96,,,,,,) = pool.slot0();
+                (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
 
                 // Get total position value including fees
-                (uint256 amount0, uint256 fee0, uint256 amount1, uint256 fee1) =
-                    PositionValue.total(positionManager, tokenId, sqrtPriceX96);
+                (
+                    uint256 amount0,
+                    uint256 fee0,
+                    uint256 amount1,
+                    uint256 fee1
+                ) = PositionValue.total(positionManager, tokenId, sqrtPriceX96);
 
                 // Add principal amounts directly
                 position0.value += amount0;
                 position1.value += amount1;
 
                 // For fees, apply the fee cut before adding
-                position0.value += fee0.mulDiv(BASIS_POINT_SCALE - feeCutBasisPoint, BASIS_POINT_SCALE);
-                position1.value += fee1.mulDiv(BASIS_POINT_SCALE - feeCutBasisPoint, BASIS_POINT_SCALE);
+                position0.value += fee0.mulDiv(
+                    BASIS_POINT_SCALE - feeCutBasisPoint,
+                    BASIS_POINT_SCALE
+                );
+                position1.value += fee1.mulDiv(
+                    BASIS_POINT_SCALE - feeCutBasisPoint,
+                    BASIS_POINT_SCALE
+                );
             }
         }
 
@@ -344,7 +462,9 @@ contract UniV3LobsterVault is LobsterVault {
     }
 
     function call(BaseOp memory op) internal returns (bytes memory result) {
-        (bool success, bytes memory returnData) = op.target.call{value: op.value}(op.data);
+        (bool success, bytes memory returnData) = op.target.call{
+            value: op.value
+        }(op.data);
         require(success, "UniV3LobsterVault: call failed");
         return returnData;
     }

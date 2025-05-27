@@ -76,7 +76,6 @@ contract UniV3LobsterVaultTest is UniswapV3Infra {
         IOpValidatorModule opValidator = new DummyValidator();
 
         vault = new UniV3LobsterVault(
-            owner,
             opValidator,
             pool,
             positionManager,
