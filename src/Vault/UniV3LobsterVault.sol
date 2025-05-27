@@ -84,7 +84,7 @@ contract UniV3LobsterVault is LobsterVault {
         require(
             address(opValidator_) != address(0) && address(pool_) != address(0)
                 && address(positionManager_) != address(0) && address(feeCollector_) != address(0),
-            "UniV3LobsterVault: zero address"
+            ZeroAddress()
         );
 
         opValidator = opValidator_;
