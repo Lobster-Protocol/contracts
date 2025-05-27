@@ -46,7 +46,7 @@ contract LobsterVault is Modular {
         ERC20("", "")
         ERC4626(IERC20(address(0)))
     {
-        if ( address(asset0_) == address(0) || address(asset1_) == address(0)) {
+        if (address(asset0_) == address(0) || address(asset1_) == address(0)) {
             revert ZeroAddress();
         }
 
