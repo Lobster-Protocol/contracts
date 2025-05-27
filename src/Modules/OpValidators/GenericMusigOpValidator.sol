@@ -17,14 +17,14 @@ import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/Messa
 uint256 constant NONCE_OFFSET = 32;
 
 /**
- * @title GenericMusigOpValidator
+ * @title GenericMuSigOpValidator
  * @author Lobster
  * @notice An operation validator module that uses multi-signature (musig) validation with quorum-based approval
  * @dev This validator implements whitelist-based operation validation with parameter verification
  *      and multi-signature authorization with customizable signer weights and quorum requirements
  * @dev Once deployed, it is no longer possible to update the call whitelist but you can still update the signers.
  */
-contract GenericMusigOpValidator is IOpValidatorModule {
+contract GenericMuSigOpValidator is IOpValidatorModule {
     // todo: support eip-712 signatures & message signing that are not vault transactions
     using MessageHashUtils for bytes32;
 
@@ -134,7 +134,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
     }
 
     /**
-     * @notice Constructs a new GenericMusigOpValidator
+     * @notice Constructs a new GenericMuSigOpValidator
      * @param whitelist Array of whitelisted calls with their targets, permissions, and selectors
      * @param signers_ Array of signers with their weights
      * @param quorum_ Minimum signature weight required to approve operations
@@ -468,7 +468,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
 
         // Create a message hash for signers to sign
         bytes32 messageHash =
-            keccak256(abi.encodePacked("GenericMusigOpValidator_SET_VAULT", _vault)).toEthSignedMessageHash();
+            keccak256(abi.encodePacked("GenericMuSigOpValidator_SET_VAULT", _vault)).toEthSignedMessageHash();
 
         // Verify the signatures meet the quorum
         if (!isValidSignature(messageHash, signatures)) {
@@ -525,7 +525,7 @@ contract GenericMusigOpValidator is IOpValidatorModule {
      */
     function _hashSignersData(Signer calldata signer, uint256 newQuorum) internal pure returns (bytes32) {
         return keccak256(
-            abi.encodePacked("GenericMusigOpValidator_UPDATE_SIGNERS", signer.signer, signer.weight, newQuorum)
+            abi.encodePacked("GenericMuSigOpValidator_UPDATE_SIGNERS", signer.signer, signer.weight, newQuorum)
         ).toEthSignedMessageHash();
     }
 }

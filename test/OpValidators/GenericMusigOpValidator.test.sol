@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
-import {GenericMusigOpValidator} from "../../src/Modules/OpValidators/GenericMusigOpValidator.sol";
+import {GenericMuSigOpValidator} from "../../src/Modules/OpValidators/GenericMuSigOpValidator.sol";
 import {
     WhitelistedCall,
     SelectorAndChecker,
@@ -12,10 +12,10 @@ import {
 } from "../../src/interfaces/modules/IOpValidatorModule.sol";
 import {SEND_ETH, CALL_FUNCTIONS, NO_PARAMS_CHECKS_ADDRESS} from "../../src/Modules/OpValidators/constants.sol";
 import {Counter} from "../Mocks/Counter.sol";
-import {GenericMusigOpValidatorTestSetup} from "./GenericMusigOpValidatorTestSetup.sol";
+import {GenericMuSigOpValidatorTestSetup} from "./GenericMuSigOpValidatorTestSetup.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
+contract GenericMuSigOpValidatorTest is GenericMuSigOpValidatorTestSetup {
     using MessageHashUtils for bytes32;
 
     /* -----------------SINGLE OP----------------- */
@@ -35,7 +35,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        GenericMuSigOpValidator validator = setupValidator(whitelistedCalls, alice);
         uint256 nonce = validator.nextNonce();
 
         Op memory op = Op(BaseOp({target: makeAddr("alice"), value: 1 ether, data: ""}), abi.encodePacked(nonce));
@@ -74,7 +74,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        GenericMuSigOpValidator validator = setupValidator(whitelistedCalls, alice);
         uint256 nonce = validator.nextNonce();
         BatchOp memory batchOp = BatchOp({ops: new BaseOp[](2), validationData: abi.encodePacked(nonce)});
         BaseOp memory op1 = BaseOp({target: makeAddr("alice"), value: 1 ether, data: ""});
@@ -115,7 +115,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        GenericMuSigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message = keccak256("this is a message");
         uint256[] memory opSigner = new uint256[](2);
@@ -144,7 +144,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        GenericMuSigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message = keccak256("this is a message");
         uint256[] memory opSigner = new uint256[](1);
@@ -154,7 +154,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                GenericMusigOpValidator.QuorumNotMet.selector,
+                GenericMuSigOpValidator.QuorumNotMet.selector,
                 1, // signer1 weight
                 2 // threshold
             )
@@ -179,7 +179,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        GenericMuSigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message = keccak256("this is a message");
         uint256[] memory opSigner = new uint256[](2);
@@ -189,7 +189,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         bytes memory signatures = multiSign(opSigner, message);
 
         vm.expectRevert(
-            abi.encodeWithSelector(GenericMusigOpValidator.InvalidSigner.selector, vm.addr(notValidatorSigner))
+            abi.encodeWithSelector(GenericMuSigOpValidator.InvalidSigner.selector, vm.addr(notValidatorSigner))
         );
 
         // Check if the signature is valid
@@ -212,7 +212,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        GenericMuSigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message = keccak256("this is a message");
         uint256[] memory opSigner = new uint256[](2);
@@ -222,7 +222,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         bytes memory signatures = multiSign(opSigner, message);
 
-        vm.expectRevert(abi.encodeWithSelector(GenericMusigOpValidator.DuplicateSigner.selector, vm.addr(uniqueSigner)));
+        vm.expectRevert(abi.encodeWithSelector(GenericMuSigOpValidator.DuplicateSigner.selector, vm.addr(uniqueSigner)));
 
         // Check if the signature is valid
         validator.isValidSignature(message, signatures);
@@ -244,7 +244,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        GenericMuSigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message = keccak256("this is a message");
         uint256[] memory opSigner = new uint256[](2);
@@ -259,7 +259,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             invalidSignatures[i] = signatures[i];
         }
 
-        vm.expectRevert(abi.encodeWithSelector(GenericMusigOpValidator.InvalidSignature.selector));
+        vm.expectRevert(abi.encodeWithSelector(GenericMuSigOpValidator.InvalidSignature.selector));
 
         // Check if the signature is valid
         validator.isValidSignature(message, invalidSignatures);
@@ -282,7 +282,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        GenericMuSigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message = keccak256("this is a message");
         uint256[] memory opSigner = new uint256[](2);
@@ -326,7 +326,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        GenericMuSigOpValidator validator = setupValidator(whitelistedCalls, alice);
         uint256 nonce = validator.nextNonce();
         Op memory op = Op({
             base: BaseOp({target: makeAddr("bob"), value: 1 ether, data: ""}),
@@ -342,7 +342,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         op.validationData = abi.encodePacked(nonce, signatures);
 
-        vm.expectRevert(abi.encodeWithSelector(GenericMusigOpValidator.TargetNotWhitelisted.selector, op.base.target));
+        vm.expectRevert(abi.encodeWithSelector(GenericMuSigOpValidator.TargetNotWhitelisted.selector, op.base.target));
         validator.validateOp(op);
     }
 
@@ -362,7 +362,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        GenericMuSigOpValidator validator = setupValidator(whitelistedCalls, alice);
         uint256 nonce = validator.nextNonce();
         Op memory op = Op({
             base: BaseOp({target: makeAddr("alice"), value: allowance + 1, data: ""}),
@@ -380,7 +380,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         op.validationData = abi.encodePacked(nonce, signatures);
 
         vm.expectRevert(
-            abi.encodeWithSelector(GenericMusigOpValidator.ExceedsAllowance.selector, allowance, op.base.value)
+            abi.encodeWithSelector(GenericMuSigOpValidator.ExceedsAllowance.selector, allowance, op.base.value)
         );
         validator.validateOp(op);
     }
@@ -401,7 +401,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        GenericMuSigOpValidator validator = setupValidator(whitelistedCalls, alice);
         uint256 nonce = validator.nextNonce();
 
         Op memory op = Op({
@@ -443,7 +443,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         whitelistedCalls[0].selectorAndChecker[0] =
             SelectorAndChecker({selector: counter.increment.selector, paramsValidator: NO_PARAMS_CHECKS_ADDRESS});
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        GenericMuSigOpValidator validator = setupValidator(whitelistedCalls, alice);
         uint256 nonce = validator.nextNonce();
         bytes memory selector = abi.encodeWithSelector(counter.ping.selector);
         // op to counter.ping() fct
@@ -466,7 +466,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         //     SelectorNotWhitelisted(0x5c36b186) != SelectorNotWhitelisted(0x00000000)
         //     whereas when we console.log the selector here and in the tested contract's function, whe get 0x5c36b186 on both sides
         //     abi.encodeWithSelector(
-        //         GenericMusigOpValidator.SelectorNotWhitelisted.selector,
+        //         GenericMuSigOpValidator.SelectorNotWhitelisted.selector,
         //         selector
         //     )
         // );
@@ -494,7 +494,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         whitelistedCalls[0].selectorAndChecker[0] =
             SelectorAndChecker({selector: bytes4(selector), paramsValidator: NO_PARAMS_CHECKS_ADDRESS});
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        GenericMuSigOpValidator validator = setupValidator(whitelistedCalls, alice);
         uint256 nonce = validator.nextNonce();
 
         // op to counter.increment() fct
@@ -536,7 +536,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         whitelistedCalls[0].selectorAndChecker[0] =
             SelectorAndChecker({selector: bytes4(selector), paramsValidator: NO_PARAMS_CHECKS_ADDRESS});
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        GenericMuSigOpValidator validator = setupValidator(whitelistedCalls, alice);
         uint256 nonce = validator.nextNonce();
         Op memory op = Op({
             base: BaseOp({
@@ -556,7 +556,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         op.validationData = abi.encodePacked(nonce, signatures);
 
-        vm.expectRevert(abi.encodeWithSelector(GenericMusigOpValidator.EmptyOperation.selector));
+        vm.expectRevert(abi.encodeWithSelector(GenericMuSigOpValidator.EmptyOperation.selector));
 
         validator.validateOp(op);
     }
@@ -582,7 +582,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         whitelistedCalls[0].selectorAndChecker[0] =
             SelectorAndChecker({selector: bytes4(selector), paramsValidator: NO_PARAMS_CHECKS_ADDRESS});
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        GenericMuSigOpValidator validator = setupValidator(whitelistedCalls, alice);
         uint256 nonce = validator.nextNonce();
 
         Op memory op = Op({
@@ -603,7 +603,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         op.validationData = abi.encodePacked(nonce, signatures);
 
-        vm.expectRevert(abi.encodeWithSelector(GenericMusigOpValidator.DataFieldTooShort.selector));
+        vm.expectRevert(abi.encodeWithSelector(GenericMuSigOpValidator.DataFieldTooShort.selector));
 
         validator.validateOp(op);
     }
@@ -629,7 +629,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         whitelistedCalls[0].selectorAndChecker[0] =
             SelectorAndChecker({selector: bytes4(selector), paramsValidator: NO_PARAMS_CHECKS_ADDRESS});
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        GenericMuSigOpValidator validator = setupValidator(whitelistedCalls, alice);
         uint256 nonce = validator.nextNonce();
 
         // op to counter.increment() fct
@@ -675,7 +675,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         whitelistedCalls[0].selectorAndChecker[0] =
             SelectorAndChecker({selector: bytes4(selector), paramsValidator: NO_PARAMS_CHECKS_ADDRESS});
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        GenericMuSigOpValidator validator = setupValidator(whitelistedCalls, alice);
         uint256 nonce = validator.nextNonce();
 
         Op memory op = Op({
@@ -715,10 +715,10 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        GenericMuSigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message =
-            keccak256(abi.encodePacked("GenericMusigOpValidator_SET_VAULT", alice)).toEthSignedMessageHash();
+            keccak256(abi.encodePacked("GenericMuSigOpValidator_SET_VAULT", alice)).toEthSignedMessageHash();
 
         uint256[] memory opSigner = new uint256[](2);
         opSigner[0] = signer1;
@@ -726,7 +726,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
 
         bytes memory signatures = multiSign(opSigner, message);
 
-        vm.expectRevert(abi.encodeWithSelector(GenericMusigOpValidator.VaultAlreadySet.selector));
+        vm.expectRevert(abi.encodeWithSelector(GenericMuSigOpValidator.VaultAlreadySet.selector));
 
         validator.setVault(alice, signatures);
     }
@@ -745,10 +745,10 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
             selectorAndChecker: new SelectorAndChecker[](0)
         });
 
-        GenericMusigOpValidator validator = setupValidator(whitelistedCalls, alice);
+        GenericMuSigOpValidator validator = setupValidator(whitelistedCalls, alice);
 
         bytes32 message =
-            keccak256(abi.encodePacked("GenericMusigOpValidator_SET_VAULT", alice)).toEthSignedMessageHash();
+            keccak256(abi.encodePacked("GenericMuSigOpValidator_SET_VAULT", alice)).toEthSignedMessageHash();
 
         uint256[] memory opSigner = new uint256[](2);
         opSigner[0] = signer1;
@@ -759,7 +759,7 @@ contract GenericMusigOpValidatorTest is GenericMusigOpValidatorTestSetup {
         address bob = makeAddr("bob"); // Not the vault
         vm.startPrank(bob);
 
-        vm.expectRevert(abi.encodeWithSelector(GenericMusigOpValidator.NotVault.selector));
+        vm.expectRevert(abi.encodeWithSelector(GenericMuSigOpValidator.NotVault.selector));
 
         validator.validateOp(
             Op({base: BaseOp({target: address(counter), value: 0, data: ""}), validationData: signatures})

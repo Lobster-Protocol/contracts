@@ -2,13 +2,13 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import {GenericMusigOpValidator} from "../../src/Modules/OpValidators/GenericMusigOpValidator.sol";
+import {GenericMuSigOpValidator} from "../../src/Modules/OpValidators/GenericMuSigOpValidator.sol";
 import {WhitelistedCall, SelectorAndChecker, Signer, Op} from "../../src/interfaces/modules/IOpValidatorModule.sol";
 import {SEND_ETH, CALL_FUNCTIONS, NO_PARAMS_CHECKS_ADDRESS} from "../../src/Modules/OpValidators/constants.sol";
 import {Counter} from "../Mocks/Counter.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-contract GenericMusigOpValidatorTestSetup is Test {
+contract GenericMuSigOpValidatorTestSetup is Test {
     using MessageHashUtils for bytes32;
 
     Counter public counter;
@@ -36,19 +36,19 @@ contract GenericMusigOpValidatorTestSetup is Test {
         address vault
     )
         public
-        returns (GenericMusigOpValidator)
+        returns (GenericMuSigOpValidator)
     {
         // allow transfer of erc20 to bob's address
         SelectorAndChecker[] memory selectorAndChecker = new SelectorAndChecker[](1);
         selectorAndChecker[0] =
             SelectorAndChecker({selector: counter.increment.selector, paramsValidator: NO_PARAMS_CHECKS_ADDRESS});
 
-        // Deploy the GenericMusigOpValidator contract
-        GenericMusigOpValidator validator = new GenericMusigOpValidator(whitelistedCalls, signers, 2);
+        // Deploy the GenericMuSigOpValidator contract
+        GenericMuSigOpValidator validator = new GenericMuSigOpValidator(whitelistedCalls, signers, 2);
 
         // Set the vault address
         bytes32 message =
-            keccak256(abi.encodePacked("GenericMusigOpValidator_SET_VAULT", vault)).toEthSignedMessageHash();
+            keccak256(abi.encodePacked("GenericMuSigOpValidator_SET_VAULT", vault)).toEthSignedMessageHash();
         uint256[] memory privateKeys = new uint256[](3);
         privateKeys[0] = signer1;
         privateKeys[1] = signer2;
