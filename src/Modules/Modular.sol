@@ -11,8 +11,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
  * @title Modular Base Contract
  * @author Lobster
  * @notice Base contract containing the modules related events, errors, and state variables for the Vault contract
- * @dev This contract provides the foundation for modular functionality in the vault system
- *      by defining core modules, error conditions, and events
+ * @dev This contract provides the foundation for the modular vault operation mechanism
  */
 abstract contract Modular is ERC4626 {
     /**
