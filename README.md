@@ -134,6 +134,13 @@ forge test -vvv
 
 # Run specific test file
 forge test --match-path test/VaultTest.sol
+
+# Get the coverage report
+forge coverage --no-match-coverage "(test|script|lib)" --ir-minimum
+
+# Visualize coverage report
+genhtml --rc derive_function_end_line=0 lcov.info -o coverage-report
+open coverage-report/index.html
 ```
 
 ### Code Quality
