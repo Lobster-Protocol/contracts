@@ -204,6 +204,7 @@ contract UniV3LobsterVault is LobsterVault {
     function _processPositions(uint256 shares, WithdrawVars memory vars) internal {
         // Get current pool state
         (uint160 sqrtPriceX96, int24 tickCurrent,,,,,) = pool.slot0();
+        uint256 totalSupply = totalSupply();
 
         for (uint256 i = 0; i < vars.tokensCount; ++i) {
             PositionVars memory posVars;
@@ -251,8 +252,8 @@ contract UniV3LobsterVault is LobsterVault {
             );
 
             // Calculate proportional withdrawal amounts based on shares
-            posVars.toWithdraw0 = posVars.position0.mulDiv(shares, totalSupply());
-            posVars.toWithdraw1 = posVars.position1.mulDiv(shares, totalSupply());
+            posVars.toWithdraw0 = posVars.position0.mulDiv(shares, totalSupply);
+            posVars.toWithdraw1 = posVars.position1.mulDiv(shares, totalSupply);
 
             // Accumulate totals for final calculations
             vars.allCollectedFee0 += fee0;
@@ -405,60 +406,115 @@ contract UniV3LobsterVault is LobsterVault {
             // Get the tokenId for the current position
             uint256 tokenId = positionManager.tokenOfOwnerByIndex(user, i);
 
-            // Retrieve position details from the position manager
-            (
-                ,
-                ,
-                address token0,
-                address token1,
-                uint24 fee,
-                int24 tickLower,
-                int24 tickUpper,
-                uint128 liquidity,
-                uint256 feeGrowthInside0LastX128,
-                uint256 feeGrowthInside1LastX128,
-                uint256 tokensOwed0,
-                uint256 tokensOwed1
-            ) = positionManager.positions(tokenId);
-
-            // Only count positions that belong to this vault's pool
-            // Positions in other pools are ignored
-            if (_isPositionInPool(token0, token1, fee)) {
-                // Get current pool state for position valuation
-                (uint160 sqrtPriceX96, int24 tickCurrent,,,,,) = pool.slot0();
-
-                // Calculate principal position value at current price
-                (uint256 amount0, uint256 amount1) = _principalPosition(sqrtPriceX96, tickLower, tickUpper, liquidity);
-
-                // Calculate uncollected fees for the position
-                (uint256 fee0, uint256 fee1) = _feePosition(
-                    FeeParams({
-                        token0: token0,
-                        token1: token1,
-                        fee: fee,
-                        tickLower: tickLower,
-                        tickUpper: tickUpper,
-                        liquidity: liquidity,
-                        positionFeeGrowthInside0LastX128: feeGrowthInside0LastX128,
-                        positionFeeGrowthInside1LastX128: feeGrowthInside1LastX128,
-                        tokensOwed0: tokensOwed0,
-                        tokensOwed1: tokensOwed1
-                    }),
-                    tickCurrent
-                );
-
-                // Add principal amounts directly to position values
-                position0.value += amount0;
-                position1.value += amount1;
-
-                // For fees, subtract the protocol fee cut before adding to position value
-                // Users get (100% - feeCutBasisPoint) of the fees
-                position0.value += fee0.mulDiv(BASIS_POINT_SCALE - feeCutBasisPoint, BASIS_POINT_SCALE);
-                position1.value += fee1.mulDiv(BASIS_POINT_SCALE - feeCutBasisPoint, BASIS_POINT_SCALE);
-            }
+            // Process each position individually to avoid stack too deep
+            _processPosition(tokenId, position0, position1);
         }
 
         return (position0, position1);
+    }
+
+    /**
+     * @dev Internal helper to process a single position and update totals
+     * @param tokenId The NFT token ID of the position
+     * @param position0 Reference to position0 total (will be modified)
+     * @param position1 Reference to position1 total (will be modified)
+     */
+    function _processPosition(uint256 tokenId, Position memory position0, Position memory position1) internal view {
+        // Get position data in a struct to reduce stack usage
+        PositionData memory posData = _getPositionData(tokenId);
+
+        // Only count positions that belong to this vault's pool
+        if (_isPositionInPool(posData.token0, posData.token1, posData.fee)) {
+            // Get current pool state for position valuation
+            (uint160 sqrtPriceX96, int24 tickCurrent,,,,,) = pool.slot0();
+
+            // Calculate and add principal amounts
+            (uint256 amount0, uint256 amount1) =
+                _principalPosition(sqrtPriceX96, posData.tickLower, posData.tickUpper, posData.liquidity);
+
+            position0.value += amount0;
+            position1.value += amount1;
+
+            // Calculate and add fees (minus protocol cut)
+            _addFeesToPosition(posData, tickCurrent, position0, position1);
+        }
+    }
+
+    /**
+     * @dev Struct to hold position data and reduce stack usage
+     */
+    struct PositionData {
+        address token0;
+        address token1;
+        uint24 fee;
+        int24 tickLower;
+        int24 tickUpper;
+        uint128 liquidity;
+        uint256 feeGrowthInside0LastX128;
+        uint256 feeGrowthInside1LastX128;
+        uint256 tokensOwed0;
+        uint256 tokensOwed1;
+    }
+
+    /**
+     * @dev Get position data from position manager
+     * @param tokenId The NFT token ID of the position
+     * @return posData Struct containing all position data
+     */
+    function _getPositionData(uint256 tokenId) internal view returns (PositionData memory posData) {
+        (
+            ,
+            ,
+            posData.token0,
+            posData.token1,
+            posData.fee,
+            posData.tickLower,
+            posData.tickUpper,
+            posData.liquidity,
+            posData.feeGrowthInside0LastX128,
+            posData.feeGrowthInside1LastX128,
+            posData.tokensOwed0,
+            posData.tokensOwed1
+        ) = positionManager.positions(tokenId);
+    }
+
+    /**
+     * @dev Calculate and add fees to position totals
+     * @param posData Position data struct
+     * @param tickCurrent Current pool tick
+     * @param position0 Reference to position0 total (will be modified)
+     * @param position1 Reference to position1 total (will be modified)
+     */
+    function _addFeesToPosition(
+        PositionData memory posData,
+        int24 tickCurrent,
+        Position memory position0,
+        Position memory position1
+    )
+        internal
+        view
+    {
+        // Calculate uncollected fees for the position
+        (uint256 fee0, uint256 fee1) = _feePosition(
+            FeeParams({
+                token0: posData.token0,
+                token1: posData.token1,
+                fee: posData.fee,
+                tickLower: posData.tickLower,
+                tickUpper: posData.tickUpper,
+                liquidity: posData.liquidity,
+                positionFeeGrowthInside0LastX128: posData.feeGrowthInside0LastX128,
+                positionFeeGrowthInside1LastX128: posData.feeGrowthInside1LastX128,
+                tokensOwed0: posData.tokensOwed0,
+                tokensOwed1: posData.tokensOwed1
+            }),
+            tickCurrent
+        );
+
+        // For fees, subtract the protocol fee cut before adding to position value
+        // Users get (100% - feeCutBasisPoint) of the fees
+        position0.value += fee0.mulDiv(BASIS_POINT_SCALE - feeCutBasisPoint, BASIS_POINT_SCALE);
+        position1.value += fee1.mulDiv(BASIS_POINT_SCALE - feeCutBasisPoint, BASIS_POINT_SCALE);
     }
 
     /**
