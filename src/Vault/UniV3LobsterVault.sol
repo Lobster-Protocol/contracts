@@ -51,7 +51,6 @@ contract UniV3LobsterVault is LobsterVault {
         uint256 tokensCount;
         uint256 initialToken0Balance;
         uint256 initialToken1Balance;
-        uint160 sqrtPriceX96;
         uint256 allCollectedFee0;
         uint256 allCollectedFee1;
         uint256 totalWithdrawnFromPosition0;
@@ -181,8 +180,6 @@ contract UniV3LobsterVault is LobsterVault {
         vars.initialToken0Balance = asset0.balanceOf(address(this));
         vars.initialToken1Balance = asset1.balanceOf(address(this));
 
-        (vars.sqrtPriceX96,,,,,,) = pool.slot0();
-
         // Process all positions
         _processPositions(shares, vars);
 
@@ -205,6 +202,9 @@ contract UniV3LobsterVault is LobsterVault {
      * @param vars The withdrawal variables struct to accumulate totals
      */
     function _processPositions(uint256 shares, WithdrawVars memory vars) internal {
+        // Get current pool state
+        (uint160 sqrtPriceX96, int24 tickCurrent,,,,,) = pool.slot0();
+
         for (uint256 i = 0; i < vars.tokensCount; ++i) {
             PositionVars memory posVars;
 
@@ -230,8 +230,6 @@ contract UniV3LobsterVault is LobsterVault {
             if (!_isPositionInPool(posVars.token0, posVars.token1, posVars.fee)) {
                 continue;
             }
-            // todo: only 1 .slot0
-            (uint160 sqrtPriceX96, int24 tickCurrent,,,,,) = pool.slot0();
 
             // Get position value and fees
             (posVars.position0, posVars.position1) =
