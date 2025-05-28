@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {UniV3LobsterVault} from "../../src/Vault/UniV3LobsterVault.sol";
-import {UniV3LobsterVaultFeesSetup} from "../Vault/VaultSetups/WithRealModules/UniswapV3VaultFlowFeesSetup.sol";
+import {UniV3LobsterVaultFeesSetup} from "../Vault/VaultSetups/WithRealModules/UniswapV3VaultFeesSetup.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {MockERC20} from "../Mocks/MockERC20.sol";
 

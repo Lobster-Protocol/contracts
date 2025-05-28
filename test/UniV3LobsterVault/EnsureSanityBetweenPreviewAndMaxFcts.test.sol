@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
-import {UniV3LobsterVaultNoFeesSetup} from "../Vault/VaultSetups/WithRealModules/UniswapV3VaultFlowNoFeesSetup.sol";
+import {UniV3LobsterVaultNoFeesSetup} from "../Vault/VaultSetups/WithRealModules/UniswapV3VaultNoFeesSetup.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {MockERC20} from "../Mocks/MockERC20.sol";
 
-contract UniswapV3VaultFlowTest is UniV3LobsterVaultNoFeesSetup {
+contract UniswapV3VaultTest is UniV3LobsterVaultNoFeesSetup {
     function testPreviewMaxWithdrawMatchesPreviewWithdrawNoPositionsNoFees() public {
         // Alice deposits
         uint256 depositedAmount0 = 1 ether;
