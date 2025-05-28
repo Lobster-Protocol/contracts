@@ -196,77 +196,6 @@ contract UniV3LobsterVault is LobsterVault {
     }
 
     /**
-     * @dev Process all Uniswap V3 positions owned by the vault for withdrawal
-     * Iterates through each position, calculates withdrawal amounts, and executes operations
-     * @param shares The number of shares being withdrawn (used for proportional calculations)
-     * @param vars The withdrawal variables struct to accumulate totals
-     */
-    function _processPositions(uint256 shares, WithdrawVars memory vars) internal {
-        // Get current pool state
-        (uint160 sqrtPriceX96, int24 tickCurrent,,,,,) = pool.slot0();
-        uint256 totalSupply = totalSupply();
-
-        for (uint256 i = 0; i < vars.tokensCount; ++i) {
-            PositionVars memory posVars;
-
-            posVars.tokenId = positionManager.tokenOfOwnerByIndex(address(this), i);
-
-            // Get position details
-            (
-                ,
-                ,
-                posVars.token0,
-                posVars.token1,
-                posVars.fee,
-                posVars.tickLower,
-                posVars.tickUpper,
-                posVars.liquidity,
-                posVars.feeGrowthInside0LastX128,
-                posVars.feeGrowthInside1LastX128,
-                posVars.tokensOwed0,
-                posVars.tokensOwed1
-            ) = positionManager.positions(posVars.tokenId);
-
-            // Verify position is in our pool - skip if not
-            if (!_isPositionInPool(posVars.token0, posVars.token1, posVars.fee)) {
-                continue;
-            }
-
-            // Get position value and fees
-            (posVars.position0, posVars.position1) =
-                _principalPosition(sqrtPriceX96, posVars.tickLower, posVars.tickUpper, posVars.liquidity);
-            (uint256 fee0, uint256 fee1) = _feePosition(
-                FeeParams({
-                    token0: posVars.token0,
-                    token1: posVars.token1,
-                    fee: posVars.fee,
-                    tickLower: posVars.tickLower,
-                    tickUpper: posVars.tickUpper,
-                    liquidity: posVars.liquidity,
-                    positionFeeGrowthInside0LastX128: posVars.feeGrowthInside0LastX128,
-                    positionFeeGrowthInside1LastX128: posVars.feeGrowthInside1LastX128,
-                    tokensOwed0: posVars.tokensOwed0,
-                    tokensOwed1: posVars.tokensOwed1
-                }),
-                tickCurrent
-            );
-
-            // Calculate proportional withdrawal amounts based on shares
-            posVars.toWithdraw0 = posVars.position0.mulDiv(shares, totalSupply);
-            posVars.toWithdraw1 = posVars.position1.mulDiv(shares, totalSupply);
-
-            // Accumulate totals for final calculations
-            vars.allCollectedFee0 += fee0;
-            vars.allCollectedFee1 += fee1;
-            vars.totalWithdrawnFromPosition0 += posVars.toWithdraw0;
-            vars.totalWithdrawnFromPosition1 += posVars.toWithdraw1;
-
-            // Execute position operations (decrease liquidity and collect)
-            _executePositionWithdrawal(posVars);
-        }
-    }
-
-    /**
      * @dev Check if a position belongs to this vault's designated pool
      * @param token0 The first token of the position
      * @param token1 The second token of the position
@@ -618,6 +547,112 @@ contract UniV3LobsterVault is LobsterVault {
             feeGrowthInside0X128 = upperFeeGrowthOutside0X128 - lowerFeeGrowthOutside0X128;
             feeGrowthInside1X128 = upperFeeGrowthOutside1X128 - lowerFeeGrowthOutside1X128;
         }
+    }
+
+    /**
+     * @dev Process all Uniswap V3 positions owned by the vault for withdrawal
+     * Iterates through each position, calculates withdrawal amounts, and executes operations
+     * @param shares The number of shares being withdrawn (used for proportional calculations)
+     * @param vars The withdrawal variables struct to accumulate totals
+     */
+    function _processPositions(uint256 shares, WithdrawVars memory vars) internal {
+        // Get current pool state
+        (uint160 sqrtPriceX96, int24 tickCurrent,,,,,) = pool.slot0();
+        uint256 totalSupply = totalSupply();
+
+        for (uint256 i = 0; i < vars.tokensCount; ++i) {
+            uint256 tokenId = positionManager.tokenOfOwnerByIndex(address(this), i);
+            _processSinglePosition(tokenId, shares, totalSupply, sqrtPriceX96, tickCurrent, vars);
+        }
+    }
+
+    /**
+     * @dev Process a single position for withdrawal
+     * @param tokenId The NFT token ID of the position
+     * @param shares The number of shares being withdrawn
+     * @param totalSupplyValue Total supply value
+     * @param sqrtPriceX96 Current pool price
+     * @param tickCurrent Current pool tick
+     * @param vars The withdrawal variables struct to accumulate totals
+     */
+    function _processSinglePosition(
+        uint256 tokenId,
+        uint256 shares,
+        uint256 totalSupplyValue,
+        uint160 sqrtPriceX96,
+        int24 tickCurrent,
+        WithdrawVars memory vars
+    )
+        internal
+    {
+        PositionVars memory posVars;
+        posVars.tokenId = tokenId;
+
+        // Get position details in isolated scope
+        {
+            (
+                ,
+                ,
+                posVars.token0,
+                posVars.token1,
+                posVars.fee,
+                posVars.tickLower,
+                posVars.tickUpper,
+                posVars.liquidity,
+                posVars.feeGrowthInside0LastX128,
+                posVars.feeGrowthInside1LastX128,
+                posVars.tokensOwed0,
+                posVars.tokensOwed1
+            ) = positionManager.positions(tokenId);
+        }
+
+        // Skip if not in our pool
+        if (!_isPositionInPool(posVars.token0, posVars.token1, posVars.fee)) {
+            return;
+        }
+
+        // Calculate position values in separate scope
+        {
+            (posVars.position0, posVars.position1) =
+                _principalPosition(sqrtPriceX96, posVars.tickLower, posVars.tickUpper, posVars.liquidity);
+        }
+
+        // Calculate fees in separate scope
+        uint256 fee0;
+        uint256 fee1;
+        {
+            (fee0, fee1) = _feePosition(
+                FeeParams({
+                    token0: posVars.token0,
+                    token1: posVars.token1,
+                    fee: posVars.fee,
+                    tickLower: posVars.tickLower,
+                    tickUpper: posVars.tickUpper,
+                    liquidity: posVars.liquidity,
+                    positionFeeGrowthInside0LastX128: posVars.feeGrowthInside0LastX128,
+                    positionFeeGrowthInside1LastX128: posVars.feeGrowthInside1LastX128,
+                    tokensOwed0: posVars.tokensOwed0,
+                    tokensOwed1: posVars.tokensOwed1
+                }),
+                tickCurrent
+            );
+        }
+
+        // Calculate withdrawal amounts and update totals
+        posVars.toWithdraw0 = posVars.position0.mulDiv(shares, totalSupplyValue);
+        posVars.toWithdraw1 = posVars.position1.mulDiv(shares, totalSupplyValue);
+
+        vars.allCollectedFee0 += fee0;
+        vars.allCollectedFee1 += fee1;
+        vars.totalWithdrawnFromPosition0 += posVars.toWithdraw0;
+        vars.totalWithdrawnFromPosition1 += posVars.toWithdraw1;
+
+        // Store fees for execution
+        posVars.fee0 = fee0;
+        posVars.fee1 = fee1;
+
+        // Execute withdrawal
+        _executePositionWithdrawal(posVars);
     }
 
     // TODO: Add collect fee function for manual fee collection without withdrawal
