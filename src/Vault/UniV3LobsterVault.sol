@@ -230,7 +230,7 @@ contract UniV3LobsterVault is LobsterVault {
             if (!_isPositionInPool(posVars.token0, posVars.token1, posVars.fee)) {
                 continue;
             }
-
+            // todo: only 1 .slot0
             (uint160 sqrtPriceX96, int24 tickCurrent,,,,,) = pool.slot0();
 
             // Get position value and fees
