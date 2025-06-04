@@ -187,4 +187,6 @@ This project is licensed under the GNU AGPL v3.0 License - see the [LICENSE](LIC
 
 ## ⚠️ Disclaimer
 
-This software is provided "as is" without warranty. Use at your own risk. Always conduct thorough testing and auditing before deploying to mainnet with real funds.√
+This software is provided "as is" without warranty. Use at your own risk. Always conduct thorough testing and auditing before deploying to mainnet with real funds.
+
+**TO FIX: in the UniV3LobsterVault._executePositionWithdrawal function, we must empty the position if afted withdraw, it is left with low liquidity and then, we must burn it to avoid being stuck with an increasing amount of positions after the withdrawals**
