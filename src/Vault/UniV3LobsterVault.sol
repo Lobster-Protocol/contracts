@@ -680,6 +680,11 @@ contract UniV3LobsterVault is LobsterVault, Ownable2Step {
      * @return totalFee1 Total fees collected in token1
      */
     function collectPendingFees() external onlyOwner returns (uint256 totalFee0, uint256 totalFee1) {
+        if (feeCutBasisPoint == 0) {
+            emit FeesCollected(totalFee0, totalFee1);
+            return (totalFee0, totalFee1);
+        }
+
         // Collect fees from all positions
         uint256 balance = positionManager.balanceOf(address(this));
         for (uint256 i = 0; i < balance; i++) {
@@ -710,6 +715,9 @@ contract UniV3LobsterVault is LobsterVault, Ownable2Step {
                 totalFee1 += fee1;
             }
         }
+
+        totalFee0 = totalFee0.mulDiv(feeCutBasisPoint, BASIS_POINT_SCALE);
+        totalFee1 = totalFee1.mulDiv(feeCutBasisPoint, BASIS_POINT_SCALE);
 
         // Transfer collected fees to the fee collector
         if (totalFee0 > 0) {
