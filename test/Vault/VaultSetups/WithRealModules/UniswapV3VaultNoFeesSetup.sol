@@ -77,6 +77,7 @@ contract UniV3LobsterVaultNoFeesSetup is UniswapV3VaultUtils {
         owner = makeAddr("owner");
         alice = makeAddr("alice");
         bob = makeAddr("bob");
+
         address uniV3feeCutCollector = makeAddr("feeCollector");
 
         (IUniswapV3FactoryMinimal factory,, INonFungiblePositionManager positionManager, IUniswapV3RouterMinimal router)
@@ -114,7 +115,8 @@ contract UniV3LobsterVaultNoFeesSetup is UniswapV3VaultUtils {
             pool,
             positionManager,
             uniV3feeCutCollector,
-            0 // 0% fee cut,
+            0, // 0% fee cut
+            owner
         );
         // Setup initial state
         MockERC20(uniswapV3Data.tokenA).mint(alice, 10000 ether);

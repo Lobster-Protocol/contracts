@@ -68,7 +68,8 @@ contract UniV3LobsterVaultFeesSetup is UniswapV3VaultUtils {
             pool,
             positionManager,
             uniV3feeCutCollector,
-            expectedFeeBasisPoint // 1% fee cut,
+            expectedFeeBasisPoint, // 1% fee cut,
+            owner
         );
 
         // Setup initial state

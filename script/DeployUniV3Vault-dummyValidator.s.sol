@@ -74,7 +74,7 @@ contract DeployUniV3LobsterVaultDummyValidator is Script {
 
         // 5. Deploy UniV3LobsterVault
         console.log("Deploying UniV3LobsterVault...");
-        vault = new UniV3LobsterVault(opValidator, pool, POSITION_MANAGER, feeCollector, FEE_BASIS_POINTS);
+        vault = new UniV3LobsterVault(opValidator, pool, POSITION_MANAGER, feeCollector, FEE_BASIS_POINTS, msg.sender);
 
         console.log("UniV3LobsterVault deployed at:", address(vault));
 
