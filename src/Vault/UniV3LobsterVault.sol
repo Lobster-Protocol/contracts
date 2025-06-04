@@ -39,7 +39,7 @@ contract UniV3LobsterVault is LobsterVault, Ownable2Step {
     uint256 public immutable feeCutBasisPoint;
 
     /// @notice Address that receives the protocol fee cuts
-    address public immutable feeCollector;
+    address public feeCollector;
 
     /// @dev The fee tier of the pool (cached for gas optimization)
     uint24 private immutable poolFee;
@@ -108,6 +108,12 @@ contract UniV3LobsterVault is LobsterVault, Ownable2Step {
      * @param totalFees1 Total fees collected in token1
      */
     event FeesCollected(uint256 totalFees0, uint256 totalFees1);
+
+    /**
+     * @notice Emitted when the fee collector address is updated
+     * @param newFeeCollector The new fee collector address
+     */
+    event FeeCollectorUpdated(address indexed newFeeCollector);
 
     /**
      * @notice Emitted when fee parameters are set
@@ -713,5 +719,16 @@ contract UniV3LobsterVault is LobsterVault, Ownable2Step {
             SafeERC20.safeTransfer(asset1, feeCollector, totalFee1);
         }
         emit FeesCollected(totalFee0, totalFee1);
+    }
+
+    /**
+     * @notice Sets the fee collector address
+     * Can only be called by the owner of the vault
+     * @param feeCollector_ The new fee collector address
+     */
+    function setFeeCollector(address feeCollector_) external onlyOwner {
+        require(feeCollector_ != address(0), ZeroAddress());
+        feeCollector = feeCollector_;
+        emit FeeCollectorUpdated(feeCollector_);
     }
 }
