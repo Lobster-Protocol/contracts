@@ -14,6 +14,7 @@ import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {LiquidityAmounts} from "../libraries/uniswapV3/LiquidityAmounts.sol";
 import {TickMath} from "../libraries/uniswapV3/TickMath.sol";
+import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /**
  * @title UniV3LobsterVault
@@ -22,7 +23,7 @@ import {TickMath} from "../libraries/uniswapV3/TickMath.sol";
  * This vault holds Uniswap V3 NFT positions on behalf of share holders and manages liquidity
  * operations while implementing a fee structure for collected trading fees.
  */
-contract UniV3LobsterVault is LobsterVault {
+contract UniV3LobsterVault is LobsterVault, Ownable2Step {
     using Math for uint256;
 
     /// @dev Q128 constant for fixed-point arithmetic in Uniswap V3 fee calculations
@@ -102,6 +103,13 @@ contract UniV3LobsterVault is LobsterVault {
     );
 
     /**
+     * @notice Emitted when fees are collected from all positions
+     * @param totalFees0 Total fees collected in token0
+     * @param totalFees1 Total fees collected in token1
+     */
+    event FeesCollected(uint256 totalFees0, uint256 totalFees1);
+
+    /**
      * @notice Emitted when fee parameters are set
      * @param feeCollector_ The address that will receive fee cuts
      * @param feeCutBasisPoint_ The fee cut percentage in basis points
@@ -121,9 +129,11 @@ contract UniV3LobsterVault is LobsterVault {
         IUniswapV3PoolMinimal pool_,
         INonFungiblePositionManager positionManager_,
         address feeCollector_,
-        uint256 feeCutBasisPoint_
+        uint256 feeCutBasisPoint_,
+        address initialOwner_
     )
         LobsterVault(opValidator_, IERC20(pool_.token0()), IERC20(pool_.token1()))
+        Ownable(initialOwner_)
     {
         require(feeCutBasisPoint_ <= BASIS_POINT_SCALE, "UniV3LobsterVault: fee cut too high");
         require(
@@ -657,5 +667,51 @@ contract UniV3LobsterVault is LobsterVault {
         _executePositionWithdrawal(posVars);
     }
 
-    // TODO: Add collect fee function for manual fee collection without withdrawal
+    /**
+     * @notice Collects all pending fees from the vault's Uniswap V3 positions
+     * Iterates through all positions, collects fees, and transfers them to the fee collector
+     * @return totalFee0 Total fees collected in token0
+     * @return totalFee1 Total fees collected in token1
+     */
+    function collectPendingFees() external onlyOwner returns (uint256 totalFee0, uint256 totalFee1) {
+        // Collect fees from all positions
+        uint256 balance = positionManager.balanceOf(address(this));
+        for (uint256 i = 0; i < balance; i++) {
+            uint256 tokenId = positionManager.tokenOfOwnerByIndex(address(this), i);
+            PositionData memory posData = _getPositionData(tokenId);
+
+            if (_isPositionInPool(posData.token0, posData.token1, posData.fee)) {
+                // fees to collect
+                (uint256 fee0, uint256 fee1) = PositionValue.fees(positionManager, tokenId);
+
+                // Collect fees for this position
+                INonFungiblePositionManager.CollectParams memory params = INonFungiblePositionManager.CollectParams({
+                    recipient: address(this),
+                    tokenId: tokenId,
+                    amount0Max: uint128(fee0),
+                    amount1Max: uint128(fee1)
+                });
+
+                BaseOp memory collectOp = BaseOp({
+                    target: address(positionManager),
+                    value: 0,
+                    data: abi.encodeCall(positionManager.collect, (params))
+                });
+
+                call_(collectOp);
+
+                totalFee0 += fee0;
+                totalFee1 += fee1;
+            }
+        }
+
+        // Transfer collected fees to the fee collector
+        if (totalFee0 > 0) {
+            SafeERC20.safeTransfer(asset0, feeCollector, totalFee0);
+        }
+        if (totalFee1 > 0) {
+            SafeERC20.safeTransfer(asset1, feeCollector, totalFee1);
+        }
+        emit FeesCollected(totalFee0, totalFee1);
+    }
 }
