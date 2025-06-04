@@ -1,21 +1,16 @@
 // SPDX-License-Identifier: GNUv3
 pragma solidity ^0.8.28;
 
-import {UniV3LobsterVault} from "../../src/Vault/UniV3LobsterVault.sol";
+import {UniV3LobsterVault, BASIS_POINT_SCALE} from "../../src/Vault/UniV3LobsterVault.sol";
 import {UniV3LobsterVaultFeesSetup} from "../Vault/VaultSetups/WithRealModules/UniswapV3VaultFeesSetup.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {MockERC20} from "../Mocks/MockERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract UniV3LobsterVaultDepositMintWithdrawRedeemFeesTest is UniV3LobsterVaultFeesSetup {
-    function testDepositFees() public {
-        // alice deposit
-        uint256 depositedAmount0 = 1 ether;
-        uint256 depositedAmount1 = 3 ether;
+    using Math for uint256;
 
-        depositToVault(alice, depositedAmount0, depositedAmount1);
-
-        // tests are done in 'depositToVault' fct
-    }
+    // no need to test deposit. Fees does not apply here
 
     function testWithdrawNoPositionsFees() public {
         uint256 aliceDeposit0 = 1 ether;
@@ -57,13 +52,19 @@ contract UniV3LobsterVaultDepositMintWithdrawRedeemFeesTest is UniV3LobsterVault
             100
         );
 
+        // Do some swaps to generate fees
+        doSomeSwaps();
+
         // Alice withdraws all her shares
         uint256 expectedAssets = vault.maxWithdraw(alice);
 
         uint256 burntShares = withdrawFromVault(alice, expectedAssets);
 
+        (uint256 totalA, uint256 totalB) = decodePackedUint128(vault.totalAssets());
+
         // Ensure all the assets have been withdrawn
-        vm.assertApproxEqAbs(vault.totalAssets(), 0, 2); // error de to rounding
+        vm.assertApproxEqAbs(totalA, 0, 2); // Allow some rounding errors in favour of the vault
+        vm.assertApproxEqAbs(totalB, 0, 2); // Allow some rounding errors in favour of the vault
         vm.assertEq(mintedShares, burntShares);
         vm.assertEq(vault.balanceOf(alice), mintedShares - burntShares);
     }
@@ -132,10 +133,16 @@ contract UniV3LobsterVaultDepositMintWithdrawRedeemFeesTest is UniV3LobsterVault
             100
         );
 
+        // Do some swaps to generate fees
+        doSomeSwaps();
+
         redeemVaultShares(alice, mintedShares);
 
+        (uint256 totalA, uint256 totalB) = decodePackedUint128(vault.totalAssets());
+
         // Ensure all the assets have been withdrawn
-        vm.assertEq(vault.totalAssets(), 0);
+        vm.assertApproxEqAbs(totalA, 0, 2); // Allow some rounding errors in favour of the vault
+        vm.assertApproxEqAbs(totalB, 0, 2); // Allow some rounding errors in favour of the vault
         vm.assertEq(0, vault.balanceOf(alice));
 
         // other necessary checks are done in 'redeemVaultShares'

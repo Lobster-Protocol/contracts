@@ -13,7 +13,7 @@ import {DummyValidator} from "../test/Mocks/modules/DummyValidator.sol";
 
 // forge script script/DeployUniV3Vault-dummyValidator.s.sol:DeployUniV3LobsterVaultDummyValidator --rpc-url sepolia --private-key <YOUR_PRIVATE_KEY> --broadcast
 contract DeployUniV3LobsterVaultDummyValidator is Script {
-    // Existing Uniswap V3 contract addresses
+    // Existing Uniswap V3 contract addresses - sepolia
     IUniswapV3FactoryMinimal constant FACTORY = IUniswapV3FactoryMinimal(0x0227628f3F023bb0B980b67D528571c95c6DaC1c);
     INonFungiblePositionManager constant POSITION_MANAGER =
         INonFungiblePositionManager(0x1238536071E1c677A632429e3655c799b22cDA52);

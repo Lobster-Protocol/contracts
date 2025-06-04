@@ -181,6 +181,10 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
         uint256 userSharesBefore;
         uint256 token0ToWithdraw;
         uint256 token1ToWithdraw;
+        uint256 feeCollectorAssets0Before;
+        uint256 feeCollectorAssets1Before;
+        uint256 expectedFeeCollected0;
+        uint256 expectedFeeCollected1;
     }
 
     // Struct to hold redeem state data
@@ -189,6 +193,10 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
         uint256 userBalance1Before;
         uint256 expectedWithdraw0;
         uint256 expectedWithdraw1;
+        uint256 feeCollectorAssets0Before;
+        uint256 feeCollectorAssets1Before;
+        uint256 expectedFeeCollected0;
+        uint256 expectedFeeCollected1;
     }
 
     // Function to withdraw assets from vault and verify results
@@ -231,8 +239,15 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
         state.vaultTotalAssetsBefore = vault.totalAssets();
         state.vaultTotalSupplyBefore = vault.totalSupply();
         state.userSharesBefore = vault.balanceOf(user);
+        state.feeCollectorAssets0Before = IERC20(uniswapV3Data.tokenA).balanceOf(vault.feeCollector());
+        state.feeCollectorAssets1Before = IERC20(uniswapV3Data.tokenB).balanceOf(vault.feeCollector());
 
         (state.token0ToWithdraw, state.token1ToWithdraw) = decodePackedUint128(packedAssetsToWithdraw);
+
+        (uint256 totalFee0, uint256 totalFee1) = getPendingFees();
+
+        state.expectedFeeCollected0 = totalFee0.mulDiv(vault.feeCutBasisPoint(), BASIS_POINT_SCALE);
+        state.expectedFeeCollected1 = totalFee1.mulDiv(vault.feeCutBasisPoint(), BASIS_POINT_SCALE);
     }
 
     // Helper function to verify withdrawal results
@@ -262,8 +277,8 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
         (uint256 total0Before, uint256 total1Before) = decodePackedUint128(state.vaultTotalAssetsBefore);
         (uint256 total0After, uint256 total1After) = decodePackedUint128(vault.totalAssets());
 
-        assertEq(total0Before - total0After, state.token0ToWithdraw);
-        assertEq(total1Before - total1After, state.token1ToWithdraw);
+        assertApproxEqAbs(total0Before - total0After, state.token0ToWithdraw, 1);
+        assertApproxEqAbs(total1Before - total1After, state.token1ToWithdraw, 1);
 
         // Verify shares were burned correctly
         assertEq(state.vaultTotalSupplyBefore - vault.totalSupply(), sharesRedeemed);
@@ -271,6 +286,12 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
 
         // Verify expected shares match actual shares redeemed
         assertEq(expectedShares, sharesRedeemed);
+
+        uint256 currentFeeCollectorBalance0 = IERC20(uniswapV3Data.tokenA).balanceOf(vault.feeCollector());
+        uint256 currentFeeCollectorBalance1 = IERC20(uniswapV3Data.tokenB).balanceOf(vault.feeCollector());
+
+        assertEq(state.expectedFeeCollected0 + state.feeCollectorAssets0Before, currentFeeCollectorBalance0);
+        assertEq(state.expectedFeeCollected1 + state.feeCollectorAssets1Before, currentFeeCollectorBalance1);
     }
 
     // Function to redeem vault shares and verify results
@@ -304,6 +325,16 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
 
         uint256 expectedWithdraw = vault.previewRedeem(sharesToRedeem);
         (state.expectedWithdraw0, state.expectedWithdraw1) = decodePackedUint128(expectedWithdraw);
+
+        state.feeCollectorAssets0Before = IERC20(uniswapV3Data.tokenA).balanceOf(vault.feeCollector());
+        state.feeCollectorAssets1Before = IERC20(uniswapV3Data.tokenB).balanceOf(vault.feeCollector());
+
+        (state.expectedWithdraw0, state.expectedWithdraw1) = decodePackedUint128(vault.previewRedeem(sharesToRedeem));
+
+        (uint256 totalFee0, uint256 totalFee1) = getPendingFees();
+
+        state.expectedFeeCollected0 = totalFee0.mulDiv(vault.feeCutBasisPoint(), BASIS_POINT_SCALE);
+        state.expectedFeeCollected1 = totalFee1.mulDiv(vault.feeCutBasisPoint(), BASIS_POINT_SCALE);
     }
 
     // Helper function to verify redeem results
@@ -313,6 +344,12 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
 
         assertEq(userBalance0After, state.expectedWithdraw0 + state.userBalance0Before);
         assertEq(userBalance1After, state.expectedWithdraw1 + state.userBalance1Before);
+
+        uint256 currentFeeCollectorBalance0 = IERC20(uniswapV3Data.tokenA).balanceOf(vault.feeCollector());
+        uint256 currentFeeCollectorBalance1 = IERC20(uniswapV3Data.tokenB).balanceOf(vault.feeCollector());
+
+        assertEq(state.expectedFeeCollected0 + state.feeCollectorAssets0Before, currentFeeCollectorBalance0);
+        assertEq(state.expectedFeeCollected1 + state.feeCollectorAssets1Before, currentFeeCollectorBalance1);
     }
 
     function maxWithdraw(address user) internal returns (uint256 packedMaxWithdrawableAssets) {
@@ -546,5 +583,52 @@ contract UniswapV3VaultUtils is UniswapV3Infra {
         positions.totalPositions1 += amount1;
         positions.totalFees0 += fee0;
         positions.totalFees1 += fee1;
+    }
+
+    // Do some swaps to generate fees
+    function doSomeSwaps() public {
+        // act like a random user and swap some tokens
+        address randomUser = makeAddr("randomUser");
+
+        vm.startPrank(randomUser);
+        // mint both tokens
+        MockERC20(uniswapV3Data.tokenA).mint(randomUser, 1000 ether); // 1000 tokens with 18 decimals
+        MockERC20(uniswapV3Data.tokenB).mint(randomUser, 1000 ether); // 1000 tokens with 18 decimals
+        // approve the router to spend the tokens
+        MockERC20(uniswapV3Data.tokenA).approve(address(uniswapV3Data.router), type(uint256).max);
+        MockERC20(uniswapV3Data.tokenB).approve(address(uniswapV3Data.router), type(uint256).max);
+
+        // swap some tokens
+        uniswapV3Data.router.exactInputSingle(
+            IUniswapV3RouterMinimal.ExactInputSingleParams({
+                tokenIn: uniswapV3Data.tokenA,
+                tokenOut: uniswapV3Data.tokenB,
+                fee: uniswapV3Data.poolFee,
+                recipient: randomUser,
+                deadline: block.timestamp,
+                amountIn: 1 ether,
+                amountOutMinimum: 0, // no slippage protection
+                sqrtPriceLimitX96: 0
+            })
+        );
+    }
+
+    function getPendingFees() public view returns (uint256 totalFee0, uint256 totalFee1) {
+        INonFungiblePositionManager positionManager = uniswapV3Data.positionManager;
+
+        // Get the amount of uncollected fees
+        // Get the total number of NFT positions owned by the user
+        uint256 balance = positionManager.balanceOf(address(vault));
+
+        // Iterate through all positions owned by the vault
+        for (uint256 i = 0; i < balance; i++) {
+            // Get the tokenId for the current position
+            uint256 tokenId = positionManager.tokenOfOwnerByIndex(address(vault), i);
+
+            (uint256 fee0, uint256 fee1) = PositionValue.fees(positionManager, tokenId);
+
+            totalFee0 += fee0;
+            totalFee1 += fee1;
+        }
     }
 }
