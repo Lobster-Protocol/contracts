@@ -213,6 +213,8 @@ contract UniV3LobsterVault is LobsterVault {
      * @param posVars The position variables containing all necessary data for the operations
      */
     function _executePositionWithdrawal(PositionVars memory posVars) internal {
+        // todo: if the position is left with low liquidity, burn it
+
         // Decrease liquidity if there are amounts to withdraw
         if (posVars.toWithdraw0 > 0 || posVars.toWithdraw1 > 0) {
             INonFungiblePositionManager.DecreaseLiquidityParams memory params = INonFungiblePositionManager
