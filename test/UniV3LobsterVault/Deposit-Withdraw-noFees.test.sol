@@ -68,6 +68,44 @@ contract UniV3LobsterVaultDepositMintWithdrawRedeemNoFeesTest is UniV3LobsterVau
         vm.assertEq(vault.balanceOf(alice), mintedShares - burntShares);
     }
 
+     // Should withdraw the necessary funds from the uniswap positions
+    function testWithdrawTooManyTokensWithPositionNoFees() public {
+        // Alice deposits into the vault
+        uint256 aliceDeposit0 = 1 ether;
+        uint256 aliceDeposit1 = 3 ether;
+
+        depositToVault(alice, aliceDeposit0, aliceDeposit1);
+
+        // get both token amounts
+        uint256 tokenAInVault = IERC20(uniswapV3Data.tokenA).balanceOf(address(vault));
+        uint256 tokenBInVault = IERC20(uniswapV3Data.tokenB).balanceOf(address(vault));
+
+        // allow the position manager to spend the tokens
+        vaultOpApproveToken(uniswapV3Data.tokenA, address(uniswapV3Data.positionManager));
+
+        // Create a new position with the swapped tokens
+        vaultOpMintUniswapPosition(
+            uniswapV3Data.tokenA > uniswapV3Data.tokenB ? tokenAInVault : tokenBInVault / 3, // todo: get the expected amount using sqrt prices
+            uniswapV3Data.tokenA > uniswapV3Data.tokenB
+                ? tokenBInVault / 3 // todo: get the expected amount using sqrt prices
+                : tokenAInVault,
+            -6000,
+            6000,
+            100
+        );
+
+        // Alice withdraws all her shares
+        uint256 expectedAssets = vault.maxWithdraw(alice);
+
+        vm.expectRevert();
+        (uint128 maxToken0Withdrawn, uint128 maxToken1Withdrawn) = decodePackedUint128(expectedAssets);
+        uint256 tooManyAssets = packUint128(
+            maxToken0Withdrawn + 2,
+           maxToken1Withdrawn + 2
+        );
+        withdrawFromVault(alice, tooManyAssets);
+    }
+
     function testMintNoFees() public {
         // alice shares to mint
         uint256 sharesToMint = 1 ether;
