@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.20;
 
-import "forge-std/Test.sol";
-import "forge-std/console.sol";
-
 import {IUniswapV3MintCallback} from "./interfaces/uniswapV3/IUniswapV3MintCallback.sol";
 import {IUniswapV3PoolMinimal} from "./interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {TransferHelper} from "./libraries/uniswapV3/TransferHelper.sol";
@@ -54,11 +51,10 @@ contract UniswapV3Proxy is IUniswapV3MintCallback {
     {
         PoolAddress.PoolKey memory poolKey =
             PoolAddress.PoolKey({token0: params.token0, token1: params.token1, fee: params.fee});
-        console.log("pool key set");
+
         // Get the pool address
         IUniswapV3PoolMinimal pool = IUniswapV3PoolMinimal(PoolAddress.computeAddress(UNI_V3_FACTORY, poolKey));
-        console.log("pool code length: ", address(pool).code.length);
-        console.log("pool factory: ", pool.factory());
+
         // compute the liquidity amount
         uint128 liquidity;
         {
@@ -87,7 +83,7 @@ contract UniswapV3Proxy is IUniswapV3MintCallback {
 
         // Make sure caller is a contract deployed by the Uniswap V3 factory
         CallbackValidation.verifyCallback(UNI_V3_FACTORY, decoded.poolKey);
-        console.log("UniswapV3Proxy: mint callback approved");
+
         if (amount0Owed > 0) {
             TransferHelper.safeTransferFrom(decoded.poolKey.token0, decoded.payer, msg.sender, amount0Owed);
         }
