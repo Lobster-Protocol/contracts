@@ -88,7 +88,7 @@ contract UniswapV3Proxy is IUniswapV3MintCallback {
             TransferHelper.safeTransferFrom(decoded.poolKey.token0, decoded.payer, msg.sender, amount0Owed);
         }
         if (amount1Owed > 0) {
-            TransferHelper.safeTransferFrom(decoded.poolKey.token1, decoded.payer, msg.sender, amount0Owed);
+            TransferHelper.safeTransferFrom(decoded.poolKey.token1, decoded.payer, msg.sender, amount1Owed);
         }
     }
 }
