@@ -51,22 +51,10 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
                                 EVENTS
     //////////////////////////////////////////////////////////////*/
 
-    event ExecutorUpdateInitiated(
-        address indexed newExecutor,
-        uint256 timestamp
-    );
-    event ExecutorUpdated(
-        address indexed oldExecutor,
-        address indexed newExecutor
-    );
-    event ExecutorManagerUpdateInitiated(
-        address indexed newManager,
-        uint256 timestamp
-    );
-    event ExecutorManagerUpdated(
-        address indexed oldManager,
-        address indexed newManager
-    );
+    event ExecutorUpdateInitiated(address indexed newExecutor, uint256 timestamp);
+    event ExecutorUpdated(address indexed oldExecutor, address indexed newExecutor);
+    event ExecutorManagerUpdateInitiated(address indexed newManager, uint256 timestamp);
+    event ExecutorManagerUpdated(address indexed oldManager, address indexed newManager);
     event DepositorApprovalChanged(address indexed depositor, bool approved);
     event WithdrawerApprovalChanged(address indexed withdrawer, bool approved);
     event ExecutorUpdateCancelled(address indexed cancelledExecutor);
@@ -107,16 +95,10 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
      * @notice Initialize the vault with an initial owner
      * @param initialOwner The address that will become the initial owner
      */
-    constructor(
-        address initialOwner,
-        address initialExecutor,
-        address initialExecutorManager
-    ) Ownable(initialOwner) {
-        if (
-            initialOwner == address(0) ||
-            initialExecutor == address(0) ||
-            initialExecutorManager == address(0)
-        ) revert ZeroAddress();
+    constructor(address initialOwner, address initialExecutor, address initialExecutorManager) Ownable(initialOwner) {
+        if (initialOwner == address(0) || initialExecutor == address(0) || initialExecutorManager == address(0)) {
+            revert ZeroAddress();
+        }
 
         executor = initialExecutor;
         executorManager = initialExecutorManager;
@@ -136,9 +118,7 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
      * @notice Initiate executor update with time delay
      * @param newExecutor Address of the new executor
      */
-    function setExecutor(
-        address newExecutor
-    ) external onlyExecutorManagerOrOwner {
+    function setExecutor(address newExecutor) external onlyExecutorManagerOrOwner {
         if (newExecutor == address(0)) revert ZeroAddress();
 
         pendingExecutor = newExecutor;
@@ -193,10 +173,7 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
         pendingExecutorManager = newExecutorManager;
         executorManagerUpdatedAt = block.timestamp;
 
-        emit ExecutorManagerUpdateInitiated(
-            newExecutorManager,
-            block.timestamp
-        );
+        emit ExecutorManagerUpdateInitiated(newExecutorManager, block.timestamp);
     }
 
     /**
@@ -239,11 +216,7 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
      * @notice Get time remaining for executor update
      * @return remainingTime Time in seconds remaining for delay, 0 if ready
      */
-    function getExecutorUpdateTimeRemaining()
-        external
-        view
-        returns (uint256 remainingTime)
-    {
+    function getExecutorUpdateTimeRemaining() external view returns (uint256 remainingTime) {
         if (pendingExecutor == address(0) || executorUpdatedAt == 0) {
             return 0;
         }
@@ -260,15 +233,8 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
      * @notice Get time remaining for executor manager update
      * @return remainingTime Time in seconds remaining for delay, 0 if ready
      */
-    function getExecutorManagerUpdateTimeRemaining()
-        external
-        view
-        returns (uint256 remainingTime)
-    {
-        if (
-            pendingExecutorManager == address(0) ||
-            executorManagerUpdatedAt == 0
-        ) {
+    function getExecutorManagerUpdateTimeRemaining() external view returns (uint256 remainingTime) {
+        if (pendingExecutorManager == address(0) || executorManagerUpdatedAt == 0) {
             return 0;
         }
 
@@ -290,11 +256,7 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
      * @param to Address to send tokens to
      * @param amount Amount to recover
      */
-    function emergencyRecoverToken(
-        address token,
-        address to,
-        uint256 amount
-    ) external onlyOwner {
+    function emergencyRecoverToken(address token, address to, uint256 amount) external onlyOwner {
         if (token == address(0) || to == address(0)) revert ZeroAddress();
         if (amount == 0) revert ZeroValue();
 
@@ -306,15 +268,12 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
      * @param to Address to send ETH to
      * @param amount Amount to recover
      */
-    function emergencyRecoverETH(
-        address to,
-        uint256 amount
-    ) external onlyOwner {
+    function emergencyRecoverETH(address to, uint256 amount) external onlyOwner {
         if (to == address(0)) revert ZeroAddress();
         if (amount == 0) revert ZeroValue();
         if (address(this).balance < amount) revert("Insufficient balance");
 
-        (bool success, ) = payable(to).call{value: amount}("");
+        (bool success,) = payable(to).call{value: amount}("");
         require(success, "ETH transfer failed");
     }
 }
