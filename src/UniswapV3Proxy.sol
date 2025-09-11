@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.20;
 
-import {IUniswapV3MintCallback} from "./interfaces/uniswapV3/IUniswapV3MintCallback.sol";
+import {IUniswapV3MintCallback, MintParams, MintCallbackData} from "./interfaces/uniswapV3/IUniswapV3MintCallback.sol";
 import {IUniswapV3PoolMinimal} from "./interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {TransferHelper} from "./libraries/uniswapV3/TransferHelper.sol";
 import {PoolAddress} from "./libraries/uniswapV3/PoolAddress.sol";
@@ -9,25 +9,6 @@ import {IWETH} from "./interfaces/IWETH.sol";
 import {TickMath} from "./libraries/uniswapV3/TickMath.sol";
 import {LiquidityAmounts} from "./libraries/uniswapV3/LiquidityAmounts.sol";
 import {CallbackValidation} from "./libraries/uniswapV3/CallbackValidation.sol";
-
-struct MintCallbackData {
-    PoolAddress.PoolKey poolKey;
-    address payer;
-}
-
-struct MintParams {
-    address token0;
-    address token1;
-    uint24 fee;
-    int24 tickLower;
-    int24 tickUpper;
-    uint256 amount0Desired;
-    uint256 amount1Desired;
-    uint256 amount0Min;
-    uint256 amount1Min;
-    address recipient;
-    uint256 deadline;
-}
 
 contract UniswapV3Proxy is IUniswapV3MintCallback {
     address public immutable WETH;
