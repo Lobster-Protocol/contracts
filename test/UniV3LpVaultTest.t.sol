@@ -3,17 +3,27 @@ pragma solidity >=0.8.20;
 
 import "forge-std/Test.sol";
 import "forge-std/console.sol";
-import {UniV3LpVault} from "../src/vaults/UniV3LpVault.sol";
+import {
+    UniV3LpVault,
+    MinimalMintParams,
+    SCALING_FACTOR,
+    MAX_SCALED_PERCENTAGE,
+    SingleVault,
+    Position
+} from "../src/vaults/UniV3LpVault.sol";
 import {IWETH} from "../src/interfaces/IWETH.sol";
 import {MockERC20} from "./Mocks/MockERC20.sol";
 import {UniswapV3Infra} from "./Mocks/uniswapV3/UniswapV3Infra.sol";
 import {IUniswapV3FactoryMinimal} from "../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 uint24 constant FEE = 3000; // 0.3%
 
 contract UniV3LpVaultTest is Test {
+    using Math for uint256;
+
     address vaultOwner = makeAddr("vaultOwner");
     address executor = makeAddr("executor");
     address executorManager = makeAddr("executorManager");
@@ -80,6 +90,8 @@ contract UniV3LpVaultTest is Test {
         uint256 initialOwnerBalance1 = token1.balanceOf(vaultOwner);
 
         vm.startPrank(vaultOwner);
+        vm.expectEmit(true, true, true, true);
+        emit UniV3LpVault.Deposit(deposit0, deposit1);
         vault.deposit(deposit0, deposit1);
         vm.stopPrank();
 
@@ -101,6 +113,341 @@ contract UniV3LpVaultTest is Test {
         vm.startPrank(notOwner);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, notOwner));
         vault.deposit(deposit0, deposit1);
+        vm.stopPrank();
+    }
+
+    function testDepositZeroTokens() public {
+        uint256 deposit0 = 0;
+        uint256 deposit1 = 0;
+
+        vm.startPrank(vaultOwner);
+        vm.expectRevert(SingleVault.ZeroValue.selector);
+        vault.deposit(deposit0, deposit1);
+        vm.stopPrank();
+    }
+
+    function testWithdrawLp() public {
+        uint256 deposit0 = 2 ether;
+        uint256 deposit1 = 5 ether;
+
+        vm.startPrank(vaultOwner);
+        vault.deposit(deposit0, deposit1);
+        vm.stopPrank();
+
+        // Let's create some positions with the executor & do some swaps
+        vm.startPrank(executor);
+        (, int24 currentTick,,,,,) = pool.slot0();
+        int24 lowerTick = currentTick - 6000;
+        int24 upperTick = currentTick + 6000;
+
+        uint256 amount0Desired = 2 ether;
+        uint256 amount1Desired = 2 ether;
+
+        MinimalMintParams memory mintParams = MinimalMintParams({
+            tickLower: lowerTick,
+            tickUpper: upperTick,
+            amount0Desired: amount0Desired,
+            amount1Desired: amount1Desired,
+            amount0Min: 0,
+            amount1Min: 0,
+            deadline: block.timestamp
+        });
+        vault.mint(mintParams);
+        vm.stopPrank();
+
+        // Owner withdraw
+        uint256 withdrawScaledPercentage = 50 * SCALING_FACTOR;
+        address receiver = makeAddr("random receiver");
+
+        uint256 initialReceiverBalance0 = token0.balanceOf(receiver);
+        uint256 initialReceiverBalance1 = token1.balanceOf(receiver);
+
+        vm.startPrank(vaultOwner);
+        vault.withdraw(withdrawScaledPercentage, receiver);
+        vm.stopPrank();
+
+        uint256 expectedWithdraw0 = deposit0.mulDiv(withdrawScaledPercentage, MAX_SCALED_PERCENTAGE);
+        uint256 expectedWithdraw1 = deposit1.mulDiv(withdrawScaledPercentage, MAX_SCALED_PERCENTAGE);
+        assertApproxEqRel(initialReceiverBalance0 + expectedWithdraw0, token0.balanceOf(receiver), 1);
+        assertApproxEqRel(initialReceiverBalance1 + expectedWithdraw1, token1.balanceOf(receiver), 1);
+
+        (uint256 finalVaultTotalToken0, uint256 finalVaultTotalToken1) = vault.netAssetsValue();
+
+        assertApproxEqRel(deposit0.mulDiv(withdrawScaledPercentage, MAX_SCALED_PERCENTAGE), finalVaultTotalToken0, 1);
+        assertApproxEqRel(deposit1.mulDiv(withdrawScaledPercentage, MAX_SCALED_PERCENTAGE), finalVaultTotalToken1, 1);
+    }
+
+    function testWithdrawLpMultiplePositions() public {
+        uint256 deposit0 = 7 ether;
+        uint256 deposit1 = 13 ether;
+
+        vm.startPrank(vaultOwner);
+        vault.deposit(deposit0, deposit1);
+        vm.stopPrank();
+
+        // Let's create some positions with the executor & do some swaps
+        vm.startPrank(executor);
+        (, int24 currentTick,,,,,) = pool.slot0();
+
+        // Mint first position
+        int24 lowerTick = currentTick - 6000;
+        int24 upperTick = currentTick + 6000;
+
+        uint256 amount0Desired = 2 ether;
+        uint256 amount1Desired = 2 ether;
+
+        MinimalMintParams memory mintParams = MinimalMintParams({
+            tickLower: lowerTick,
+            tickUpper: upperTick,
+            amount0Desired: amount0Desired,
+            amount1Desired: amount1Desired,
+            amount0Min: 0,
+            amount1Min: 0,
+            deadline: block.timestamp
+        });
+        vault.mint(mintParams);
+
+        // Mint second position
+        int24 lowerTick2 = currentTick - 12000;
+        int24 upperTick2 = currentTick + 6000;
+
+        uint256 amount0Desired2 = 5 ether;
+        uint256 amount1Desired2 = 5 ether;
+
+        MinimalMintParams memory mintParams2 = MinimalMintParams({
+            tickLower: lowerTick2,
+            tickUpper: upperTick2,
+            amount0Desired: amount0Desired2,
+            amount1Desired: amount1Desired2,
+            amount0Min: 0,
+            amount1Min: 0,
+            deadline: block.timestamp
+        });
+        vault.mint(mintParams2);
+        vm.stopPrank();
+
+        // Owner withdraw
+        uint256 withdrawScaledPercentage = 50 * SCALING_FACTOR;
+        address receiver = makeAddr("random receiver");
+
+        uint256 initialReceiverBalance0 = token0.balanceOf(receiver);
+        uint256 initialReceiverBalance1 = token1.balanceOf(receiver);
+
+        vm.startPrank(vaultOwner);
+        vault.withdraw(withdrawScaledPercentage, receiver);
+        vm.stopPrank();
+
+        uint256 expectedWithdraw0 = deposit0.mulDiv(withdrawScaledPercentage, MAX_SCALED_PERCENTAGE);
+        uint256 expectedWithdraw1 = deposit1.mulDiv(withdrawScaledPercentage, MAX_SCALED_PERCENTAGE);
+        assertApproxEqRel(initialReceiverBalance0 + expectedWithdraw0, token0.balanceOf(receiver), 1);
+        assertApproxEqRel(initialReceiverBalance1 + expectedWithdraw1, token1.balanceOf(receiver), 1);
+
+        (uint256 finalVaultTotalToken0, uint256 finalVaultTotalToken1) = vault.netAssetsValue();
+
+        assertApproxEqRel(deposit0.mulDiv(withdrawScaledPercentage, MAX_SCALED_PERCENTAGE), finalVaultTotalToken0, 1);
+        assertApproxEqRel(deposit1.mulDiv(withdrawScaledPercentage, MAX_SCALED_PERCENTAGE), finalVaultTotalToken1, 1);
+    }
+
+    function testWithdrawWrongScaledPercent() public {
+        uint256 deposit0 = 2 ether;
+        uint256 deposit1 = 5 ether;
+
+        vm.startPrank(vaultOwner);
+        vault.deposit(deposit0, deposit1);
+        vm.stopPrank();
+
+        // Let's create some positions with the executor & do some swaps
+        vm.startPrank(executor);
+        (, int24 currentTick,,,,,) = pool.slot0();
+        int24 lowerTick = currentTick - 6000;
+        int24 upperTick = currentTick + 6000;
+
+        uint256 amount0Desired = 2 ether;
+        uint256 amount1Desired = 2 ether;
+
+        MinimalMintParams memory mintParams = MinimalMintParams({
+            tickLower: lowerTick,
+            tickUpper: upperTick,
+            amount0Desired: amount0Desired,
+            amount1Desired: amount1Desired,
+            amount0Min: 0,
+            amount1Min: 0,
+            deadline: block.timestamp
+        });
+        vault.mint(mintParams);
+        vm.stopPrank();
+
+        // Owner withdraw
+        uint256 withdrawScaledPercentage = MAX_SCALED_PERCENTAGE + 1;
+        address receiver = makeAddr("random receiver");
+
+        vm.startPrank(vaultOwner);
+        vm.expectRevert(UniV3LpVault.InvalidScalingFactor.selector);
+        vault.withdraw(withdrawScaledPercentage, receiver);
+        vm.stopPrank();
+    }
+
+    function testWithdrawZeroPercent() public {
+        uint256 deposit0 = 2 ether;
+        uint256 deposit1 = 5 ether;
+
+        vm.startPrank(vaultOwner);
+        vault.deposit(deposit0, deposit1);
+        vm.stopPrank();
+
+        // Let's create some positions with the executor & do some swaps
+        vm.startPrank(executor);
+        (, int24 currentTick,,,,,) = pool.slot0();
+        int24 lowerTick = currentTick - 6000;
+        int24 upperTick = currentTick + 6000;
+
+        uint256 amount0Desired = 2 ether;
+        uint256 amount1Desired = 2 ether;
+
+        MinimalMintParams memory mintParams = MinimalMintParams({
+            tickLower: lowerTick,
+            tickUpper: upperTick,
+            amount0Desired: amount0Desired,
+            amount1Desired: amount1Desired,
+            amount0Min: 0,
+            amount1Min: 0,
+            deadline: block.timestamp
+        });
+        vault.mint(mintParams);
+        vm.stopPrank();
+
+        // Owner withdraw
+        address receiver = makeAddr("random receiver");
+
+        vm.startPrank(vaultOwner);
+        vm.expectRevert(SingleVault.ZeroValue.selector);
+        vault.withdraw(0, receiver);
+        vm.stopPrank();
+    }
+
+    function testWithdrawMultipleLpsAndSwaps() public {
+        // todo: complete (copy/paste testWithdrawLp), add some Lps and some swaps (but needs to pass throug a proxy because of the swap callback)
+    }
+
+    function testMint() public {
+        uint256 deposit0 = 1 ether;
+        uint256 deposit1 = 3 ether;
+
+        vm.startPrank(vaultOwner);
+        vault.deposit(deposit0, deposit1);
+        vm.stopPrank();
+
+        vm.startPrank(executor);
+        (, int24 currentTick,,,,,) = pool.slot0();
+        int24 lowerTick = currentTick - 6000;
+        int24 upperTick = currentTick + 6000;
+
+        uint256 amount0Desired = 0.5 ether;
+        uint256 amount1Desired = 0.5 ether;
+
+        MinimalMintParams memory mintParams = MinimalMintParams({
+            tickLower: lowerTick,
+            tickUpper: upperTick,
+            amount0Desired: amount0Desired,
+            amount1Desired: amount1Desired,
+            amount0Min: 0.5 ether,
+            amount1Min: 0.5 ether,
+            deadline: block.timestamp
+        });
+        vault.mint(mintParams);
+        vm.stopPrank();
+
+        assertEq(token0.balanceOf(address(vault)), deposit0 - amount0Desired);
+        assertEq(token1.balanceOf(address(vault)), deposit1 - amount1Desired);
+
+        (uint256 totalLp0, uint256 totalLp1) = vault.totalLpValue();
+        assertApproxEqAbs(totalLp0, amount0Desired, 1);
+        assertApproxEqAbs(totalLp1, amount1Desired, 1);
+    }
+
+    function testMintMultipleRanges() public {
+        uint256 deposit0 = 2 ether;
+        uint256 deposit1 = 2 ether;
+
+        vm.startPrank(vaultOwner);
+        vault.deposit(deposit0, deposit1);
+        vm.stopPrank();
+
+        vm.startPrank(executor);
+        (, int24 currentTick,,,,,) = pool.slot0();
+        int24 lowerTick = currentTick - 6000;
+        int24 upperTick = currentTick + 6000;
+
+        uint256 amount0Desired = 0.5 ether;
+        uint256 amount1Desired = 0.5 ether;
+
+        MinimalMintParams memory mintParams = MinimalMintParams({
+            tickLower: lowerTick,
+            tickUpper: upperTick,
+            amount0Desired: amount0Desired,
+            amount1Desired: amount1Desired,
+            amount0Min: 0.5 ether,
+            amount1Min: 0.5 ether,
+            deadline: block.timestamp
+        });
+        vault.mint(mintParams);
+
+        // Mint same Range
+        uint256 amount0Desired2 = 0.5 ether;
+        uint256 amount1Desired2 = 0.5 ether;
+
+        MinimalMintParams memory mintParams2 = MinimalMintParams({
+            tickLower: lowerTick,
+            tickUpper: upperTick,
+            amount0Desired: amount0Desired2,
+            amount1Desired: amount1Desired2,
+            amount0Min: 0,
+            amount1Min: 0,
+            deadline: block.timestamp
+        });
+        vault.mint(mintParams2);
+        vm.stopPrank();
+
+        Position memory position0 = vault.getPosition(0);
+
+        assertEq(token0.balanceOf(address(vault)), deposit0 - amount0Desired - amount0Desired2);
+        assertEq(token1.balanceOf(address(vault)), deposit1 - amount1Desired - amount1Desired2);
+
+        (uint256 totalLp0, uint256 totalLp1) = vault.totalLpValue();
+        assertApproxEqAbs(totalLp0, amount0Desired + amount0Desired2, 1);
+        assertApproxEqAbs(totalLp1, amount1Desired + amount1Desired2, 1);
+    }
+
+    function testMintWrongCaller() public {
+        uint256 deposit0 = 1 ether;
+        uint256 deposit1 = 3 ether;
+
+        vm.startPrank(vaultOwner);
+        vault.deposit(deposit0, deposit1);
+        vm.stopPrank();
+
+        vm.startPrank(executor);
+        (, int24 currentTick,,,,,) = pool.slot0();
+        int24 lowerTick = currentTick - 6000;
+        int24 upperTick = currentTick + 6000;
+
+        uint256 amount0Desired = 0.5 ether;
+        uint256 amount1Desired = 0.5 ether;
+
+        MinimalMintParams memory mintParams = MinimalMintParams({
+            tickLower: lowerTick,
+            tickUpper: upperTick,
+            amount0Desired: amount0Desired,
+            amount1Desired: amount1Desired,
+            amount0Min: 0.5 ether,
+            amount1Min: 0.5 ether,
+            deadline: block.timestamp
+        });
+        vm.stopPrank();
+
+        vm.startPrank(makeAddr("SomeRandomDude"));
+        vm.expectRevert(SingleVault.Unauthorized.selector);
+        vault.mint(mintParams);
         vm.stopPrank();
     }
 }

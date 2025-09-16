@@ -11,7 +11,6 @@ import {LiquidityAmounts} from "./libraries/uniswapV3/LiquidityAmounts.sol";
 import {CallbackValidation} from "./libraries/uniswapV3/CallbackValidation.sol";
 
 contract UniswapV3Proxy is IUniswapV3MintCallback {
-    address public immutable WETH;
     address public immutable UNI_V3_FACTORY;
 
     modifier checkDeadline(uint256 deadline) {
@@ -19,8 +18,7 @@ contract UniswapV3Proxy is IUniswapV3MintCallback {
         _;
     }
 
-    constructor(address _weth, address _uniV3Factory) {
-        WETH = _weth;
+    constructor(address _uniV3Factory) {
         UNI_V3_FACTORY = _uniV3Factory;
     }
 

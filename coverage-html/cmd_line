@@ -1,0 +1,1 @@
+genhtml coverage.lcov -o coverage-html --branch-coverage --function-coverage --ignore-errors inconsistent,corrupt

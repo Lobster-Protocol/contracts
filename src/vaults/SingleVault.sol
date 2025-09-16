@@ -55,8 +55,6 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
     event ExecutorUpdated(address indexed oldExecutor, address indexed newExecutor);
     event ExecutorManagerUpdateInitiated(address indexed newManager, uint256 timestamp);
     event ExecutorManagerUpdated(address indexed oldManager, address indexed newManager);
-    event DepositorApprovalChanged(address indexed depositor, bool approved);
-    event WithdrawerApprovalChanged(address indexed withdrawer, bool approved);
     event ExecutorUpdateCancelled(address indexed cancelledExecutor);
     event ExecutorManagerUpdateCancelled(address indexed cancelledManager);
 
@@ -75,8 +73,8 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
                                 MODIFIERS
     //////////////////////////////////////////////////////////////*/
 
-    modifier onlyExecutor() {
-        if (msg.sender != executor) revert Unauthorized();
+    modifier onlyOwnerOrExecutor() {
+        require(msg.sender == owner() || msg.sender == executor, Unauthorized());
         _;
     }
 
@@ -276,4 +274,6 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
         (bool success,) = payable(to).call{value: amount}("");
         require(success, "ETH transfer failed");
     }
+
+    // todo: add call fct
 }

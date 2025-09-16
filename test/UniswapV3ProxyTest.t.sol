@@ -54,7 +54,7 @@ contract UniswapV3ProxyTest is Test {
             uniswapV3.createPoolAndInitialize(factory, address(weth), address(token1), FEE, initialSqrtPriceX96);
 
         // Deploy proxy
-        proxy = new UniswapV3Proxy(address(weth), address(factory));
+        proxy = new UniswapV3Proxy(address(factory));
 
         // Setup user balances
         vm.deal(user, 10_000 ether);
@@ -70,7 +70,6 @@ contract UniswapV3ProxyTest is Test {
     }
 
     function testConstructor() public view {
-        assertEq(proxy.WETH(), address(weth));
         assertEq(proxy.UNI_V3_FACTORY(), address(pool.factory()));
     }
 
