@@ -136,11 +136,9 @@ forge test -vvv
 forge test --match-path test/VaultTest.sol
 
 # Get the coverage report
-forge coverage --no-match-coverage "(test|script|lib)" --ir-minimum
-
-# Visualize coverage report
-genhtml --rc derive_function_end_line=0 lcov.info -o coverage-report
-open coverage-report/index.html
+forge coverage --report lcov --report-file coverage.lcov --ir-minimum
+genhtml coverage.lcov -o coverage-html --branch-coverage --function-coverage --ignore-errors inconsistent,corrupt
+open coverage-html/index.html
 ```
 
 ### Code Quality
@@ -166,7 +164,7 @@ forge doc --build
 1. **Inherit Base Contracts**: Extend `ERC4626WithOpValidator` or `LobsterVault`
 2. **Override Key Functions**: Implement your protocol-specific logic in:
    - `deposit()` - Custom deposit handling
-   - `withdraw()` - Custom withdrawal logic  
+   - `withdraw()` - Custom withdrawal logic
    - `totalAssets()` - Asset valuation for your protocol
    - `_convertToShares()` / `_convertToAssets()` - Share conversion logic
    - All the `preview*`and `max*` functions if necessary

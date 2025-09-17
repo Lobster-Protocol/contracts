@@ -18,6 +18,8 @@ import {IUniswapV3FactoryMinimal} from "../src/interfaces/uniswapV3/IUniswapV3Fa
 import {IUniswapV3PoolMinimal} from "../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {MintCallbackData} from "../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
+import {PoolAddress} from "../src/libraries/uniswapV3/PoolAddress.sol";
 
 uint24 constant FEE = 3000; // 0.3%
 
@@ -393,8 +395,8 @@ contract UniV3LpVaultTest is Test {
         vault.mint(mintParams);
 
         // Mint same Range
-        uint256 amount0Desired2 = 0.5 ether;
-        uint256 amount1Desired2 = 0.5 ether;
+        uint256 amount0Desired2 = 0.1 ether;
+        uint256 amount1Desired2 = 0.1 ether;
 
         MinimalMintParams memory mintParams2 = MinimalMintParams({
             tickLower: lowerTick,
@@ -406,16 +408,52 @@ contract UniV3LpVaultTest is Test {
             deadline: block.timestamp
         });
         vault.mint(mintParams2);
+
+        // Mint new Range
+        uint256 amount0Desired3 = 0.4 ether;
+        uint256 amount1Desired3 = 0.4 ether;
+
+        int24 lowerTick3 = currentTick - 12000;
+        int24 upperTick3 = currentTick + 12000;
+
+        MinimalMintParams memory mintParams3 = MinimalMintParams({
+            tickLower: lowerTick3,
+            tickUpper: upperTick3,
+            amount0Desired: amount0Desired3,
+            amount1Desired: amount1Desired3,
+            amount0Min: 0,
+            amount1Min: 0,
+            deadline: block.timestamp
+        });
+        vault.mint(mintParams3);
         vm.stopPrank();
 
         Position memory position0 = vault.getPosition(0);
 
-        assertEq(token0.balanceOf(address(vault)), deposit0 - amount0Desired - amount0Desired2);
-        assertEq(token1.balanceOf(address(vault)), deposit1 - amount1Desired - amount1Desired2);
+        assert(position0.lowerTick == lowerTick && position0.upperTick == upperTick);
+
+        assertEq(token0.balanceOf(address(vault)), deposit0 - amount0Desired - amount0Desired2 - amount0Desired3);
+        assertEq(token1.balanceOf(address(vault)), deposit1 - amount1Desired - amount1Desired2 - amount1Desired3);
 
         (uint256 totalLp0, uint256 totalLp1) = vault.totalLpValue();
-        assertApproxEqAbs(totalLp0, amount0Desired + amount0Desired2, 1);
-        assertApproxEqAbs(totalLp1, amount1Desired + amount1Desired2, 1);
+
+        console.log(totalLp0, totalLp1);
+        console.log(
+            amount0Desired + amount0Desired2 - amount0Desired3, amount1Desired + amount1Desired2 - amount1Desired3
+        );
+        console.log(token0.balanceOf(address(vault)), token1.balanceOf(address(vault)));
+        (uint256 t0, uint256 t1) = vault.netAssetsValue();
+        console.log(t0, t1);
+        assertApproxEqAbs(
+            totalLp0,
+            amount0Desired + amount0Desired2 + amount0Desired3,
+            2 // due to multiple rounding errors
+        );
+        assertApproxEqAbs(
+            totalLp1,
+            amount1Desired + amount1Desired2 + amount1Desired3,
+            2 // due to multiple rounding errors
+        );
     }
 
     function testMintWrongCaller() public {
@@ -448,6 +486,69 @@ contract UniV3LpVaultTest is Test {
         vm.startPrank(makeAddr("SomeRandomDude"));
         vm.expectRevert(SingleVault.Unauthorized.selector);
         vault.mint(mintParams);
+        vm.stopPrank();
+    }
+
+    function testMintDeadlinePassed() public {
+        uint256 deposit0 = 1 ether;
+        uint256 deposit1 = 3 ether;
+
+        vm.startPrank(vaultOwner);
+        vault.deposit(deposit0, deposit1);
+        vm.stopPrank();
+
+        vm.startPrank(executor);
+        (, int24 currentTick,,,,,) = pool.slot0();
+        int24 lowerTick = currentTick - 6000;
+        int24 upperTick = currentTick + 6000;
+
+        uint256 amount0Desired = 0.5 ether;
+        uint256 amount1Desired = 0.5 ether;
+
+        uint256 deadline = block.timestamp + 5;
+
+        MinimalMintParams memory mintParams = MinimalMintParams({
+            tickLower: lowerTick,
+            tickUpper: upperTick,
+            amount0Desired: amount0Desired,
+            amount1Desired: amount1Desired,
+            amount0Min: 0.5 ether,
+            amount1Min: 0.5 ether,
+            deadline: deadline
+        });
+        vm.stopPrank();
+
+        vm.warp(deadline + 1);
+
+        vm.startPrank(executor);
+        vm.expectRevert("Transaction too old");
+        vault.mint(mintParams);
+        vm.stopPrank();
+    }
+
+    function testUniswapV3MintCallbackAsNotPool() public {
+        MintCallbackData memory mintCallbackData = MintCallbackData({
+            poolKey: PoolAddress.PoolKey({token0: address(token0), token1: address(token1), fee: pool.fee()}),
+            payer: address(vault)
+        });
+
+        // call as not pool
+        vm.startPrank(makeAddr("random user"));
+        vm.expectRevert(UniV3LpVault.NotPool.selector);
+        vault.uniswapV3MintCallback(0, 0, abi.encode(mintCallbackData));
+        vm.stopPrank();
+    }
+
+    function testUniswapV3MintCallbackAsWrongPayer() public {
+        MintCallbackData memory mintCallbackData = MintCallbackData({
+            poolKey: PoolAddress.PoolKey({token0: address(token0), token1: address(token1), fee: pool.fee()}),
+            payer: address(makeAddr("wrong payer"))
+        });
+
+        // call as not pool
+        vm.startPrank(address(pool));
+        vm.expectRevert(UniV3LpVault.WrongPayer.selector);
+        vault.uniswapV3MintCallback(0, 0, abi.encode(mintCallbackData));
         vm.stopPrank();
     }
 }
