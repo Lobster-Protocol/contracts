@@ -17,6 +17,8 @@ import {InternalMulticall} from "../utils/InternalMulticall.sol";
 
 uint256 constant SCALING_FACTOR = 1e18;
 uint256 constant MAX_SCALED_PERCENTAGE = 100 * SCALING_FACTOR;
+/// @dev Q128 constant for fixed-point arithmetic in Uniswap V3 fee calculations
+uint256 constant Q128 = 0x100000000000000000000000000000000;
 
 struct Position {
     int24 lowerTick;
@@ -41,9 +43,6 @@ struct MinimalMintParams {
  */
 contract UniV3LpVault is SingleVault, InternalMulticall {
     using Math for uint256;
-
-    /// @dev Q128 constant for fixed-point arithmetic in Uniswap V3 fee calculations
-    uint256 internal constant Q128 = 0x100000000000000000000000000000000;
 
     IERC20 public immutable token0;
     IERC20 public immutable token1;
