@@ -49,7 +49,7 @@ contract UniV3LpVault is SingleVault, InternalMulticall {
     IERC20 public immutable token1;
     IUniswapV3PoolMinimal public immutable pool;
     uint24 private immutable pool_fee;
-    Position[] private positions; // Supposed to hold up to 4 positions
+    Position[] private positions; // Supposed to hold up to 3 positions
 
     error NotPool();
     error WrongPayer();

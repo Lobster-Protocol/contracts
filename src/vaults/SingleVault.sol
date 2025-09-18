@@ -88,8 +88,6 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
      * @param newExecutor Address of the new executor
      */
     function setExecutor(address newExecutor) external onlyExecutorManagerOrOwner {
-        if (newExecutor == address(0)) revert ZeroAddress();
-
         executor = newExecutor;
         emit ExecutorUpdated(newExecutor);
     }
@@ -103,8 +101,6 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
      * @param newExecutorManager Address of the new executor manager
      */
     function setExecutorManager(address newExecutorManager) external onlyOwner {
-        if (newExecutorManager == address(0)) revert ZeroAddress();
-
         executorManager = newExecutorManager;
 
         emit ExecutorManagerUpdated(newExecutorManager);

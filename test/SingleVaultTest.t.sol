@@ -122,12 +122,6 @@ contract SingleVaultTest is Test {
         vault.setExecutor(newExecutor);
     }
 
-    function test_SetExecutor_RevertIf_ZeroAddress() public {
-        vm.expectRevert(SingleVault.ZeroAddress.selector);
-        vm.prank(owner);
-        vault.setExecutor(address(0));
-    }
-
     /*//////////////////////////////////////////////////////////////
                     EXECUTOR MANAGER MANAGEMENT TESTS
     //////////////////////////////////////////////////////////////*/
@@ -150,12 +144,6 @@ contract SingleVaultTest is Test {
         vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", executorManager));
         vm.prank(executorManager);
         vault.setExecutorManager(newManager);
-    }
-
-    function test_SetExecutorManager_RevertIf_ZeroAddress() public {
-        vm.expectRevert(SingleVault.ZeroAddress.selector);
-        vm.prank(owner);
-        vault.setExecutorManager(address(0));
     }
 
     /*//////////////////////////////////////////////////////////////
