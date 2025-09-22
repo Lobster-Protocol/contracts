@@ -73,6 +73,9 @@ contract UniV3LpVaultFullCycleTest is Test {
         helper.assertApproxEqual(
             totalLp0, actual_narrow_0 + actual_wide_0, TestConstants.TOLERANCE_LOW, "Total LP value0 mismatch"
         );
+        helper.assertApproxEqual(
+            totalLp1, actual_narrow_1 + actual_wide_1, TestConstants.TOLERANCE_LOW, "Total LP value0 mismatch"
+        );
 
         // === PHASE 3: Time Passes - Accumulate Fees ===
         uint256 delay = TestConstants.ONE_MONTH;
@@ -117,9 +120,7 @@ contract UniV3LpVaultFullCycleTest is Test {
         uint256 additionalAmount0 = TestConstants.SMALL_AMOUNT;
         uint256 additionalAmount1 = TestConstants.SMALL_AMOUNT;
 
-        (uint256 additional0, uint256 additional1) = helper.createPosition(
-            setup.vault, setup.executor, wide_lower, wide_upper, additionalAmount0, additionalAmount1
-        );
+        helper.createPosition(setup.vault, setup.executor, wide_lower, wide_upper, additionalAmount0, additionalAmount1);
 
         // Should still have 2 positions, but wide position should have more liquidity
         Position memory pos2_after_addition = setup.vault.getPosition(1);
@@ -166,8 +167,6 @@ contract UniV3LpVaultFullCycleTest is Test {
             TestConstants.MAX_SCALED_PERCENTAGE, // 100%
             recipient
         );
-
-        (uint256 total00, uint256 total01) = setup.vault.netAssetsValue();
 
         // Verify final withdrawal
         assertTrue(finalWithdrawn0 > 0 || finalWithdrawn1 > 0);
@@ -256,177 +255,121 @@ contract UniV3LpVaultFullCycleTest is Test {
         assertApproxEqAbs(finalNet1, 0, 1);
     }
 
-    // function test_fullCycle_WithRebalancing() public {
-    //     // Test a more complex scenario with position rebalancing
-    //     uint256 depositAmount0 = TestConstants.LARGE_AMOUNT;
-    //     uint256 depositAmount1 = TestConstants.LARGE_AMOUNT;
+    function test_fullCycle_WithRebalancing() public {
+        // Test a more complex scenario with position rebalancing
+        uint256 depositAmount0 = TestConstants.LARGE_AMOUNT;
+        uint256 depositAmount1 = TestConstants.LARGE_AMOUNT;
 
-    //     helper.depositToVault(setup, depositAmount0, depositAmount1);
+        helper.depositToVault(setup, depositAmount0, depositAmount1);
 
-    //     (, int24 currentTick, , , , , ) = setup.pool.slot0();
-    //     address recipient = makeAddr("recipient");
+        (, int24 currentTick,,,,,) = setup.pool.slot0();
+        address recipient = makeAddr("recipient");
 
-    //     // === Initial Position ===
-    //     int24 initialLower = currentTick - TestConstants.TICK_RANGE_MEDIUM;
-    //     int24 initialUpper = currentTick + TestConstants.TICK_RANGE_MEDIUM;
+        // === Initial Position ===
+        int24 initialLower = currentTick - TestConstants.TICK_RANGE_MEDIUM;
+        int24 initialUpper = currentTick + TestConstants.TICK_RANGE_MEDIUM;
 
-    //     helper.createPosition(
-    //         setup.vault,
-    //         setup.executor,
-    //         initialLower,
-    //         initialUpper,
-    //         TestConstants.MEDIUM_AMOUNT,
-    //         TestConstants.MEDIUM_AMOUNT
-    //     );
+        helper.createPosition(
+            setup.vault,
+            setup.executor,
+            initialLower,
+            initialUpper,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
 
-    //     Position memory initialPos = setup.vault.getPosition(0);
+        Position memory initialPos = setup.vault.getPosition(0);
 
-    //     // === Simulate Price Movement (Mock) ===
-    //     // In real scenario, price would move due to swaps
-    //     helper.movePoolPriceUp(setup.pool, 10); // Mock 10% price increase
+        // === Simulate Price Movement (Mock) ===
+        // In real scenario, price would move due to swaps
+        helper.movePoolPriceUp(setup.pool, 10); // Mock 10% price increase
 
-    //     // === Rebalance: Close old position, open new ===
-    //     vm.prank(setup.executor);
-    //     setup.vault.burn(initialLower, initialUpper, initialPos.liquidity);
+        // === Rebalance: Close old position, open new ===
+        vm.prank(setup.executor);
+        setup.vault.burn(initialLower, initialUpper, initialPos.liquidity);
 
-    //     // No positions should exist now
-    //     vm.expectRevert();
-    //     setup.vault.getPosition(0);
+        // No positions should exist now
+        vm.expectRevert();
+        setup.vault.getPosition(0);
 
-    //     // Create new position at different range
-    //     int24 newLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-    //     int24 newUpper = currentTick + TestConstants.TICK_RANGE_WIDE; // Asymmetric
+        // Create new position at different range
+        int24 newLower = currentTick - TestConstants.TICK_RANGE_NARROW;
+        int24 newUpper = currentTick + TestConstants.TICK_RANGE_WIDE; // Asymmetric
 
-    //     helper.createPosition(
-    //         setup.vault,
-    //         setup.executor,
-    //         newLower,
-    //         newUpper,
-    //         TestConstants.MEDIUM_AMOUNT,
-    //         TestConstants.MEDIUM_AMOUNT
-    //     );
+        helper.createPosition(
+            setup.vault, setup.executor, newLower, newUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
+        );
 
-    //     // Should have one position again
-    //     Position memory newPos = setup.vault.getPosition(0);
-    //     assertTrue(newPos.liquidity > 0);
-    //     assertTrue(
-    //         newPos.lowerTick != initialPos.lowerTick ||
-    //             newPos.upperTick != initialPos.upperTick
-    //     );
+        // Should have one position again
+        Position memory newPos = setup.vault.getPosition(0);
+        assertTrue(newPos.liquidity > 0);
+        assertTrue(newPos.lowerTick != initialPos.lowerTick || newPos.upperTick != initialPos.upperTick);
 
-    //     // === Time passes ===
-    //     helper.simulateTimePass(TestConstants.ONE_MONTH);
+        // === Time passes ===
+        helper.simulateTimePass(TestConstants.ONE_MONTH);
 
-    //     // === Final withdrawal ===
-    //     uint256 feeCollectorBefore0 = setup.token0.balanceOf(
-    //         setup.feeCollector
-    //     );
+        // === Final withdrawal ===
+        uint256 feeCollectorBefore0 = setup.token0.balanceOf(setup.feeCollector);
 
-    //     helper.withdrawFromVault(
-    //         setup,
-    //         TestConstants.MAX_SCALED_PERCENTAGE,
-    //         recipient
-    //     );
+        helper.withdrawFromVault(setup, TestConstants.MAX_SCALED_PERCENTAGE, recipient);
 
-    //     // Should have collected TVL fees
-    //     assertTrue(
-    //         setup.token0.balanceOf(setup.feeCollector) > feeCollectorBefore0
-    //     );
+        // Should have collected TVL fees
+        assertTrue(setup.token0.balanceOf(setup.feeCollector) > feeCollectorBefore0);
 
-    //     // Vault should be empty
-    //     (uint256 finalNet0, uint256 finalNet1) = setup.vault.netAssetsValue();
-    //     helper.assertApproxEqual(
-    //         finalNet0,
-    //         0,
-    //         TestConstants.TOLERANCE_HIGH,
-    //         "Should be empty after rebalancing"
-    //     );
-    //     helper.assertApproxEqual(
-    //         finalNet1,
-    //         0,
-    //         TestConstants.TOLERANCE_HIGH,
-    //         "Should be empty after rebalancing"
-    //     );
-    // }
+        // Vault should be empty
+        (uint256 finalNet0, uint256 finalNet1) = setup.vault.netAssetsValue();
+        assertApproxEqAbs(finalNet0, 0, 2);
+        assertApproxEqAbs(finalNet1, 0, 2);
+    }
 
-    // function test_fullCycle_MultipleUsersDepositsAndWithdrawals() public {
-    //     // Simulate multiple deposit/withdrawal cycles
-    //     address recipient1 = makeAddr("recipient1");
-    //     address recipient2 = makeAddr("recipient2");
+    function test_fullCycle_MultipleUsersDepositsAndWithdrawals() public {
+        // Simulate multiple deposit/withdrawal cycles
+        address recipient1 = makeAddr("recipient1");
+        address recipient2 = makeAddr("recipient2");
 
-    //     // === Cycle 1 ===
-    //     helper.depositToVault(
-    //         setup,
-    //         TestConstants.MEDIUM_AMOUNT,
-    //         TestConstants.MEDIUM_AMOUNT
-    //     );
-    //     helper.createPositionAroundCurrentTick(
-    //         setup.vault,
-    //         setup.executor,
-    //         TestConstants.TICK_RANGE_NARROW,
-    //         TestConstants.SMALL_AMOUNT,
-    //         TestConstants.SMALL_AMOUNT
-    //     );
+        // === Cycle 1 ===
+        helper.depositToVault(setup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
+        helper.createPositionAroundCurrentTick(
+            setup.vault,
+            setup.executor,
+            TestConstants.TICK_RANGE_NARROW,
+            TestConstants.SMALL_AMOUNT,
+            TestConstants.SMALL_AMOUNT
+        );
 
-    //     helper.simulateTimePass(TestConstants.ONE_WEEK);
-    //     helper.withdrawFromVault(
-    //         setup,
-    //         TestConstants.HALF_SCALED_PERCENTAGE,
-    //         recipient1
-    //     );
+        helper.simulateTimePass(TestConstants.ONE_WEEK);
+        helper.withdrawFromVault(setup, TestConstants.HALF_SCALED_PERCENTAGE, recipient1);
 
-    //     // === Cycle 2 ===
-    //     helper.depositToVault(
-    //         setup,
-    //         TestConstants.LARGE_AMOUNT,
-    //         TestConstants.LARGE_AMOUNT
-    //     );
-    //     helper.createPositionAroundCurrentTick(
-    //         setup.vault,
-    //         setup.executor,
-    //         TestConstants.TICK_RANGE_WIDE,
-    //         TestConstants.MEDIUM_AMOUNT,
-    //         TestConstants.MEDIUM_AMOUNT
-    //     );
+        // === Cycle 2 ===
+        helper.depositToVault(setup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
+        helper.createPositionAroundCurrentTick(
+            setup.vault,
+            setup.executor,
+            TestConstants.TICK_RANGE_WIDE,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
 
-    //     helper.simulateTimePass(TestConstants.ONE_WEEK);
-    //     helper.withdrawFromVault(
-    //         setup,
-    //         TestConstants.QUARTER_SCALED_PERCENTAGE,
-    //         recipient2
-    //     );
+        helper.simulateTimePass(TestConstants.ONE_WEEK);
+        helper.withdrawFromVault(setup, TestConstants.QUARTER_SCALED_PERCENTAGE, recipient2);
 
-    //     // === Final cycle ===
-    //     helper.simulateTimePass(TestConstants.ONE_WEEK);
-    //     helper.withdrawFromVault(
-    //         setup,
-    //         TestConstants.MAX_SCALED_PERCENTAGE,
-    //         recipient1
-    //     );
+        // === Final cycle ===
+        helper.simulateTimePass(TestConstants.ONE_WEEK);
+        helper.withdrawFromVault(setup, TestConstants.MAX_SCALED_PERCENTAGE, recipient1);
 
-    //     // Vault should be empty
-    //     (uint256 finalNet0, uint256 finalNet1) = setup.vault.netAssetsValue();
-    //     helper.assertApproxEqual(
-    //         finalNet0,
-    //         0,
-    //         TestConstants.TOLERANCE_HIGH,
-    //         "Multi-cycle final check"
-    //     );
-    //     helper.assertApproxEqual(
-    //         finalNet1,
-    //         0,
-    //         TestConstants.TOLERANCE_HIGH,
-    //         "Multi-cycle final check"
-    //     );
+        // Vault should be empty
+        (uint256 finalNet0, uint256 finalNet1) = setup.vault.netAssetsValue();
+        assertApproxEqAbs(finalNet0, 0, 2);
+        assertApproxEqAbs(finalNet1, 0, 2);
 
-    //     // Both recipients should have received tokens
-    //     assertTrue(setup.token0.balanceOf(recipient1) > 0);
-    //     assertTrue(setup.token0.balanceOf(recipient2) > 0);
-    //     assertTrue(setup.token1.balanceOf(recipient1) > 0);
-    //     assertTrue(setup.token1.balanceOf(recipient2) > 0);
+        // Both recipients should have received tokens
+        assertTrue(setup.token0.balanceOf(recipient1) > 0);
+        assertTrue(setup.token0.balanceOf(recipient2) > 0);
+        assertTrue(setup.token1.balanceOf(recipient1) > 0);
+        assertTrue(setup.token1.balanceOf(recipient2) > 0);
 
-    //     // Fee collector should have received fees
-    //     assertTrue(setup.token0.balanceOf(setup.feeCollector) > 0);
-    //     assertTrue(setup.token1.balanceOf(setup.feeCollector) > 0);
-    // }
+        // Fee collector should have received fees
+        assertTrue(setup.token0.balanceOf(setup.feeCollector) > 0);
+        assertTrue(setup.token1.balanceOf(setup.feeCollector) > 0);
+    }
 }
