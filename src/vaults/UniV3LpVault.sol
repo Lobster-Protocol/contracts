@@ -286,8 +286,15 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
         private
         returns (uint256 withdrawn0, uint256 withdrawn1)
     {
-        for (uint256 i = 0; i < positions.length; i++) {
-            Position memory position = positions[i];
+        uint256 positionsCount = positions.length;
+        // Create a copy of positions array to iterate safely
+        Position[] memory positionsToProcess = new Position[](positionsCount);
+        for (uint256 i = 0; i < positionsCount; i++) {
+            positionsToProcess[i] = positions[i];
+        }
+
+        for (uint256 i = 0; i < positionsCount; i++) {
+            Position memory position = positionsToProcess[i];
 
             uint128 liquidityToWithdraw =
                 uint128(uint256(position.liquidity).mulDiv(scaledPercentage, MAX_SCALED_PERCENTAGE));
@@ -300,6 +307,7 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
         }
     }
 
+    // returns raw value, pending fees must be deduced
     function _totalLpState(
         uint160 sqrtPriceX96,
         int24 currentTick
@@ -346,13 +354,6 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
             uncollected0 += uncollectedAssets0;
             uncollected1 += uncollectedAssets1;
         }
-
-        uint256 tokensLeft = MAX_SCALED_PERCENTAGE - _pendingRelativeTvlFee();
-
-        assets0 = assets0.mulDiv(tokensLeft, MAX_SCALED_PERCENTAGE);
-        assets1 = assets1.mulDiv(tokensLeft, MAX_SCALED_PERCENTAGE);
-        uncollected0 = uncollected0.mulDiv(tokensLeft, MAX_SCALED_PERCENTAGE);
-        uncollected1 = uncollected1.mulDiv(tokensLeft, MAX_SCALED_PERCENTAGE);
     }
 
     function _withdraw(WithdrawParams memory withdrawParams) internal returns (uint256 amount0, uint256 amount1) {
@@ -364,7 +365,6 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
 
         userScaledPercent =
             (MAX_SCALED_PERCENTAGE - tvlFeeScaledPercent).mulDiv(userScaledPercent, MAX_SCALED_PERCENTAGE);
-        console.log("userScaledPercent", userScaledPercent);
 
         // Collect for all positions
         for (uint256 i = 0; i < positions.length; i++) {
@@ -387,10 +387,17 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
 
         // Extract the fees
         if (tvlFeeScaledPercent > 0) {
-            uint256 tvlFeeAssets0 = initialToken0Balance.mulDiv(tvlFeeScaledPercent, MAX_SCALED_PERCENTAGE)
-                + withdrawn0.mulDiv(tvlFeeScaledPercent, totalToWithdrawScaledPercent);
-            uint256 tvlFeeAssets1 = initialToken1Balance.mulDiv(tvlFeeScaledPercent, MAX_SCALED_PERCENTAGE)
-                + withdrawn1.mulDiv(tvlFeeScaledPercent, totalToWithdrawScaledPercent);
+            uint256 tvlFeeFromWithdrawn0 = totalToWithdrawScaledPercent > 0
+                ? withdrawn0.mulDiv(tvlFeeScaledPercent, totalToWithdrawScaledPercent)
+                : 0;
+            uint256 tvlFeeFromWithdrawn1 = totalToWithdrawScaledPercent > 0
+                ? withdrawn1.mulDiv(tvlFeeScaledPercent, totalToWithdrawScaledPercent)
+                : 0;
+
+            uint256 tvlFeeAssets0 =
+                initialToken0Balance.mulDiv(tvlFeeScaledPercent, MAX_SCALED_PERCENTAGE) + tvlFeeFromWithdrawn0;
+            uint256 tvlFeeAssets1 =
+                initialToken1Balance.mulDiv(tvlFeeScaledPercent, MAX_SCALED_PERCENTAGE) + tvlFeeFromWithdrawn1;
 
             if (tvlFeeAssets0 > 0) {
                 SafeERC20.safeTransfer(token0, feeCollector, tvlFeeAssets0);
@@ -405,26 +412,14 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
         }
 
         // User Withdraw
-
-        /////
-        (uint160 sqrtPriceX96, int24 tickCurrent,,,,,) = pool.slot0();
-
-        (uint256 totalAssets0, uint256 totalAssets1) = _totalLpValue(sqrtPriceX96, tickCurrent);
-
-        (uint256 tmp0, uint256 tmp1) =
-            (totalAssets0 + token0.balanceOf(address(this)), totalAssets1 + token1.balanceOf(address(this)));
-        console.log("tmp0", tmp0);
-        console.log("tmp1", tmp1);
-        /////
-
-        uint256 assets0ToWithdrawForUser = userScaledPercent > 0
-            ? initialToken0Balance.mulDiv(userScaledPercent, MAX_SCALED_PERCENTAGE)
-                + withdrawn0.mulDiv(userScaledPercent, totalToWithdrawScaledPercent)
-            : 0;
-        uint256 assets1ToWithdrawForUser = userScaledPercent > 0
-            ? initialToken1Balance.mulDiv(userScaledPercent, MAX_SCALED_PERCENTAGE)
-                + withdrawn1.mulDiv(userScaledPercent, totalToWithdrawScaledPercent)
-            : 0;
+        uint256 fromWithdrawn0 =
+            totalToWithdrawScaledPercent > 0 ? withdrawn0.mulDiv(userScaledPercent, totalToWithdrawScaledPercent) : 0;
+        uint256 fromWithdrawn1 =
+            totalToWithdrawScaledPercent > 0 ? withdrawn1.mulDiv(userScaledPercent, totalToWithdrawScaledPercent) : 0;
+        uint256 assets0ToWithdrawForUser =
+            initialToken0Balance.mulDiv(userScaledPercent, MAX_SCALED_PERCENTAGE) + fromWithdrawn0;
+        uint256 assets1ToWithdrawForUser =
+            initialToken1Balance.mulDiv(userScaledPercent, MAX_SCALED_PERCENTAGE) + fromWithdrawn1;
 
         // Execute user withdraw
         bool withdrawEvent = false;
@@ -443,6 +438,7 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
         return (assets0ToWithdrawForUser, assets1ToWithdrawForUser);
     }
 
+    // pending fees must be deduces from the result
     function _totalLpValue(
         uint160 sqrtPriceX96,
         int24 currentTick
@@ -454,7 +450,8 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
         (uint256 position0, uint256 position1, uint256 uncollected0, uint256 uncollected1) =
             _totalLpState(sqrtPriceX96, currentTick);
 
-        return (position0 + uncollected0, position1 + uncollected1);
+        // raw values
+        (amount0, amount1) = (position0 + uncollected0, position1 + uncollected1);
     }
 
     function totalLpValue() external view returns (uint256 totalAssets0, uint256 totalAssets1) {
@@ -468,7 +465,16 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
 
         (totalAssets0, totalAssets1) = _totalLpValue(sqrtPriceX96, tickCurrent);
 
-        return (totalAssets0 + token0.balanceOf(address(this)), totalAssets1 + token1.balanceOf(address(this)));
+        totalAssets0 += token0.balanceOf(address(this));
+        totalAssets1 += token1.balanceOf(address(this));
+
+        // Apply TVL fee deduction
+        uint256 tokensLeft = MAX_SCALED_PERCENTAGE - _pendingRelativeTvlFee();
+
+        totalAssets0 = totalAssets0.mulDiv(tokensLeft, MAX_SCALED_PERCENTAGE);
+        totalAssets1 = totalAssets1.mulDiv(tokensLeft, MAX_SCALED_PERCENTAGE);
+
+        return (totalAssets0, totalAssets1);
     }
 
     function haveSameRange(Position memory pos1, Position memory pos2) internal pure returns (bool) {
