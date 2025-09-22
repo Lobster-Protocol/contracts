@@ -29,6 +29,7 @@ contract UniV3LpVaultTest is Test {
     address vaultOwner = makeAddr("vaultOwner");
     address executor = makeAddr("executor");
     address executorManager = makeAddr("executorManager");
+    address feeCollector = makeAddr("feeCollector");
     IWETH weth;
     MockERC20 token0;
     MockERC20 token1;
@@ -58,7 +59,9 @@ contract UniV3LpVaultTest is Test {
         // Deploy pool
         pool = uniswapV3.createPoolAndInitialize(factory, address(token0), address(token1), FEE, initialSqrtPriceX96);
 
-        vault = new UniV3LpVault(vaultOwner, executor, executorManager, address(token0), address(token1), address(pool));
+        vault = new UniV3LpVault(
+            vaultOwner, executor, executorManager, address(token0), address(token1), address(pool), feeCollector, 0
+        );
 
         vm.startPrank(vaultOwner);
         token0.approve(address(vault), type(uint256).max);
@@ -79,7 +82,9 @@ contract UniV3LpVaultTest is Test {
 
     function testConstructorInvalidTokens() public {
         vm.expectRevert("Wrong token 0 & 1 order");
-        new UniV3LpVault(vaultOwner, executor, executorManager, address(token1), address(token0), address(pool));
+        new UniV3LpVault(
+            vaultOwner, executor, executorManager, address(token1), address(token0), address(pool), feeCollector, 0
+        );
     }
 
     function testDeposit() public {

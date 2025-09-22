@@ -55,9 +55,9 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
     uint24 private immutable pool_fee;
     Position[] private positions; // Supposed to hold up to 3 positions
     // Last time block management fees were collected
-    uint256 internal tvlFeesCollectedAt;
+    uint256 internal tvlFeeCollectedAt;
     // Annualized management fees, in basis point
-    uint256 internal tvlFee;
+    uint256 internal tvlFeeScaled;
     address feeCollector;
 
     error NotPool();
@@ -86,7 +86,7 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
         SingleVault(initialOwner, initialExecutor, initialExecutorManager)
     {
         require(uint160(token0_) < uint160(token1_), "Wrong token 0 & 1 order");
-        require(feeCollector != address(0), ZeroAddress());
+        require(initialFeeCollector != address(0), ZeroAddress());
 
         pool = IUniswapV3PoolMinimal(pool_);
         require(pool.token0() == token0_ && pool.token1() == token1_, "Token mismatch");
@@ -95,12 +95,15 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
         token1 = IERC20(token1_);
         pool_fee = pool.fee();
         feeCollector = initialFeeCollector;
-        tvlFee = initialtvlFee;
+        tvlFeeScaled = initialtvlFee;
+        tvlFeeCollectedAt = block.timestamp;
     }
 
     /* ------------------OWNER ACTIONS------------------ */
     function deposit(uint256 assets0, uint256 assets1) external onlyOwner {
         if (assets0 == 0 && assets1 == 0) revert ZeroValue();
+
+        _collectTvlFees();
 
         // Execute the deposit
         if (assets0 > 0) {
@@ -121,8 +124,15 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
         onlyOwner
         returns (uint256 amount0, uint256 amount1)
     {
+        if (scaledPercentage == 0) revert ZeroValue();
+        if (recipient == address(0)) revert ZeroAddress();
+
         (amount0, amount1) = _withdraw(
-            WithdrawParams({userScaledPercent: scaledPercentage, tvlFeeScaledPercent: 0, recipient: recipient})
+            WithdrawParams({
+                userScaledPercent: scaledPercentage,
+                tvlFeeScaledPercent: _pendingTvlFee(),
+                recipient: recipient
+            })
         );
     }
 
@@ -246,6 +256,23 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
 
     /* ------------------UTILS------------------ */
 
+    function _pendingTvlFee() internal view returns (uint256) {
+        uint256 deltaT = block.timestamp - tvlFeeCollectedAt;
+
+        return tvlFeeScaled.mulDiv(deltaT, 365 days * MAX_SCALED_PERCENTAGE);
+    }
+
+    function _collectTvlFees() internal {
+        uint256 toCollect = _pendingTvlFee();
+
+        if (toCollect == 0) return;
+
+        WithdrawParams memory withdrawParams =
+            WithdrawParams({userScaledPercent: 0, tvlFeeScaledPercent: _pendingTvlFee(), recipient: address(0)});
+
+        _withdraw(withdrawParams);
+    }
+
     function _withdrawFromPositions(uint256 scaledPercentage)
         private
         returns (uint256 withdrawn0, uint256 withdrawn1)
@@ -319,7 +346,6 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
         if (userScaledPercent > MAX_SCALED_PERCENTAGE) {
             revert InvalidScalingFactor();
         }
-        if (userScaledPercent == 0) revert ZeroValue();
 
         // Collect for all positions
         for (uint256 i = 0; i < positions.length; i++) {
@@ -374,6 +400,8 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
             }
 
             emit TvlFeeCollected(tvlFeeAssets0, tvlFeeAssets1, feeCollector);
+
+            tvlFeeCollectedAt = block.timestamp;
         }
 
         return (assets0ToWithdrawForUser, assets1ToWithdrawForUser);
@@ -418,4 +446,6 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
 
     // todo: add preview withdraw
     // todo: add fee update fct
+    // todo: add fct to view fees
+    // todo: collect perf fee & tvl fee monthly
 }
