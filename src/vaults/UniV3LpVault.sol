@@ -356,11 +356,15 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
     }
 
     function _withdraw(WithdrawParams memory withdrawParams) internal returns (uint256 amount0, uint256 amount1) {
-        uint256 userScaledPercent = withdrawParams.userScaledPercent;
-
-        if (userScaledPercent > MAX_SCALED_PERCENTAGE) {
+        if (withdrawParams.userScaledPercent > MAX_SCALED_PERCENTAGE) {
             revert InvalidScalingFactor();
         }
+        uint256 userScaledPercent = withdrawParams.userScaledPercent;
+        uint256 tvlFeeScaledPercent = withdrawParams.tvlFeeScaledPercent;
+
+        userScaledPercent =
+            (MAX_SCALED_PERCENTAGE - tvlFeeScaledPercent).mulDiv(userScaledPercent, MAX_SCALED_PERCENTAGE);
+        console.log("userScaledPercent", userScaledPercent);
 
         // Collect for all positions
         for (uint256 i = 0; i < positions.length; i++) {
@@ -374,40 +378,19 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
             );
         }
 
-        uint256 totalToWithdrawScaledPercent = userScaledPercent + withdrawParams.tvlFeeScaledPercent;
+        uint256 totalToWithdrawScaledPercent = userScaledPercent + tvlFeeScaledPercent;
 
         uint256 initialToken0Balance = token0.balanceOf(address(this));
         uint256 initialToken1Balance = token1.balanceOf(address(this));
 
         (uint256 withdrawn0, uint256 withdrawn1) = _withdrawFromPositions(totalToWithdrawScaledPercent);
 
-        uint256 assets0ToWithdrawForUser = userScaledPercent > 0
-            ? initialToken0Balance.mulDiv(userScaledPercent, MAX_SCALED_PERCENTAGE) + withdrawn0
-            : 0;
-        uint256 assets1ToWithdrawForUser = userScaledPercent > 0
-            ? initialToken1Balance.mulDiv(userScaledPercent, MAX_SCALED_PERCENTAGE) + withdrawn1
-            : 0;
-
-        // Execute user withdraw
-        bool withdrawEvent = false;
-        if (assets0ToWithdrawForUser > 0) {
-            SafeERC20.safeTransfer(token0, withdrawParams.recipient, assets0ToWithdrawForUser);
-            withdrawEvent = true;
-        }
-        if (assets0ToWithdrawForUser > 0) {
-            SafeERC20.safeTransfer(token1, withdrawParams.recipient, assets1ToWithdrawForUser);
-            withdrawEvent = true;
-        }
-        if (withdrawEvent) {
-            emit Withdraw(assets0ToWithdrawForUser, assets0ToWithdrawForUser, withdrawParams.recipient);
-        }
-
         // Extract the fees
-        if (withdrawParams.tvlFeeScaledPercent > 0) {
-            uint256 tvlFeeAssets0 =
-                initialToken0Balance.mulDiv(withdrawParams.tvlFeeScaledPercent, MAX_SCALED_PERCENTAGE) + withdrawn0;
-            uint256 tvlFeeAssets1 =
-                initialToken1Balance.mulDiv(withdrawParams.tvlFeeScaledPercent, MAX_SCALED_PERCENTAGE) + withdrawn1;
+        if (tvlFeeScaledPercent > 0) {
+            uint256 tvlFeeAssets0 = initialToken0Balance.mulDiv(tvlFeeScaledPercent, MAX_SCALED_PERCENTAGE)
+                + withdrawn0.mulDiv(tvlFeeScaledPercent, totalToWithdrawScaledPercent);
+            uint256 tvlFeeAssets1 = initialToken1Balance.mulDiv(tvlFeeScaledPercent, MAX_SCALED_PERCENTAGE)
+                + withdrawn1.mulDiv(tvlFeeScaledPercent, totalToWithdrawScaledPercent);
 
             if (tvlFeeAssets0 > 0) {
                 SafeERC20.safeTransfer(token0, feeCollector, tvlFeeAssets0);
@@ -419,6 +402,31 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
             emit TvlFeeCollected(tvlFeeAssets0, tvlFeeAssets1, feeCollector);
 
             tvlFeeCollectedAt = block.timestamp;
+        }
+
+        // User Withdraw
+
+        uint256 assets0ToWithdrawForUser = userScaledPercent > 0
+            ? initialToken0Balance.mulDiv(userScaledPercent, MAX_SCALED_PERCENTAGE)
+                + withdrawn0.mulDiv(userScaledPercent, totalToWithdrawScaledPercent)
+            : 0;
+        uint256 assets1ToWithdrawForUser = userScaledPercent > 0
+            ? initialToken1Balance.mulDiv(userScaledPercent, MAX_SCALED_PERCENTAGE)
+                + withdrawn1.mulDiv(userScaledPercent, totalToWithdrawScaledPercent)
+            : 0;
+
+        // Execute user withdraw
+        bool withdrawEvent = false;
+        if (assets0ToWithdrawForUser > 0) {
+            SafeERC20.safeTransfer(token0, withdrawParams.recipient, assets0ToWithdrawForUser);
+            withdrawEvent = true;
+        }
+        if (assets1ToWithdrawForUser > 0) {
+            SafeERC20.safeTransfer(token1, withdrawParams.recipient, assets1ToWithdrawForUser);
+            withdrawEvent = true;
+        }
+        if (withdrawEvent) {
+            emit Withdraw(assets0ToWithdrawForUser, assets0ToWithdrawForUser, withdrawParams.recipient);
         }
 
         return (assets0ToWithdrawForUser, assets1ToWithdrawForUser);

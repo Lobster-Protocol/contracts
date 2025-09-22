@@ -163,7 +163,7 @@ contract UniV3LpVaultDepositTest is Test {
             TestConstants.SMALL_AMOUNT
         );
 
-        uint256 delay = TestConstants.ONE_MONTH;
+        uint256 delay = 365 days; //TestConstants.ONE_MONTH;
 
         // Simulate time passing to accumulate TVL fees
         helper.simulateTimePass(delay);
@@ -183,6 +183,8 @@ contract UniV3LpVaultDepositTest is Test {
         console.log("fee collector balance1: ", feeSetup.token1.balanceOf(feeSetup.feeCollector));
         console.log("expectedFee0", expectedFee0);
         console.log("expectedFee1", expectedFee1);
+        console.log("initialFeeCollectorBalance0", initialFeeCollectorBalance0);
+        console.log("initialFeeCollectorBalance1", initialFeeCollectorBalance1);
 
         // Fee collector should have received fees
         assertApproxEqAbs(
