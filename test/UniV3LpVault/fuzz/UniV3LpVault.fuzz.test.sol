@@ -1,0 +1,540 @@
+// todo
+// // SPDX-License-Identifier: GPL-3.0-or-later
+// pragma solidity ^0.8.28;
+
+// import "forge-std/Test.sol";
+// import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+// import {UniV3LpVault, Position} from "../../../src/vaults/UniV3LpVault.sol";
+// import {TestHelper} from "../helpers/TestHelper.sol";
+// import {TestConstants} from "../helpers/Constants.sol";
+
+// contract UniV3LpVaultFuzzTest is Test {
+//     using Math for uint256;
+
+//     TestHelper helper;
+//     TestHelper.VaultSetup setup;
+
+//     function setUp() public {
+//         helper = new TestHelper();
+//         setup = helper.deployVaultWithPool(TestConstants.MEDIUM_TVL_FEE);
+//     }
+
+//     // === DEPOSIT FUZZ TESTS ===
+
+//     function testFuzz_deposit_ValidAmounts(
+//         uint256 amount0,
+//         uint256 amount1
+//     ) public {
+//         amount0 = bound(amount0, 1, TestConstants.INITIAL_BALANCE);
+//         amount1 = bound(amount1, 1, TestConstants.INITIAL_BALANCE);
+
+//         uint256 initialVaultBalance0 = setup.token0.balanceOf(
+//             address(setup.vault)
+//         );
+//         uint256 initialVaultBalance1 = setup.token1.balanceOf(
+//             address(setup.vault)
+//         );
+//         uint256 initialOwnerBalance0 = setup.token0.balanceOf(setup.owner);
+//         uint256 initialOwnerBalance1 = setup.token1.balanceOf(setup.owner);
+
+//         vm.prank(setup.owner);
+//         setup.vault.deposit(amount0, amount1);
+
+//         // Invariants
+//         assertEq(
+//             setup.token0.balanceOf(address(setup.vault)),
+//             initialVaultBalance0 + amount0
+//         );
+//         assertEq(
+//             setup.token1.balanceOf(address(setup.vault)),
+//             initialVaultBalance1 + amount1
+//         );
+//         assertEq(
+//             setup.token0.balanceOf(setup.owner),
+//             initialOwnerBalance0 - amount0
+//         );
+//         assertEq(
+//             setup.token1.balanceOf(setup.owner),
+//             initialOwnerBalance1 - amount1
+//         );
+
+//         (uint256 netAssets0, uint256 netAssets1) = setup.vault.netAssetsValue();
+//         assertEq(netAssets0, initialVaultBalance0 + amount0);
+//         assertEq(netAssets1, initialVaultBalance1 + amount1);
+//     }
+
+//     function testFuzz_deposit_SingleToken(
+//         uint256 amount,
+//         bool isToken0
+//     ) public {
+//         amount = bound(amount, 1, TestConstants.INITIAL_BALANCE);
+
+//         uint256 amount0 = isToken0 ? amount : 0;
+//         uint256 amount1 = isToken0 ? 0 : amount;
+
+//         uint256 initialBalance0 = setup.token0.balanceOf(address(setup.vault));
+//         uint256 initialBalance1 = setup.token1.balanceOf(address(setup.vault));
+
+//         vm.prank(setup.owner);
+//         setup.vault.deposit(amount0, amount1);
+
+//         if (isToken0) {
+//             assertEq(
+//                 setup.token0.balanceOf(address(setup.vault)),
+//                 initialBalance0 + amount
+//             );
+//             assertEq(
+//                 setup.token1.balanceOf(address(setup.vault)),
+//                 initialBalance1
+//             );
+//         } else {
+//             assertEq(
+//                 setup.token0.balanceOf(address(setup.vault)),
+//                 initialBalance0
+//             );
+//             assertEq(
+//                 setup.token1.balanceOf(address(setup.vault)),
+//                 initialBalance1 + amount
+//             );
+//         }
+//     }
+
+//     // === WITHDRAW FUZZ TESTS ===
+
+//     function testFuzz_withdraw_ValidPercentages(
+//         uint256 scaledPercentage
+//     ) public {
+//         scaledPercentage = bound(
+//             scaledPercentage,
+//             1,
+//             TestConstants.MAX_SCALED_PERCENTAGE
+//         );
+
+//         // Setup with funds
+//         helper.depositToVault(
+//             setup,
+//             TestConstants.LARGE_AMOUNT,
+//             TestConstants.LARGE_AMOUNT
+//         );
+//         helper.createPositionAroundCurrentTick(
+//             setup.vault,
+//             setup.executor,
+//             TestConstants.TICK_RANGE_NARROW,
+//             TestConstants.MEDIUM_AMOUNT,
+//             TestConstants.MEDIUM_AMOUNT
+//         );
+
+//         address recipient = makeAddr("recipient");
+//         (uint256 initialNet0, ) = setup.vault.netAssetsValue();
+
+//         vm.prank(setup.owner);
+//         (uint256 withdrawn0, uint256 withdrawn1) = setup.vault.withdraw(
+//             scaledPercentage,
+//             recipient
+//         );
+
+//         // Withdrawn amounts should be proportional (with some tolerance for LP mechanics)
+//         if (scaledPercentage == TestConstants.MAX_SCALED_PERCENTAGE) {
+//             // Full withdrawal should leave vault nearly empty
+//             (uint256 finalNet0, uint256 finalNet1) = setup
+//                 .vault
+//                 .netAssetsValue();
+//             helper.assertApproxEqual(
+//                 finalNet0,
+//                 0,
+//                 TestConstants.TOLERANCE_HIGH,
+//                 "Full withdrawal should empty vault"
+//             );
+//             helper.assertApproxEqual(
+//                 finalNet1,
+//                 0,
+//                 TestConstants.TOLERANCE_HIGH,
+//                 "Full withdrawal should empty vault"
+//             );
+//         } else {
+//             // Partial withdrawal - check proportionality
+//             assertTrue(
+//                 withdrawn0 > 0 || withdrawn1 > 0,
+//                 "Should withdraw something"
+//             );
+
+//             uint256 expectedProportion = scaledPercentage.mulDiv(
+//                 1e18,
+//                 TestConstants.MAX_SCALED_PERCENTAGE
+//             );
+//             if (withdrawn0 > 0 && initialNet0 > 0) {
+//                 uint256 actualProportion0 = withdrawn0.mulDiv(
+//                     1e18,
+//                     initialNet0
+//                 );
+//                 // Allow 50% tolerance due to LP position management complexity
+//                 helper.assertApproxEqual(
+//                     actualProportion0,
+//                     expectedProportion,
+//                     5e17, // 50% tolerance
+//                     "Withdrawal proportion0 incorrect"
+//                 );
+//             }
+//         }
+//     }
+
+//     // === MINT FUZZ TESTS ===
+
+//     function testFuzz_mint_ValidAmounts(
+//         uint256 amount0Desired,
+//         uint256 amount1Desired,
+//         uint256 tickRangeMultiplier
+//     ) public {
+//         amount0Desired = bound(
+//             amount0Desired,
+//             TestConstants.SMALL_AMOUNT,
+//             TestConstants.MEDIUM_AMOUNT
+//         );
+//         amount1Desired = bound(
+//             amount1Desired,
+//             TestConstants.SMALL_AMOUNT,
+//             TestConstants.MEDIUM_AMOUNT
+//         );
+//         tickRangeMultiplier = bound(tickRangeMultiplier, 1, 5);
+
+//         // Ensure vault has enough funds
+//         helper.depositToVault(
+//             setup,
+//             TestConstants.LARGE_AMOUNT,
+//             TestConstants.LARGE_AMOUNT
+//         );
+
+//         (, int24 currentTick, , , , , ) = setup.pool.slot0();
+//         int24 tickRange = int24(
+//             TestConstants.TICK_RANGE_NARROW * int256(tickRangeMultiplier)
+//         );
+//         int24 tickLower = currentTick - tickRange;
+//         int24 tickUpper = currentTick + tickRange;
+
+//         uint256 initialLp0;
+//         uint256 initialLp1;
+//         (initialLp0, initialLp1) = setup.vault.totalLpValue();
+
+//         vm.prank(setup.executor);
+//         (uint256 actualAmount0, uint256 actualAmount1) = helper.createPosition(
+//             setup.vault,
+//             setup.executor,
+//             tickLower,
+//             tickUpper,
+//             amount0Desired,
+//             amount1Desired
+//         );
+
+//         // LP value should increase
+//         (uint256 finalLp0, uint256 finalLp1) = setup.vault.totalLpValue();
+//         assertTrue(finalLp0 >= initialLp0, "LP value0 should increase");
+//         assertTrue(finalLp1 >= initialLp1, "LP value1 should increase");
+
+//         // Should have used some tokens from vault
+//         assertTrue(
+//             actualAmount0 > 0 || actualAmount1 > 0,
+//             "Should have minted something"
+//         );
+//         assertTrue(
+//             actualAmount0 <= amount0Desired,
+//             "Should not exceed desired amount0"
+//         );
+//         assertTrue(
+//             actualAmount1 <= amount1Desired,
+//             "Should not exceed desired amount1"
+//         );
+//     }
+
+//     // === BURN FUZZ TESTS ===
+
+//     function testFuzz_burn_ValidAmounts(uint256 burnPercentage) public {
+//         burnPercentage = bound(burnPercentage, 1, 100);
+
+//         // Setup with position
+//         helper.depositToVault(
+//             setup,
+//             TestConstants.LARGE_AMOUNT,
+//             TestConstants.LARGE_AMOUNT
+//         );
+//         helper.createPositionAroundCurrentTick(
+//             setup.vault,
+//             setup.executor,
+//             TestConstants.TICK_RANGE_NARROW,
+//             TestConstants.MEDIUM_AMOUNT,
+//             TestConstants.MEDIUM_AMOUNT
+//         );
+
+//         Position memory initialPos = setup.vault.getPosition(0);
+//         uint128 burnAmount = uint128(
+//             (uint256(initialPos.liquidity) * burnPercentage) / 100
+//         );
+
+//         (, int24 currentTick, , , , , ) = setup.pool.slot0();
+//         int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
+//         int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
+
+//         uint256 initialVaultBalance0 = setup.token0.balanceOf(
+//             address(setup.vault)
+//         );
+//         uint256 initialVaultBalance1 = setup.token1.balanceOf(
+//             address(setup.vault)
+//         );
+
+//         vm.prank(setup.executor);
+//         setup.vault.burn(tickLower, tickUpper, burnAmount);
+
+//         // Should receive tokens back
+//         assertTrue(
+//             setup.token0.balanceOf(address(setup.vault)) >=
+//                 initialVaultBalance0,
+//             "Should get tokens back"
+//         );
+//         assertTrue(
+//             setup.token1.balanceOf(address(setup.vault)) >=
+//                 initialVaultBalance1,
+//             "Should get tokens back"
+//         );
+
+//         if (burnAmount == initialPos.liquidity) {
+//             // Full burn - position should be removed
+//             vm.expectRevert();
+//             setup.vault.getPosition(0);
+//         } else {
+//             // Partial burn - position should remain with reduced liquidity
+//             Position memory finalPos = setup.vault.getPosition(0);
+//             assertEq(finalPos.liquidity, initialPos.liquidity - burnAmount);
+//         }
+//     }
+
+//     // === TVL FEES FUZZ TESTS ===
+
+//     function testFuzz_tvlFees_TimeAndRate(
+//         uint256 timeElapsed,
+//         uint256 tvlFeeRate
+//     ) public {
+//         timeElapsed = bound(timeElapsed, 1 days, 2 * TestConstants.ONE_YEAR);
+//         tvlFeeRate = bound(
+//             tvlFeeRate,
+//             0,
+//             TestConstants.MAX_SCALED_PERCENTAGE / 10
+//         ); // Max 10% annual
+
+//         TestHelper.VaultSetup memory fuzzSetup = helper.deployVaultWithPool(
+//             tvlFeeRate
+//         );
+
+//         uint256 depositAmount = TestConstants.MEDIUM_AMOUNT;
+//         helper.depositToVault(fuzzSetup, depositAmount, depositAmount);
+
+//         helper.simulateTimePass(timeElapsed);
+
+//         uint256 initialFeeCollectorBalance = fuzzSetup.token0.balanceOf(
+//             fuzzSetup.feeCollector
+//         );
+
+//         // Trigger fee collection
+//         helper.depositToVault(fuzzSetup, 1, 1);
+
+//         uint256 finalFeeCollectorBalance = fuzzSetup.token0.balanceOf(
+//             fuzzSetup.feeCollector
+//         );
+//         uint256 collectedFees = finalFeeCollectorBalance -
+//             initialFeeCollectorBalance;
+
+//         if (tvlFeeRate == 0) {
+//             assertEq(
+//                 collectedFees,
+//                 0,
+//                 "No fees should be collected with 0% rate"
+//             );
+//         } else {
+//             // Calculate expected fee
+//             uint256 expectedFee = helper.calculateExpectedTvlFee(
+//                 tvlFeeRate,
+//                 timeElapsed
+//             );
+//             uint256 expectedFeeOfDeposit = depositAmount.mulDiv(
+//                 expectedFee,
+//                 TestConstants.MAX_SCALED_PERCENTAGE
+//             );
+
+//             // Allow significant tolerance due to position management and rounding
+//             helper.assertApproxEqual(
+//                 collectedFees,
+//                 expectedFeeOfDeposit,
+//                 TestConstants.TOLERANCE_HIGH,
+//                 "TVL fee calculation mismatch"
+//             );
+
+//             // Sanity check - fees shouldn't exceed the deposit
+//             assertTrue(
+//                 collectedFees <= depositAmount,
+//                 "Fees shouldn't exceed principal"
+//             );
+//         }
+//     }
+
+//     // === INVARIANT TESTS ===
+
+//     function testFuzz_invariant_TokenConservation(
+//         uint256 depositAmount0,
+//         uint256 depositAmount1,
+//         uint256 mintAmount0,
+//         uint256 mintAmount1,
+//         uint256 timeElapsed
+//     ) public {
+//         depositAmount0 = bound(
+//             depositAmount0,
+//             TestConstants.MEDIUM_AMOUNT,
+//             TestConstants.LARGE_AMOUNT
+//         );
+//         depositAmount1 = bound(
+//             depositAmount1,
+//             TestConstants.MEDIUM_AMOUNT,
+//             TestConstants.LARGE_AMOUNT
+//         );
+//         mintAmount0 = bound(
+//             mintAmount0,
+//             TestConstants.SMALL_AMOUNT,
+//             depositAmount0 / 2
+//         );
+//         mintAmount1 = bound(
+//             mintAmount1,
+//             TestConstants.SMALL_AMOUNT,
+//             depositAmount1 / 2
+//         );
+//         timeElapsed = bound(timeElapsed, 1 hours, TestConstants.ONE_MONTH);
+
+//         uint256 initialOwnerBalance0 = setup.token0.balanceOf(setup.owner);
+//         uint256 initialOwnerBalance1 = setup.token1.balanceOf(setup.owner);
+
+//         // Deposit
+//         helper.depositToVault(setup, depositAmount0, depositAmount1);
+
+//         // Create position
+//         helper.createPositionAroundCurrentTick(
+//             setup.vault,
+//             setup.executor,
+//             TestConstants.TICK_RANGE_NARROW,
+//             mintAmount0,
+//             mintAmount1
+//         );
+
+//         // Time passes
+//         helper.simulateTimePass(timeElapsed);
+
+//         // Withdraw everything
+//         address recipient = makeAddr("recipient");
+//         helper.withdrawFromVault(
+//             setup,
+//             TestConstants.MAX_SCALED_PERCENTAGE,
+//             recipient
+//         );
+
+//         // Check token conservation (accounting for TVL fees)
+//         uint256 finalOwnerBalance0 = setup.token0.balanceOf(setup.owner);
+//         uint256 finalOwnerBalance1 = setup.token1.balanceOf(setup.owner);
+//         uint256 recipientBalance0 = setup.token0.balanceOf(recipient);
+//         uint256 recipientBalance1 = setup.token1.balanceOf(recipient);
+//         uint256 feeCollectorBalance0 = setup.token0.balanceOf(
+//             setup.feeCollector
+//         );
+//         uint256 feeCollectorBalance1 = setup.token1.balanceOf(
+//             setup.feeCollector
+//         );
+//         uint256 vaultRemainder0 = setup.token0.balanceOf(address(setup.vault));
+//         uint256 vaultRemainder1 = setup.token1.balanceOf(address(setup.vault));
+
+//         uint256 totalFinal0 = finalOwnerBalance0 +
+//             recipientBalance0 +
+//             feeCollectorBalance0 +
+//             vaultRemainder0;
+//         uint256 totalFinal1 = finalOwnerBalance1 +
+//             recipientBalance1 +
+//             feeCollectorBalance1 +
+//             vaultRemainder1;
+
+//         // Total should equal initial (allowing for small rounding errors)
+//         helper.assertApproxEqual(
+//             totalFinal0,
+//             initialOwnerBalance0,
+//             TestConstants.TOLERANCE_MEDIUM,
+//             "Token0 conservation failed"
+//         );
+//         helper.assertApproxEqual(
+//             totalFinal1,
+//             initialOwnerBalance1,
+//             TestConstants.TOLERANCE_MEDIUM,
+//             "Token1 conservation failed"
+//         );
+//     }
+
+//     function testFuzz_invariant_NetAssetsNonNegative(
+//         uint256 amount0,
+//         uint256 amount1,
+//         uint256 operations
+//     ) public {
+//         amount0 = bound(
+//             amount0,
+//             TestConstants.SMALL_AMOUNT,
+//             TestConstants.LARGE_AMOUNT
+//         );
+//         amount1 = bound(
+//             amount1,
+//             TestConstants.SMALL_AMOUNT,
+//             TestConstants.LARGE_AMOUNT
+//         );
+//         operations = bound(operations, 1, 5);
+
+//         helper.depositToVault(setup, amount0, amount1);
+
+//         for (uint256 i = 0; i < operations; i++) {
+//             uint256 op = uint256(keccak256(abi.encode(i, amount0, amount1))) %
+//                 3;
+
+//             if (op == 0) {
+//                 // Mint position
+//                 try
+//                     helper.createPositionAroundCurrentTick(
+//                         setup.vault,
+//                         setup.executor,
+//                         TestConstants.TICK_RANGE_NARROW,
+//                         TestConstants.SMALL_AMOUNT,
+//                         TestConstants.SMALL_AMOUNT
+//                     )
+//                 {} catch {}
+//             } else if (op == 1) {
+//                 // Collect fees
+//                 (, int24 currentTick, , , , , ) = setup.pool.slot0();
+//                 vm.prank(setup.executor);
+//                 try
+//                     setup.vault.collect(
+//                         currentTick - TestConstants.TICK_RANGE_NARROW,
+//                         currentTick + TestConstants.TICK_RANGE_NARROW,
+//                         type(uint128).max,
+//                         type(uint128).max
+//                     )
+//                 {} catch {}
+//             } else {
+//                 // Burn position
+//                 try setup.vault.getPosition(0) returns (Position memory pos) {
+//                     if (pos.liquidity > 0) {
+//                         vm.prank(setup.executor);
+//                         try
+//                             setup.vault.burn(
+//                                 pos.lowerTick,
+//                                 pos.upperTick,
+//                                 pos.liquidity / 2
+//                             )
+//                         {} catch {}
+//                     }
+//                 } catch {}
+//             }
+
+//             // Invariant: net assets should always be non-negative
+//             (uint256 net0, uint256 net1) = setup.vault.netAssetsValue();
+//             assertTrue(net0 >= 0, "Net assets0 became negative");
+//             assertTrue(net1 >= 0, "Net assets1 became negative");
+//         }
+//     }
+// }

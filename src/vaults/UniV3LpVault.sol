@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.28;
 
+import "forge-std/Test.sol";
+
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {SingleVault} from "./SingleVault.sol";
@@ -217,6 +219,11 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
             Position memory position = positions[i];
 
             if (haveSameRange(position, newPosition)) {
+                console.log("position updated: ");
+                console.log(positions[i].upperTick);
+                console.log(positions[i].lowerTick);
+                console.log("liquidity: ", positions[i].liquidity + liquidity);
+
                 positions[i].liquidity += liquidity;
                 isPositionCreation = false;
                 break;
