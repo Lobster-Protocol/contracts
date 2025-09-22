@@ -406,6 +406,17 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
 
         // User Withdraw
 
+        /////
+        (uint160 sqrtPriceX96, int24 tickCurrent,,,,,) = pool.slot0();
+
+        (uint256 totalAssets0, uint256 totalAssets1) = _totalLpValue(sqrtPriceX96, tickCurrent);
+
+        (uint256 tmp0, uint256 tmp1) =
+            (totalAssets0 + token0.balanceOf(address(this)), totalAssets1 + token1.balanceOf(address(this)));
+        console.log("tmp0", tmp0);
+        console.log("tmp1", tmp1);
+        /////
+
         uint256 assets0ToWithdrawForUser = userScaledPercent > 0
             ? initialToken0Balance.mulDiv(userScaledPercent, MAX_SCALED_PERCENTAGE)
                 + withdrawn0.mulDiv(userScaledPercent, totalToWithdrawScaledPercent)
@@ -426,7 +437,7 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
             withdrawEvent = true;
         }
         if (withdrawEvent) {
-            emit Withdraw(assets0ToWithdrawForUser, assets0ToWithdrawForUser, withdrawParams.recipient);
+            emit Withdraw(assets0ToWithdrawForUser, assets1ToWithdrawForUser, withdrawParams.recipient);
         }
 
         return (assets0ToWithdrawForUser, assets1ToWithdrawForUser);

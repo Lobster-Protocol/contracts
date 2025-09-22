@@ -175,13 +175,17 @@ contract UniV3LpVaultTest is Test {
 
         uint256 expectedWithdraw0 = deposit0.mulDiv(withdrawScaledPercentage, MAX_SCALED_PERCENTAGE);
         uint256 expectedWithdraw1 = deposit1.mulDiv(withdrawScaledPercentage, MAX_SCALED_PERCENTAGE);
-        assertApproxEqRel(initialReceiverBalance0 + expectedWithdraw0, token0.balanceOf(receiver), 1);
-        assertApproxEqRel(initialReceiverBalance1 + expectedWithdraw1, token1.balanceOf(receiver), 1);
+        assertApproxEqAbs(initialReceiverBalance0 + expectedWithdraw0, token0.balanceOf(receiver), 1);
+        assertApproxEqAbs(initialReceiverBalance1 + expectedWithdraw1, token1.balanceOf(receiver), 1);
 
         (uint256 finalVaultTotalToken0, uint256 finalVaultTotalToken1) = vault.netAssetsValue();
-
-        assertApproxEqRel(deposit0.mulDiv(withdrawScaledPercentage, MAX_SCALED_PERCENTAGE), finalVaultTotalToken0, 1);
-        assertApproxEqRel(deposit1.mulDiv(withdrawScaledPercentage, MAX_SCALED_PERCENTAGE), finalVaultTotalToken1, 1);
+        console.log("finalVaultTotalToken0", finalVaultTotalToken0);
+        assertApproxEqAbs(
+            deposit0 - deposit0.mulDiv(withdrawScaledPercentage, MAX_SCALED_PERCENTAGE), finalVaultTotalToken0, 1
+        );
+        assertApproxEqAbs(
+            deposit1 - deposit1.mulDiv(withdrawScaledPercentage, MAX_SCALED_PERCENTAGE), finalVaultTotalToken1, 1
+        );
     }
 
     function testWithdrawLpMultiplePositions() public {

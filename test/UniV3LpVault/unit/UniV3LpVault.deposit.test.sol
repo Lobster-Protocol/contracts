@@ -163,7 +163,7 @@ contract UniV3LpVaultDepositTest is Test {
             TestConstants.SMALL_AMOUNT
         );
 
-        uint256 delay = 365 days; //TestConstants.ONE_MONTH;
+        uint256 delay = TestConstants.ONE_MONTH;
 
         // Simulate time passing to accumulate TVL fees
         helper.simulateTimePass(delay);
