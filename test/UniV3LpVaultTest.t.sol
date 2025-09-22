@@ -179,7 +179,7 @@ contract UniV3LpVaultTest is Test {
         assertApproxEqAbs(initialReceiverBalance1 + expectedWithdraw1, token1.balanceOf(receiver), 1);
 
         (uint256 finalVaultTotalToken0, uint256 finalVaultTotalToken1) = vault.netAssetsValue();
-        console.log("finalVaultTotalToken0", finalVaultTotalToken0);
+
         assertApproxEqAbs(
             deposit0 - deposit0.mulDiv(withdrawScaledPercentage, MAX_SCALED_PERCENTAGE), finalVaultTotalToken0, 1
         );
@@ -446,13 +446,6 @@ contract UniV3LpVaultTest is Test {
 
         (uint256 totalLp0, uint256 totalLp1) = vault.totalLpValue();
 
-        console.log(totalLp0, totalLp1);
-        console.log(
-            amount0Desired + amount0Desired2 - amount0Desired3, amount1Desired + amount1Desired2 - amount1Desired3
-        );
-        console.log(token0.balanceOf(address(vault)), token1.balanceOf(address(vault)));
-        (uint256 t0, uint256 t1) = vault.netAssetsValue();
-        console.log(t0, t1);
         assertApproxEqAbs(
             totalLp0,
             amount0Desired + amount0Desired2 + amount0Desired3,

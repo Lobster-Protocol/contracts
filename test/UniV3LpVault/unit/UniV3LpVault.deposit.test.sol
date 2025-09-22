@@ -179,13 +179,6 @@ contract UniV3LpVaultDepositTest is Test {
         uint256 expectedFee0 = total0.mulDiv(tvlFeePercent, MAX_SCALED_PERCENTAGE);
         uint256 expectedFee1 = total1.mulDiv(tvlFeePercent, MAX_SCALED_PERCENTAGE);
 
-        console.log("fee collector balance0: ", feeSetup.token0.balanceOf(feeSetup.feeCollector));
-        console.log("fee collector balance1: ", feeSetup.token1.balanceOf(feeSetup.feeCollector));
-        console.log("expectedFee0", expectedFee0);
-        console.log("expectedFee1", expectedFee1);
-        console.log("initialFeeCollectorBalance0", initialFeeCollectorBalance0);
-        console.log("initialFeeCollectorBalance1", initialFeeCollectorBalance1);
-
         // Fee collector should have received fees
         assertApproxEqAbs(
             feeSetup.token0.balanceOf(feeSetup.feeCollector), initialFeeCollectorBalance0 + expectedFee0, 1
