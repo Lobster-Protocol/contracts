@@ -461,12 +461,7 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
     }
 
     function netAssetsValue() external view returns (uint256 totalAssets0, uint256 totalAssets1) {
-        (uint160 sqrtPriceX96, int24 tickCurrent,,,,,) = pool.slot0();
-
-        (totalAssets0, totalAssets1) = _totalLpValue(sqrtPriceX96, tickCurrent);
-
-        totalAssets0 += token0.balanceOf(address(this));
-        totalAssets1 += token1.balanceOf(address(this));
+        (totalAssets0, totalAssets1) = _rawAssetsValue();
 
         // Apply TVL fee deduction
         uint256 tokensLeft = MAX_SCALED_PERCENTAGE - _pendingRelativeTvlFee();
@@ -475,6 +470,15 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
         totalAssets1 = totalAssets1.mulDiv(tokensLeft, MAX_SCALED_PERCENTAGE);
 
         return (totalAssets0, totalAssets1);
+    }
+
+    function _rawAssetsValue() internal view returns (uint256 totalAssets0, uint256 totalAssets1) {
+        (uint160 sqrtPriceX96, int24 tickCurrent,,,,,) = pool.slot0();
+
+        (totalAssets0, totalAssets1) = _totalLpValue(sqrtPriceX96, tickCurrent);
+
+        totalAssets0 += token0.balanceOf(address(this));
+        totalAssets1 += token1.balanceOf(address(this));
     }
 
     function haveSameRange(Position memory pos1, Position memory pos2) internal pure returns (bool) {
@@ -486,8 +490,17 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
         return positions[index];
     }
 
-    function pendingTvlFee() external view returns (uint256) {
-        return _pendingRelativeTvlFee();
+    function rawAssetsValue() external view returns (uint256 totalAssets0, uint256 totalAssets1) {
+        return _rawAssetsValue();
+    }
+
+    function pendingTvlFee() external view returns (uint256 amount0, uint256 amount1) {
+        uint256 pendingRelativeTvlFee = _pendingRelativeTvlFee();
+
+        (amount0, amount1) = _rawAssetsValue();
+
+        amount0.mulDiv(pendingRelativeTvlFee, MAX_SCALED_PERCENTAGE);
+        amount1.mulDiv(pendingRelativeTvlFee, MAX_SCALED_PERCENTAGE);
     }
 
     function positionsLength() external view returns (uint256) {
