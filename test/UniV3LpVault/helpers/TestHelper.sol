@@ -230,10 +230,6 @@ contract TestHelper is Test {
         assertFalse(found, "Position should not exist");
     }
 
-    function calculateExpectedTvlFee(uint256 tvlFeeScaled, uint256 timeElapsed) public pure returns (uint256) {
-        return tvlFeeScaled.mulDiv(timeElapsed, TestConstants.ONE_YEAR * TestConstants.MAX_SCALED_PERCENTAGE);
-    }
-
     function depositToVault(VaultSetup memory setup, uint256 amount0, uint256 amount1) public {
         vm.prank(setup.owner);
         setup.vault.deposit(amount0, amount1);
