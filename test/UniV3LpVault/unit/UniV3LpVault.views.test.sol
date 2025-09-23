@@ -273,4 +273,6 @@ contract UniV3LpVaultViewsTest is Test {
         helper.assertApproxEqual(finalNet0, 0, TestConstants.TOLERANCE_HIGH, "Net assets should be zero");
         helper.assertApproxEqual(finalNet1, 0, TestConstants.TOLERANCE_HIGH, "Net assets should be zero");
     }
+
+    // todo: test rawAssetsValue(), pendingTvlFee(), and positionsLength()
 }
