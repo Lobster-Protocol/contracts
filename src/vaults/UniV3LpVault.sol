@@ -261,7 +261,11 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
     function _pendingRelativeTvlFee() internal view returns (uint256) {
         uint256 deltaT = block.timestamp - tvlFeeCollectedAt;
 
-        return tvlFeeScaled.mulDiv(deltaT, 365 days);
+        return min(tvlFeeScaled.mulDiv(deltaT, 365 days), MAX_SCALED_PERCENTAGE);
+    }
+
+    function min(uint256 a, uint256 b) internal pure returns (uint256) {
+        return a > b ? b : a;
     }
 
     function _collectTvlFees() internal {
@@ -353,6 +357,7 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
         if (withdrawParams.userScaledPercent > MAX_SCALED_PERCENTAGE) {
             revert InvalidScalingFactor();
         }
+
         uint256 userScaledPercent = withdrawParams.userScaledPercent;
         uint256 tvlFeeScaledPercent = withdrawParams.tvlFeeScaledPercent;
 
@@ -409,8 +414,10 @@ contract UniV3LpVault is SingleVault, InternalMulticall, UniswapV3Calculator {
             totalToWithdrawScaledPercent > 0 ? withdrawn0.mulDiv(userScaledPercent, totalToWithdrawScaledPercent) : 0;
         uint256 fromWithdrawn1 =
             totalToWithdrawScaledPercent > 0 ? withdrawn1.mulDiv(userScaledPercent, totalToWithdrawScaledPercent) : 0;
+
         uint256 assets0ToWithdrawForUser =
             initialToken0Balance.mulDiv(userScaledPercent, MAX_SCALED_PERCENTAGE) + fromWithdrawn0;
+
         uint256 assets1ToWithdrawForUser =
             initialToken1Balance.mulDiv(userScaledPercent, MAX_SCALED_PERCENTAGE) + fromWithdrawn1;
 

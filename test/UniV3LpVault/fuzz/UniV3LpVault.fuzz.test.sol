@@ -66,82 +66,45 @@ contract UniV3LpVaultFuzzTest is Test {
 
     // === WITHDRAW FUZZ TESTS ===
 
-    // function testFuzz_withdraw_ValidPercentages(
-    //     uint256 scaledPercentage
-    // ) public {
-    //     scaledPercentage = bound(
-    //         scaledPercentage,
-    //         1,
-    //         TestConstants.MAX_SCALED_PERCENTAGE
-    //     );
+    function testFuzz_withdraw_ValidPercentages(uint256 scaledPercentage) public {
+        scaledPercentage = bound(scaledPercentage, 1, TestConstants.MAX_SCALED_PERCENTAGE);
 
-    //     // Setup with funds
-    //     helper.depositToVault(
-    //         setup,
-    //         TestConstants.LARGE_AMOUNT,
-    //         TestConstants.LARGE_AMOUNT
-    //     );
-    //     helper.createPositionAroundCurrentTick(
-    //         setup.vault,
-    //         setup.executor,
-    //         TestConstants.TICK_RANGE_NARROW,
-    //         TestConstants.MEDIUM_AMOUNT,
-    //         TestConstants.MEDIUM_AMOUNT
-    //     );
+        // Setup with funds
+        // Use high values to make sure roundings does not lead to 0 for excessively small scaledPercentage values
+        helper.depositToVault(setup, 10_000 ether, 10_000 ether);
+        helper.createPositionAroundCurrentTick(
+            setup.vault, setup.executor, TestConstants.TICK_RANGE_NARROW, 1000 ether, 1000 ether
+        );
 
-    //     address recipient = makeAddr("recipient");
-    //     (uint256 initialNet0, ) = setup.vault.netAssetsValue();
+        address recipient = makeAddr("recipient");
+        (uint256 initialNet0,) = setup.vault.netAssetsValue();
 
-    //     vm.prank(setup.owner);
-    //     (uint256 withdrawn0, uint256 withdrawn1) = setup.vault.withdraw(
-    //         scaledPercentage,
-    //         recipient
-    //     );
+        vm.prank(setup.owner);
+        (uint256 withdrawn0, uint256 withdrawn1) = setup.vault.withdraw(scaledPercentage, recipient);
 
-    //     // Withdrawn amounts should be proportional (with some tolerance for LP mechanics)
-    //     if (scaledPercentage == TestConstants.MAX_SCALED_PERCENTAGE) {
-    //         // Full withdrawal should leave vault nearly empty
-    //         (uint256 finalNet0, uint256 finalNet1) = setup
-    //             .vault
-    //             .netAssetsValue();
-    //         helper.assertApproxEqual(
-    //             finalNet0,
-    //             0,
-    //             TestConstants.TOLERANCE_HIGH,
-    //             "Full withdrawal should empty vault"
-    //         );
-    //         helper.assertApproxEqual(
-    //             finalNet1,
-    //             0,
-    //             TestConstants.TOLERANCE_HIGH,
-    //             "Full withdrawal should empty vault"
-    //         );
-    //     } else {
-    //         // Partial withdrawal - check proportionality
-    //         assertTrue(
-    //             withdrawn0 > 0 || withdrawn1 > 0,
-    //             "Should withdraw something"
-    //         );
+        // Withdrawn amounts should be proportional
+        if (scaledPercentage == TestConstants.MAX_SCALED_PERCENTAGE) {
+            // Full withdrawal should leave vault nearly empty
+            (uint256 finalNet0, uint256 finalNet1) = setup.vault.netAssetsValue();
+            helper.assertApproxEqual(finalNet0, 0, TestConstants.TOLERANCE_HIGH, "Full withdrawal should empty vault");
+            helper.assertApproxEqual(finalNet1, 0, TestConstants.TOLERANCE_HIGH, "Full withdrawal should empty vault");
+        } else {
+            // Partial withdrawal - check proportionality
+            assertTrue(withdrawn0 > 0 || withdrawn1 > 0, "Should withdraw something");
 
-    //         uint256 expectedProportion = scaledPercentage.mulDiv(
-    //             1e18,
-    //             TestConstants.MAX_SCALED_PERCENTAGE
-    //         );
-    //         if (withdrawn0 > 0 && initialNet0 > 0) {
-    //             uint256 actualProportion0 = withdrawn0.mulDiv(
-    //                 1e18,
-    //                 initialNet0
-    //             );
-    //             // Allow 50% tolerance due to LP position management complexity
-    //             helper.assertApproxEqual(
-    //                 actualProportion0,
-    //                 expectedProportion,
-    //                 5e17, // 50% tolerance
-    //                 "Withdrawal proportion0 incorrect"
-    //             );
-    //         }
-    //     }
-    // }
+            uint256 expectedProportion = scaledPercentage.mulDiv(1e18, TestConstants.MAX_SCALED_PERCENTAGE);
+            if (withdrawn0 > 0 && initialNet0 > 0) {
+                uint256 actualProportion0 = withdrawn0.mulDiv(1e18, initialNet0);
+                // Allow 50% tolerance due to LP position management complexity
+                helper.assertApproxEqual(
+                    actualProportion0,
+                    expectedProportion,
+                    5e17, // 50% tolerance
+                    "Withdrawal proportion0 incorrect"
+                );
+            }
+        }
+    }
 
     // === MINT FUZZ TESTS ===
 
