@@ -3,9 +3,10 @@ pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {UniV3LpVault} from "../../../src/vaults/UniV3LpVault.sol";
+import {UniV3LpVault, MAX_SCALED_PERCENTAGE} from "../../../src/vaults/UniV3LpVault.sol";
 import {TestHelper} from "../helpers/TestHelper.sol";
 import {TestConstants} from "../helpers/Constants.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract UniV3LpVaultFeesTest is Test {
     using Math for uint256;
@@ -57,7 +58,8 @@ contract UniV3LpVaultFeesTest is Test {
             TestConstants.MEDIUM_AMOUNT
         );
 
-        helper.simulateTimePass(TestConstants.ONE_MONTH);
+        uint256 delay = TestConstants.ONE_MONTH;
+        helper.simulateTimePass(delay);
 
         uint256 initialFeeCollectorBalance0 = feeSetup.token0.balanceOf(feeSetup.feeCollector);
         uint256 initialFeeCollectorBalance1 = feeSetup.token1.balanceOf(feeSetup.feeCollector);
@@ -69,9 +71,9 @@ contract UniV3LpVaultFeesTest is Test {
         helper.depositToVault(feeSetup, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT);
 
         // Fee collector should receive approximately 1/12 of 5% of the assets
-        uint256 expectedMonthlyFeeRate = TestConstants.HIGH_TVL_FEE.mulDiv(
-            TestConstants.ONE_MONTH, TestConstants.ONE_YEAR * TestConstants.MAX_SCALED_PERCENTAGE
-        );
+        uint256 tvlFeePercent = feeSetup.vault.tvlFeeScaled().mulDiv(delay, 365 days);
+        uint256 expectedFee0 = depositAmount0.mulDiv(tvlFeePercent, MAX_SCALED_PERCENTAGE);
+        uint256 expectedFee1 = depositAmount1.mulDiv(tvlFeePercent, MAX_SCALED_PERCENTAGE);
 
         uint256 finalFeeCollectorBalance0 = feeSetup.token0.balanceOf(feeSetup.feeCollector);
         uint256 finalFeeCollectorBalance1 = feeSetup.token1.balanceOf(feeSetup.feeCollector);
@@ -84,8 +86,9 @@ contract UniV3LpVaultFeesTest is Test {
         uint256 collectedFee1 = finalFeeCollectorBalance1 - initialFeeCollectorBalance1;
 
         // Fees should be positive but reasonable
-        assertTrue(collectedFee0 > 0);
-        assertTrue(collectedFee1 > 0);
+        assertApproxEqAbs(collectedFee0, expectedFee0, 2);
+        assertApproxEqAbs(collectedFee1, expectedFee1, 2);
+
         assertTrue(collectedFee0 < depositAmount0 / 10); // Less than 10% of deposit
         assertTrue(collectedFee1 < depositAmount1 / 10);
     }
