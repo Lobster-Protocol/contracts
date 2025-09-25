@@ -44,8 +44,13 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
                                 MODIFIERS
     //////////////////////////////////////////////////////////////*/
 
+    // todo: add lock modifier
+
     modifier onlyOwnerOrExecutor() {
-        require(msg.sender == owner() || msg.sender == executor, Unauthorized());
+        require(
+            msg.sender == owner() || msg.sender == executor,
+            Unauthorized()
+        );
         _;
     }
 
@@ -64,8 +69,16 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
      * @notice Initialize the vault with an initial owner
      * @param initialOwner The address that will become the initial owner
      */
-    constructor(address initialOwner, address initialExecutor, address initialExecutorManager) Ownable(initialOwner) {
-        if (initialOwner == address(0) || initialExecutor == address(0) || initialExecutorManager == address(0)) {
+    constructor(
+        address initialOwner,
+        address initialExecutor,
+        address initialExecutorManager
+    ) Ownable(initialOwner) {
+        if (
+            initialOwner == address(0) ||
+            initialExecutor == address(0) ||
+            initialExecutorManager == address(0)
+        ) {
             revert ZeroAddress();
         }
 
@@ -87,7 +100,9 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
      * @notice Initiate executor update with time delay
      * @param newExecutor Address of the new executor
      */
-    function setExecutor(address newExecutor) external onlyExecutorManagerOrOwner {
+    function setExecutor(
+        address newExecutor
+    ) external onlyExecutorManagerOrOwner {
         executor = newExecutor;
         emit ExecutorUpdated(newExecutor);
     }
@@ -116,7 +131,11 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
      * @param to Address to send tokens to
      * @param amount Amount to recover
      */
-    function emergencyRecoverToken(address token, address to, uint256 amount) external onlyOwner {
+    function emergencyRecoverToken(
+        address token,
+        address to,
+        uint256 amount
+    ) external onlyOwner {
         if (token == address(0) || to == address(0)) revert ZeroAddress();
         if (amount == 0) revert ZeroValue();
 
@@ -128,12 +147,15 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
      * @param to Address to send ETH to
      * @param amount Amount to recover
      */
-    function emergencyRecoverETH(address to, uint256 amount) external onlyOwner {
+    function emergencyRecoverETH(
+        address to,
+        uint256 amount
+    ) external onlyOwner {
         if (to == address(0)) revert ZeroAddress();
         if (amount == 0) revert ZeroValue();
         if (address(this).balance < amount) revert("Insufficient balance");
 
-        (bool success,) = payable(to).call{value: amount}("");
+        (bool success, ) = payable(to).call{value: amount}("");
         require(success, "ETH transfer failed");
     }
 
@@ -148,12 +170,7 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
         address target,
         uint256 value,
         bytes calldata data
-    )
-        public
-        payable
-        onlyOwner
-        returns (bytes memory returnData)
-    {
+    ) public payable onlyOwner returns (bytes memory returnData) {
         (bool success, bytes memory result) = target.call{value: value}(data);
 
         if (!success) {
@@ -176,13 +193,12 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
         address[] calldata targets,
         uint256[] calldata values,
         bytes[] calldata calldatas
-    )
-        external
-        payable
-        onlyOwner
-    {
+    ) external payable onlyOwner {
         uint256 length = targets.length;
-        require(length == values.length && length == calldatas.length, "Array length mismatch");
+        require(
+            length == values.length && length == calldatas.length,
+            "Array length mismatch"
+        );
 
         for (uint256 i = 0; i < length; i++) {
             // call, revert on error

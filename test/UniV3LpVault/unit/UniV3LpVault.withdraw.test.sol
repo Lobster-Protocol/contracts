@@ -44,16 +44,25 @@ contract UniV3LpVaultWithdrawTest is Test {
         emit UniV3LpVault.Withdraw(0, 0, recipient); // Amounts will be calculated dynamically
 
         vm.prank(setup.owner);
-        (uint256 withdrawn0, uint256 withdrawn1) = setup.vault.withdraw(withdrawPercentage, recipient);
+        (uint256 withdrawn0, uint256 withdrawn1) = setup.vault.withdraw(
+            withdrawPercentage,
+            recipient
+        );
 
         // Check recipient received tokens
-        assertTrue(setup.token0.balanceOf(recipient) > initialRecipientBalance0);
-        assertTrue(setup.token1.balanceOf(recipient) > initialRecipientBalance1);
+        assertTrue(
+            setup.token0.balanceOf(recipient) > initialRecipientBalance0
+        );
+        assertTrue(
+            setup.token1.balanceOf(recipient) > initialRecipientBalance1
+        );
         assertTrue(withdrawn0 > 0);
         assertTrue(withdrawn1 > 0);
 
         // Check vault still has remaining assets
-        (uint256 remainingNet0, uint256 remainingNet1) = setup.vault.netAssetsValue();
+        (uint256 remainingNet0, uint256 remainingNet1) = setup
+            .vault
+            .netAssetsValue();
         assertTrue(remainingNet0 > 0);
         assertTrue(remainingNet1 > 0);
     }
@@ -78,12 +87,26 @@ contract UniV3LpVaultWithdrawTest is Test {
 
         // Vault should be nearly empty (allowing for small rounding errors)
         (uint256 finalNet0, uint256 finalNet1) = setup.vault.netAssetsValue();
-        helper.assertApproxEqual(finalNet0, 0, TestConstants.TOLERANCE_HIGH, "Final net assets0 should be zero");
-        helper.assertApproxEqual(finalNet1, 0, TestConstants.TOLERANCE_HIGH, "Final net assets1 should be zero");
+        helper.assertApproxEqual(
+            finalNet0,
+            0,
+            TestConstants.TOLERANCE_HIGH,
+            "Final net assets0 should be zero"
+        );
+        helper.assertApproxEqual(
+            finalNet1,
+            0,
+            TestConstants.TOLERANCE_HIGH,
+            "Final net assets1 should be zero"
+        );
     }
 
     function test_withdraw_ZeroPercentage_Reverts() public {
-        helper.depositToVault(setup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
+        helper.depositToVault(
+            setup,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
 
         address recipient = makeAddr("recipient");
 
@@ -93,7 +116,11 @@ contract UniV3LpVaultWithdrawTest is Test {
     }
 
     function test_withdraw_PercentageOverMax_Reverts() public {
-        helper.depositToVault(setup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
+        helper.depositToVault(
+            setup,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
 
         address recipient = makeAddr("recipient");
         uint256 excessivePercentage = TestConstants.MAX_SCALED_PERCENTAGE + 1;
@@ -104,7 +131,11 @@ contract UniV3LpVaultWithdrawTest is Test {
     }
 
     function test_withdraw_ZeroRecipient_Reverts() public {
-        helper.depositToVault(setup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
+        helper.depositToVault(
+            setup,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
 
         vm.prank(setup.owner);
         vm.expectRevert(SingleVault.ZeroAddress.selector);
@@ -112,13 +143,22 @@ contract UniV3LpVaultWithdrawTest is Test {
     }
 
     function test_withdraw_NotOwner_Reverts() public {
-        helper.depositToVault(setup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
+        helper.depositToVault(
+            setup,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
 
         address notOwner = makeAddr("notOwner");
         address recipient = makeAddr("recipient");
 
         vm.prank(notOwner);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, notOwner));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Ownable.OwnableUnauthorizedAccount.selector,
+                notOwner
+            )
+        );
         setup.vault.withdraw(TestConstants.HALF_SCALED_PERCENTAGE, recipient);
     }
 
@@ -129,7 +169,7 @@ contract UniV3LpVaultWithdrawTest is Test {
         helper.depositToVault(setup, depositAmount0, depositAmount1);
 
         // Create multiple positions
-        (, int24 currentTick,,,,,) = setup.pool.slot0();
+        (, int24 currentTick, , , , , ) = setup.pool.slot0();
 
         helper.createPosition(
             setup.vault,
@@ -152,8 +192,10 @@ contract UniV3LpVaultWithdrawTest is Test {
         address recipient = makeAddr("recipient");
 
         vm.prank(setup.owner);
-        (uint256 withdrawn0, uint256 withdrawn1) =
-            setup.vault.withdraw(TestConstants.QUARTER_SCALED_PERCENTAGE, recipient);
+        (uint256 withdrawn0, uint256 withdrawn1) = setup.vault.withdraw(
+            TestConstants.QUARTER_SCALED_PERCENTAGE,
+            recipient
+        );
 
         assertTrue(withdrawn0 > 0);
         assertTrue(withdrawn1 > 0);
@@ -162,9 +204,15 @@ contract UniV3LpVaultWithdrawTest is Test {
     }
 
     function test_withdraw_WithTvlFees_CollectsFeesFirst() public {
-        TestHelper.VaultSetup memory feeSetup = helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE);
+        TestHelper.VaultSetup memory feeSetup = helper.deployVaultWithPool(
+            TestConstants.HIGH_TVL_FEE
+        );
 
-        helper.depositToVault(feeSetup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
+        helper.depositToVault(
+            feeSetup,
+            TestConstants.LARGE_AMOUNT,
+            TestConstants.LARGE_AMOUNT
+        );
         helper.createPositionAroundCurrentTick(
             feeSetup.vault,
             feeSetup.executor,
@@ -177,25 +225,41 @@ contract UniV3LpVaultWithdrawTest is Test {
         helper.simulateTimePass(TestConstants.ONE_MONTH);
 
         address recipient = makeAddr("recipient");
-        uint256 initialFeeCollectorBalance0 = feeSetup.token0.balanceOf(feeSetup.feeCollector);
-        uint256 initialFeeCollectorBalance1 = feeSetup.token1.balanceOf(feeSetup.feeCollector);
+        uint256 initialFeeCollectorBalance0 = feeSetup.token0.balanceOf(
+            feeSetup.feeCollector
+        );
+        uint256 initialFeeCollectorBalance1 = feeSetup.token1.balanceOf(
+            feeSetup.feeCollector
+        );
 
         vm.expectEmit(false, false, true, true);
         emit UniV3LpVault.TvlFeeCollected(0, 0, feeSetup.feeCollector);
 
         vm.prank(feeSetup.owner);
-        feeSetup.vault.withdraw(TestConstants.HALF_SCALED_PERCENTAGE, recipient);
+        feeSetup.vault.withdraw(
+            TestConstants.HALF_SCALED_PERCENTAGE,
+            recipient
+        );
 
         // Fee collector should have received fees
-        assertTrue(feeSetup.token0.balanceOf(feeSetup.feeCollector) > initialFeeCollectorBalance0);
-        assertTrue(feeSetup.token1.balanceOf(feeSetup.feeCollector) > initialFeeCollectorBalance1);
+        assertTrue(
+            feeSetup.token0.balanceOf(feeSetup.feeCollector) >
+                initialFeeCollectorBalance0
+        );
+        assertTrue(
+            feeSetup.token1.balanceOf(feeSetup.feeCollector) >
+                initialFeeCollectorBalance1
+        );
     }
 
     function test_withdraw_EmptyVault_Success() public {
         address recipient = makeAddr("recipient");
 
         vm.prank(setup.owner);
-        (uint256 withdrawn0, uint256 withdrawn1) = setup.vault.withdraw(TestConstants.MAX_SCALED_PERCENTAGE, recipient);
+        (uint256 withdrawn0, uint256 withdrawn1) = setup.vault.withdraw(
+            TestConstants.MAX_SCALED_PERCENTAGE,
+            recipient
+        );
 
         assertEq(withdrawn0, 0);
         assertEq(withdrawn1, 0);
@@ -214,10 +278,19 @@ contract UniV3LpVaultWithdrawTest is Test {
         uint256 withdrawPercentage = TestConstants.HALF_SCALED_PERCENTAGE;
 
         vm.prank(setup.owner);
-        (uint256 withdrawn0, uint256 withdrawn1) = setup.vault.withdraw(withdrawPercentage, recipient);
+        (uint256 withdrawn0, uint256 withdrawn1) = setup.vault.withdraw(
+            withdrawPercentage,
+            recipient
+        );
 
-        uint256 expectedWithdraw0 = depositAmount0.mulDiv(withdrawPercentage, TestConstants.MAX_SCALED_PERCENTAGE);
-        uint256 expectedWithdraw1 = depositAmount1.mulDiv(withdrawPercentage, TestConstants.MAX_SCALED_PERCENTAGE);
+        uint256 expectedWithdraw0 = depositAmount0.mulDiv(
+            withdrawPercentage,
+            TestConstants.MAX_SCALED_PERCENTAGE
+        );
+        uint256 expectedWithdraw1 = depositAmount1.mulDiv(
+            withdrawPercentage,
+            TestConstants.MAX_SCALED_PERCENTAGE
+        );
 
         assertEq(withdrawn0, expectedWithdraw0);
         assertEq(withdrawn1, expectedWithdraw1);
@@ -241,7 +314,10 @@ contract UniV3LpVaultWithdrawTest is Test {
         address recipient = makeAddr("recipient");
 
         vm.prank(setup.owner);
-        setup.vault.withdraw(TestConstants.QUARTER_SCALED_PERCENTAGE, recipient);
+        setup.vault.withdraw(
+            TestConstants.QUARTER_SCALED_PERCENTAGE,
+            recipient
+        );
 
         // Vault should have approximately 75% left
         (uint256 finalNet0, uint256 finalNet1) = setup.vault.netAssetsValue();
@@ -251,10 +327,16 @@ contract UniV3LpVaultWithdrawTest is Test {
         uint256 expectedRemaining1 = (depositAmount1 * 75) / 100;
 
         helper.assertApproxEqual(
-            finalNet0, expectedRemaining0, TestConstants.TOLERANCE_MEDIUM, "Remaining assets0 should be ~75%"
+            finalNet0,
+            expectedRemaining0,
+            TestConstants.TOLERANCE_MEDIUM,
+            "Remaining assets0 should be ~75%"
         );
         helper.assertApproxEqual(
-            finalNet1, expectedRemaining1, TestConstants.TOLERANCE_MEDIUM, "Remaining assets1 should be ~75%"
+            finalNet1,
+            expectedRemaining1,
+            TestConstants.TOLERANCE_MEDIUM,
+            "Remaining assets1 should be ~75%"
         );
     }
 }

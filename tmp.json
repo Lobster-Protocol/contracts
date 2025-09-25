@@ -1,0 +1,173 @@
+[
+  {
+    "events": [
+      {
+        "block_number": 382512961,
+        "block_timestamp": 1758715854,
+        "chain_id": 42161,
+        "content": {
+          "data": {
+            "amount0": "-174375930991803707",
+            "amount1": "728934954",
+            "liquidity": "147938030666013988",
+            "sqrt_price_x96": "5122449734811312799612928",
+            "tick": "-192939"
+          },
+          "indexed": {
+            "recipient": "0x51c72848c68a965f66fa7a88855f9f7784502a7f",
+            "sender": "0x27920e8039d2b6e93e36f5d5f53b998e2e631a70"
+          }
+        },
+        "emitter": "0xb1026b8e7276e7ac75410f1fcbbe21796e8f7526",
+        "log_index": 21,
+        "topic0": "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67",
+        "tx": "0xce7362973222a084c0ed6d479bc41364cc637b1fce9289b1cf9c4f847103026c"
+      },
+      {
+        "block_number": 382512961,
+        "block_timestamp": 1758715854,
+        "chain_id": 42161,
+        "content": {
+          "data": { "value": "2229000000000000000000" },
+          "indexed": {
+            "from": "0xa18db6154fd0f83e82c21df81fe4843b4d67483b",
+            "to": "0x6747bcaf9bd5a5f0758cbe08903490e45ddfacb5"
+          }
+        },
+        "emitter": "0x4e200fe2f3efb977d5fd9c430a41531fb04d97b8",
+        "log_index": 4,
+        "topic0": "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "tx": "0x62c9c9292105fcebead328379ceaf8dd241f1f57f0494dad402e55a2daba1709"
+      },
+      {
+        "block_number": 382512961,
+        "block_timestamp": 1758715854,
+        "chain_id": 42161,
+        "content": {
+          "data": { "value": "119386339809250989" },
+          "indexed": {
+            "from": "0xb49eae16e45faebaa406e57c93263a5fcbc0c8d3",
+            "to": "0x5e2f47bd7d4b357fcfd0bb224eb665773b1b9801"
+          }
+        },
+        "emitter": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+        "log_index": 5,
+        "topic0": "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "tx": "0x62c9c9292105fcebead328379ceaf8dd241f1f57f0494dad402e55a2daba1709"
+      },
+      {
+        "block_number": 382512961,
+        "block_timestamp": 1758715854,
+        "chain_id": 42161,
+        "content": {
+          "data": { "value": "2229000000000000000000" },
+          "indexed": {
+            "from": "0x6747bcaf9bd5a5f0758cbe08903490e45ddfacb5",
+            "to": "0xb49eae16e45faebaa406e57c93263a5fcbc0c8d3"
+          }
+        },
+        "emitter": "0x4e200fe2f3efb977d5fd9c430a41531fb04d97b8",
+        "log_index": 6,
+        "topic0": "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "tx": "0x62c9c9292105fcebead328379ceaf8dd241f1f57f0494dad402e55a2daba1709"
+      },
+      {
+        "block_number": 382512961,
+        "block_timestamp": 1758715854,
+        "chain_id": 42161,
+        "content": {
+          "data": { "value": "119386339809250991" },
+          "indexed": {
+            "from": "0x5e2f47bd7d4b357fcfd0bb224eb665773b1b9801",
+            "to": "0xd99cae3fac551f6b6ba7b9f19bdd316951eeee98"
+          }
+        },
+        "emitter": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+        "log_index": 8,
+        "topic0": "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "tx": "0x62c9c9292105fcebead328379ceaf8dd241f1f57f0494dad402e55a2daba1709"
+      },
+      {
+        "block_number": 382512961,
+        "block_timestamp": 1758715854,
+        "chain_id": 42161,
+        "content": {
+          "data": { "value": "119386339809250991" },
+          "indexed": {
+            "from": "0xd99cae3fac551f6b6ba7b9f19bdd316951eeee98",
+            "to": "0x0000000000000000000000000000000000000000"
+          }
+        },
+        "emitter": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+        "log_index": 9,
+        "topic0": "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "tx": "0x62c9c9292105fcebead328379ceaf8dd241f1f57f0494dad402e55a2daba1709"
+      },
+      {
+        "block_number": 382512961,
+        "block_timestamp": 1758715854,
+        "chain_id": 42161,
+        "content": {
+          "data": { "value": "1000000000" },
+          "indexed": {
+            "from": "0x9e3e386d9799bac1204d304045336006433215fb",
+            "to": "0x700e97ef07219440487840dc472e7120a7ff11f4"
+          }
+        },
+        "emitter": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+        "log_index": 15,
+        "topic0": "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "tx": "0x2504a27177f2cd4b44df9424d16139a5b2bb9a1f6f2399399cae703b067569a3"
+      },
+      {
+        "block_number": 382512961,
+        "block_timestamp": 1758715854,
+        "chain_id": 42161,
+        "content": {
+          "data": { "value": "174375930991803707" },
+          "indexed": {
+            "from": "0xb1026b8e7276e7ac75410f1fcbbe21796e8f7526",
+            "to": "0x51c72848c68a965f66fa7a88855f9f7784502a7f"
+          }
+        },
+        "emitter": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+        "log_index": 18,
+        "topic0": "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "tx": "0xce7362973222a084c0ed6d479bc41364cc637b1fce9289b1cf9c4f847103026c"
+      },
+      {
+        "block_number": 382512961,
+        "block_timestamp": 1758715854,
+        "chain_id": 42161,
+        "content": {
+          "data": { "value": "728934954" },
+          "indexed": {
+            "from": "0x51c72848c68a965f66fa7a88855f9f7784502a7f",
+            "to": "0xb1026b8e7276e7ac75410f1fcbbe21796e8f7526"
+          }
+        },
+        "emitter": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+        "log_index": 19,
+        "topic0": "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "tx": "0xce7362973222a084c0ed6d479bc41364cc637b1fce9289b1cf9c4f847103026c"
+      },
+      {
+        "block_number": 382512961,
+        "block_timestamp": 1758715854,
+        "chain_id": 42161,
+        "content": {
+          "data": { "value": "9840" },
+          "indexed": {
+            "from": "0xb1026b8e7276e7ac75410f1fcbbe21796e8f7526",
+            "to": "0x58095979b412a366687ca05cbe85ff56241be21f"
+          }
+        },
+        "emitter": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+        "log_index": 20,
+        "topic0": "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "tx": "0xce7362973222a084c0ed6d479bc41364cc637b1fce9289b1cf9c4f847103026c"
+      }
+    ],
+    "is_historical": false
+  }
+]
