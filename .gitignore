@@ -23,3 +23,5 @@ lcov.info
 
 coverage-html/
 coverage.lcov
+
+test/tmp.t.sol

@@ -37,6 +37,7 @@ struct MinimalMintParams {
 struct WithdrawParams {
     uint256 userScaledPercent;
     uint256 tvlFeeScaledPercent;
+    uint256 performanceFeeScaledPercent;
     address recipient; // recipient for the user's withdrawal
 }
 
@@ -55,8 +56,12 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     Position[] private positions; // Supposed to hold up to 3 positions
     // Last time block management fees were collected
     uint256 public tvlFeeCollectedAt;
-    // Annualized management fees, in basis point
+    // Annualized management fees
     uint256 public tvlFeeScaled;
+    // Performance fee
+    uint256 public performanceFeeScaled;
+    // Vault tvl computed in token0 using pool twap
+    uint256 private lastVaultTvl;
     address public feeCollector;
 
     error NotPool();
@@ -102,7 +107,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     function deposit(uint256 assets0, uint256 assets1) external onlyOwner {
         if (assets0 == 0 && assets1 == 0) revert ZeroValue();
 
-        _collectTvlFees();
+        _collectFees();
 
         // Execute the deposit
         if (assets0 > 0) {
@@ -130,6 +135,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
             WithdrawParams({
                 userScaledPercent: scaledPercentage,
                 tvlFeeScaledPercent: _pendingRelativeTvlFee(),
+                performanceFeeScaledPercent: _pendingRelativePerformanceFee(),
                 recipient: recipient
             })
         );
@@ -263,17 +269,31 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         return min(tvlFeeScaled.mulDiv(deltaT, 365 days), MAX_SCALED_PERCENTAGE);
     }
 
+    function _pendingRelativePerformanceFee() internal view returns (uint256) {
+        // use lastVaultTvl
+        // todo
+    }
+
     function min(uint256 a, uint256 b) internal pure returns (uint256) {
         return a > b ? b : a;
     }
 
-    function _collectTvlFees() internal {
-        uint256 toCollect = _pendingRelativeTvlFee();
+    function _collectFees() internal {
+        uint256 tvlToCollect = _pendingRelativeTvlFee();
 
-        if (toCollect == 0) return;
+        uint256 performanceFeeToCollect = _pendingRelativePerformanceFee();
 
-        WithdrawParams memory withdrawParams =
-            WithdrawParams({userScaledPercent: 0, tvlFeeScaledPercent: toCollect, recipient: address(0)});
+        if (tvlToCollect == 0 && performanceFeeToCollect == 0) {
+            tvlFeeCollectedAt = block.timestamp;
+            return;
+        }
+
+        WithdrawParams memory withdrawParams = WithdrawParams({
+            userScaledPercent: 0,
+            tvlFeeScaledPercent: tvlToCollect,
+            performanceFeeScaledPercent: performanceFeeToCollect,
+            recipient: address(0)
+        });
 
         _withdraw(withdrawParams);
     }
@@ -498,8 +518,8 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
         (amount0, amount1) = _rawAssetsValue();
 
-        amount0.mulDiv(pendingRelativeTvlFee, MAX_SCALED_PERCENTAGE);
-        amount1.mulDiv(pendingRelativeTvlFee, MAX_SCALED_PERCENTAGE);
+        amount0 = amount0.mulDiv(pendingRelativeTvlFee, MAX_SCALED_PERCENTAGE);
+        amount1 = amount1.mulDiv(pendingRelativeTvlFee, MAX_SCALED_PERCENTAGE);
     }
 
     function positionsLength() external view returns (uint256) {

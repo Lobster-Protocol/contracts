@@ -2,17 +2,22 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import {UniV3LpVault, Position} from "../../../src/vaults/UniV3LpVault.sol";
+import {UniV3LpVault, Position, MAX_SCALED_PERCENTAGE} from "../../../src/vaults/UniV3LpVault.sol";
 import {TestHelper} from "../helpers/TestHelper.sol";
 import {TestConstants} from "../helpers/Constants.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract UniV3LpVaultViewsTest is Test {
+    using Math for uint256;
+
     TestHelper helper;
     TestHelper.VaultSetup setup;
+    TestHelper.VaultSetup feeSetup;
 
     function setUp() public {
         helper = new TestHelper();
         setup = helper.deployVaultWithPool();
+        feeSetup = helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE); // 5% annual
     }
 
     function test_totalLpValue_EmptyVault_ReturnsZero() public view {
@@ -274,5 +279,33 @@ contract UniV3LpVaultViewsTest is Test {
         helper.assertApproxEqual(finalNet1, 0, TestConstants.TOLERANCE_HIGH, "Net assets should be zero");
     }
 
-    // todo: test rawAssetsValue(), pendingTvlFee(), and positionsLength()
+    function test_views_rawAssetsValue() public {
+        helper.depositToVault(setup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
+
+        (uint256 raw0, uint256 raw1) = setup.vault.rawAssetsValue();
+        assertEq(setup.token0.balanceOf(address(setup.vault)), raw0);
+        assertEq(setup.token1.balanceOf(address(setup.vault)), raw1);
+    }
+
+    function test_views_pendingTvlFee() public {
+        uint256 depositAmount0 = 100 ether;
+        uint256 depositAmount1 = 3 ether;
+
+        helper.depositToVault(feeSetup, depositAmount0, depositAmount1);
+
+        uint256 delay = TestConstants.ONE_YEAR;
+        helper.simulateTimePass(delay);
+
+        (uint256 pending0, uint256 pending1) = feeSetup.vault.pendingTvlFee();
+
+        uint256 pendingFeePercent = feeSetup.vault.tvlFeeScaled().mulDiv(delay, 365 days);
+
+        uint256 pending0Computed = depositAmount0.mulDiv(pendingFeePercent, MAX_SCALED_PERCENTAGE);
+        uint256 pending1Computed = depositAmount1.mulDiv(pendingFeePercent, MAX_SCALED_PERCENTAGE);
+
+        assertEq(pending0, pending0Computed);
+        assertEq(pending1, pending1Computed);
+    }
+
+    // todo: test positionsLength()
 }
