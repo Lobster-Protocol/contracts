@@ -407,7 +407,8 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         uint256 performanceFeeScaledPercent = withdrawParams.performanceFeeScaledPercent;
 
         if (tvlFeeScaledPercent + performanceFeeScaledPercent > MAX_SCALED_PERCENTAGE) {
-            // todo: Give priority to which fee ?
+            performanceFeeScaledPercent = 0;
+            tvlFeeScaledPercent = MAX_SCALED_PERCENTAGE;
         }
 
         userScaledPercent = (MAX_SCALED_PERCENTAGE - tvlFeeScaledPercent - performanceFeeScaledPercent).mulDiv(
