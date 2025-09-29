@@ -18,6 +18,7 @@ import {UniswapUtils} from "../libraries/uniswapV3/UniswapUtils.sol";
 
 uint256 constant SCALING_FACTOR = 1e18;
 uint256 constant MAX_SCALED_PERCENTAGE = 100 * SCALING_FACTOR;
+uint32 constant TWAP_SECONDS_AGO = 7 days;
 
 struct Position {
     int24 lowerTick;
@@ -46,6 +47,7 @@ struct WithdrawParams {
  * @title
  * @author Elli <nathan@lobster-protocol.com>
  * @notice Allows to do lp on a uniswap v3 pool
+ * @notice To work fine, especially with the performance fees, we suppose the pool existed at least TWAP_SECONDS_AGO seconds ago and some swaps happended during this delay
  */
 contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     using Math for uint256;
@@ -279,14 +281,18 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
         (uint256 tvl0, uint256 tvl1) = _netAssetsValue();
 
-        // todo: handle overflows
+        // Use a reasonable base amount instead of 1 if there is an overflow
+        uint128 baseAmount = tvl1 > type(uint128).max ? uint128(1) : uint128(tvl1);
 
-        uint256 twapValueFrom1To0 = UniswapUtils.getTwap(
-            pool,
-            7 days, // uint32 secondsAgo,
-            uint128(tvl1), // uint128 baseAmount,
-            true
-        );
+        uint256 twapResult = UniswapUtils.getTwap(pool, TWAP_SECONDS_AGO, baseAmount, true);
+
+        // Scale the result if we used a smaller base amount
+        uint256 twapValueFrom1To0;
+        if (tvl1 > type(uint128).max) {
+            twapValueFrom1To0 = twapResult * tvl1;
+        } else {
+            twapValueFrom1To0 = twapResult;
+        }
 
         uint256 newTvl0 = tvl0 + twapValueFrom1To0;
 
@@ -294,7 +300,9 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
             return 0;
         }
 
-        uint256 relativePerfScaledPercent = newTvl0.mulDiv(SCALING_FACTOR, lastVaultTvl0);
+        uint256 lastVaultTvl0_secure = lastVaultTvl0 == 0 ? 1 : lastVaultTvl0; // avoid division by 0 later
+
+        uint256 relativePerfScaledPercent = newTvl0.mulDiv(SCALING_FACTOR, lastVaultTvl0_secure);
 
         return min(relativePerfScaledPercent, MAX_SCALED_PERCENTAGE);
     }
