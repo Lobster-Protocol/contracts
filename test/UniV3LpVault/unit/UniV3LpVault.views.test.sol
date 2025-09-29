@@ -21,52 +21,86 @@ contract UniV3LpVaultViewsTest is Test {
     }
 
     function test_totalLpValue_EmptyVault_ReturnsZero() public view {
-        (uint256 totalAssets0, uint256 totalAssets1) = setup.vault.totalLpValue();
+        (uint256 totalAssets0, uint256 totalAssets1) = setup
+            .vault
+            .totalLpValue();
         assertEq(totalAssets0, 0);
         assertEq(totalAssets1, 0);
     }
 
     function test_netAssetsValue_EmptyVault_ReturnsZero() public view {
-        (uint256 totalAssets0, uint256 totalAssets1) = setup.vault.netAssetsValue();
+        (uint256 totalAssets0, uint256 totalAssets1) = setup
+            .vault
+            .netAssetsValue();
         assertEq(totalAssets0, 0);
         assertEq(totalAssets1, 0);
     }
 
     function test_totalLpValue_OnlyCashNoPositions_ReturnsZero() public {
-        helper.depositToVault(setup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
+        helper.depositToVault(
+            setup,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
 
-        (uint256 totalAssets0, uint256 totalAssets1) = setup.vault.totalLpValue();
+        (uint256 totalAssets0, uint256 totalAssets1) = setup
+            .vault
+            .totalLpValue();
         assertEq(totalAssets0, 0);
         assertEq(totalAssets1, 0);
     }
 
-    function test_netAssetsValue_OnlyCashNoPositions_ReturnsCashBalance() public {
+    function test_netAssetsValue_OnlyCashNoPositions_ReturnsCashBalance()
+        public
+    {
         uint256 depositAmount0 = TestConstants.MEDIUM_AMOUNT;
         uint256 depositAmount1 = TestConstants.LARGE_AMOUNT;
 
         helper.depositToVault(setup, depositAmount0, depositAmount1);
 
-        (uint256 totalAssets0, uint256 totalAssets1) = setup.vault.netAssetsValue();
+        (uint256 totalAssets0, uint256 totalAssets1) = setup
+            .vault
+            .netAssetsValue();
         assertEq(totalAssets0, depositAmount0);
         assertEq(totalAssets1, depositAmount1);
     }
 
-    function test_totalLpValue_WithSinglePosition_ReturnsPositionValue() public {
-        helper.depositToVault(setup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
+    function test_totalLpValue_WithSinglePosition_ReturnsPositionValue()
+        public
+    {
+        helper.depositToVault(
+            setup,
+            TestConstants.LARGE_AMOUNT,
+            TestConstants.LARGE_AMOUNT
+        );
 
         uint256 amount0Desired = TestConstants.MEDIUM_AMOUNT;
         uint256 amount1Desired = TestConstants.MEDIUM_AMOUNT;
 
         helper.createPositionAroundCurrentTick(
-            setup.vault, setup.executor, TestConstants.TICK_RANGE_NARROW, amount0Desired, amount1Desired
+            setup.vault,
+            setup.executor,
+            TestConstants.TICK_RANGE_NARROW,
+            amount0Desired,
+            amount1Desired
         );
 
         (uint256 totalLp0, uint256 totalLp1) = setup.vault.totalLpValue();
 
         assertTrue(totalLp0 > 0);
         assertTrue(totalLp1 > 0);
-        helper.assertApproxEqual(totalLp0, amount0Desired, TestConstants.TOLERANCE_LOW, "LP value0 mismatch");
-        helper.assertApproxEqual(totalLp1, amount1Desired, TestConstants.TOLERANCE_LOW, "LP value1 mismatch");
+        helper.assertApproxEqual(
+            totalLp0,
+            amount0Desired,
+            TestConstants.TOLERANCE_LOW,
+            "LP value0 mismatch"
+        );
+        helper.assertApproxEqual(
+            totalLp1,
+            amount1Desired,
+            TestConstants.TOLERANCE_LOW,
+            "LP value1 mismatch"
+        );
     }
 
     function test_netAssetsValue_WithPositionAndCash_ReturnsCombined() public {
@@ -77,7 +111,11 @@ contract UniV3LpVaultViewsTest is Test {
 
         helper.depositToVault(setup, totalDeposit0, totalDeposit1);
         helper.createPositionAroundCurrentTick(
-            setup.vault, setup.executor, TestConstants.TICK_RANGE_NARROW, positionAmount0, positionAmount1
+            setup.vault,
+            setup.executor,
+            TestConstants.TICK_RANGE_NARROW,
+            positionAmount0,
+            positionAmount1
         );
 
         (uint256 netAssets0, uint256 netAssets1) = setup.vault.netAssetsValue();
@@ -85,17 +123,27 @@ contract UniV3LpVaultViewsTest is Test {
         // Net assets should be approximately equal to total deposit
         // (position value + remaining cash)
         helper.assertApproxEqual(
-            netAssets0, totalDeposit0, TestConstants.TOLERANCE_LOW, "Net assets0 should equal total deposit"
+            netAssets0,
+            totalDeposit0,
+            TestConstants.TOLERANCE_LOW,
+            "Net assets0 should equal total deposit"
         );
         helper.assertApproxEqual(
-            netAssets1, totalDeposit1, TestConstants.TOLERANCE_LOW, "Net assets1 should equal total deposit"
+            netAssets1,
+            totalDeposit1,
+            TestConstants.TOLERANCE_LOW,
+            "Net assets1 should equal total deposit"
         );
     }
 
     function test_totalLpValue_WithMultiplePositions_ReturnsSum() public {
-        helper.depositToVault(setup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
+        helper.depositToVault(
+            setup,
+            TestConstants.LARGE_AMOUNT,
+            TestConstants.LARGE_AMOUNT
+        );
 
-        (, int24 currentTick,,,,,) = setup.pool.slot0();
+        (, int24 currentTick, , , , , ) = setup.pool.slot0();
 
         // Create two positions
         uint256 amount1_0 = TestConstants.SMALL_AMOUNT;
@@ -125,17 +173,27 @@ contract UniV3LpVaultViewsTest is Test {
 
         // Should be approximately sum of both positions
         helper.assertApproxEqual(
-            totalLp0, amount1_0 + amount2_0, TestConstants.TOLERANCE_MEDIUM, "Total LP value0 should sum positions"
+            totalLp0,
+            amount1_0 + amount2_0,
+            TestConstants.TOLERANCE_MEDIUM,
+            "Total LP value0 should sum positions"
         );
         helper.assertApproxEqual(
-            totalLp1, amount1_1 + amount2_1, TestConstants.TOLERANCE_MEDIUM, "Total LP value1 should sum positions"
+            totalLp1,
+            amount1_1 + amount2_1,
+            TestConstants.TOLERANCE_MEDIUM,
+            "Total LP value1 should sum positions"
         );
     }
 
     function test_getPosition_ValidIndex_ReturnsCorrectPosition() public {
-        helper.depositToVault(setup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
+        helper.depositToVault(
+            setup,
+            TestConstants.LARGE_AMOUNT,
+            TestConstants.LARGE_AMOUNT
+        );
 
-        (, int24 currentTick,,,,,) = setup.pool.slot0();
+        (, int24 currentTick, , , , , ) = setup.pool.slot0();
         int24 expectedLowerTick = currentTick - TestConstants.TICK_RANGE_NARROW;
         int24 expectedUpperTick = currentTick + TestConstants.TICK_RANGE_NARROW;
 
@@ -161,7 +219,11 @@ contract UniV3LpVaultViewsTest is Test {
         setup.vault.getPosition(0);
 
         // Create one position, try to get second
-        helper.depositToVault(setup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
+        helper.depositToVault(
+            setup,
+            TestConstants.LARGE_AMOUNT,
+            TestConstants.LARGE_AMOUNT
+        );
         helper.createPositionAroundCurrentTick(
             setup.vault,
             setup.executor,
@@ -175,14 +237,23 @@ contract UniV3LpVaultViewsTest is Test {
     }
 
     function test_views_AfterPartialBurn_UpdatesCorrectly() public {
-        helper.depositToVault(setup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
+        helper.depositToVault(
+            setup,
+            TestConstants.LARGE_AMOUNT,
+            TestConstants.LARGE_AMOUNT
+        );
 
-        (, int24 currentTick,,,,,) = setup.pool.slot0();
+        (, int24 currentTick, , , , , ) = setup.pool.slot0();
         int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
         int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
 
         helper.createPosition(
-            setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
+            setup.vault,
+            setup.executor,
+            tickLower,
+            tickUpper,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
         );
 
         (uint256 initialLp0, uint256 initialLp1) = setup.vault.totalLpValue();
@@ -204,9 +275,11 @@ contract UniV3LpVaultViewsTest is Test {
     }
 
     function test_views_WithTvlFees_ReflectsFeesReduction() public {
-        TestHelper.VaultSetup memory feeSetup = helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE);
-
-        helper.depositToVault(feeSetup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
+        helper.depositToVault(
+            feeSetup,
+            TestConstants.LARGE_AMOUNT,
+            TestConstants.LARGE_AMOUNT
+        );
         helper.createPositionAroundCurrentTick(
             feeSetup.vault,
             feeSetup.executor,
@@ -216,13 +289,17 @@ contract UniV3LpVaultViewsTest is Test {
         );
 
         // Get values immediately after creation
-        (uint256 initialNet0, uint256 initialNet1) = feeSetup.vault.netAssetsValue();
+        (uint256 initialNet0, uint256 initialNet1) = feeSetup
+            .vault
+            .netAssetsValue();
 
         // Let time pass to accumulate fees
         helper.simulateTimePass(TestConstants.ONE_MONTH);
 
         // Get values after time passes (before fee collection)
-        (uint256 finalNet0, uint256 finalNet1) = feeSetup.vault.netAssetsValue();
+        (uint256 finalNet0, uint256 finalNet1) = feeSetup
+            .vault
+            .netAssetsValue();
 
         // Net assets should be reduced due to pending TVL fees
         assertTrue(finalNet0 < initialNet0);
@@ -234,7 +311,11 @@ contract UniV3LpVaultViewsTest is Test {
     }
 
     function test_views_ConsistencyBetweenCalls() public {
-        helper.depositToVault(setup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
+        helper.depositToVault(
+            setup,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
         helper.createPositionAroundCurrentTick(
             setup.vault,
             setup.executor,
@@ -256,7 +337,11 @@ contract UniV3LpVaultViewsTest is Test {
     }
 
     function test_views_AfterFullWithdrawal_ReturnsZero() public {
-        helper.depositToVault(setup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
+        helper.depositToVault(
+            setup,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
         helper.createPositionAroundCurrentTick(
             setup.vault,
             setup.executor,
@@ -267,20 +352,48 @@ contract UniV3LpVaultViewsTest is Test {
 
         // Withdraw everything
         address recipient = makeAddr("recipient");
-        helper.withdrawFromVault(setup, TestConstants.MAX_SCALED_PERCENTAGE, recipient);
+        helper.withdrawFromVault(
+            setup,
+            TestConstants.MAX_SCALED_PERCENTAGE,
+            recipient
+        );
 
         (uint256 finalLp0, uint256 finalLp1) = setup.vault.totalLpValue();
         (uint256 finalNet0, uint256 finalNet1) = setup.vault.netAssetsValue();
 
         // Should be zero or very close to zero
-        helper.assertApproxEqual(finalLp0, 0, TestConstants.TOLERANCE_HIGH, "LP value should be zero");
-        helper.assertApproxEqual(finalLp1, 0, TestConstants.TOLERANCE_HIGH, "LP value should be zero");
-        helper.assertApproxEqual(finalNet0, 0, TestConstants.TOLERANCE_HIGH, "Net assets should be zero");
-        helper.assertApproxEqual(finalNet1, 0, TestConstants.TOLERANCE_HIGH, "Net assets should be zero");
+        helper.assertApproxEqual(
+            finalLp0,
+            0,
+            TestConstants.TOLERANCE_HIGH,
+            "LP value should be zero"
+        );
+        helper.assertApproxEqual(
+            finalLp1,
+            0,
+            TestConstants.TOLERANCE_HIGH,
+            "LP value should be zero"
+        );
+        helper.assertApproxEqual(
+            finalNet0,
+            0,
+            TestConstants.TOLERANCE_HIGH,
+            "Net assets should be zero"
+        );
+        helper.assertApproxEqual(
+            finalNet1,
+            0,
+            TestConstants.TOLERANCE_HIGH,
+            "Net assets should be zero"
+        );
     }
 
     function test_views_rawAssetsValue() public {
-        helper.depositToVault(setup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
+        helper.depositToVault(
+            setup,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
 
         (uint256 raw0, uint256 raw1) = setup.vault.rawAssetsValue();
         assertEq(setup.token0.balanceOf(address(setup.vault)), raw0);
@@ -298,10 +411,19 @@ contract UniV3LpVaultViewsTest is Test {
 
         (uint256 pending0, uint256 pending1) = feeSetup.vault.pendingTvlFee();
 
-        uint256 pendingFeePercent = feeSetup.vault.tvlFeeScaled().mulDiv(delay, 365 days);
+        uint256 pendingFeePercent = feeSetup.vault.tvlFeeScaled().mulDiv(
+            delay,
+            365 days
+        );
 
-        uint256 pending0Computed = depositAmount0.mulDiv(pendingFeePercent, MAX_SCALED_PERCENTAGE);
-        uint256 pending1Computed = depositAmount1.mulDiv(pendingFeePercent, MAX_SCALED_PERCENTAGE);
+        uint256 pending0Computed = depositAmount0.mulDiv(
+            pendingFeePercent,
+            MAX_SCALED_PERCENTAGE
+        );
+        uint256 pending1Computed = depositAmount1.mulDiv(
+            pendingFeePercent,
+            MAX_SCALED_PERCENTAGE
+        );
 
         assertEq(pending0, pending0Computed);
         assertEq(pending1, pending1Computed);

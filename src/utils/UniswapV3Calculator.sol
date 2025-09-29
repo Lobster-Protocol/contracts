@@ -10,6 +10,9 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 /// @dev Q128 constant for fixed-point arithmetic in Uniswap V3 fee calculations
 uint256 constant Q128 = 0x100000000000000000000000000000000;
 
+int24 constant MIN_TICK = -887272;
+int24 constant MAX_TICK = 887272;
+
 /**
  * @title UniswapV3Calculator
  * @author Elli <nathan@lobster-protocol.com>
@@ -17,6 +20,8 @@ uint256 constant Q128 = 0x100000000000000000000000000000000;
  */
 contract UniswapV3Calculator {
     using Math for uint256;
+
+    error UnexpectedTickValue(int56 tickValue);
 
     /**
      * @dev Calculate the principal token amounts for a position at the current price
@@ -32,14 +37,14 @@ contract UniswapV3Calculator {
         int24 tickLower,
         int24 tickUpper,
         uint128 liquidity
-    )
-        internal
-        pure
-        returns (uint256 amount0, uint256 amount1)
-    {
-        return LiquidityAmounts.getAmountsForLiquidity(
-            sqrtRatioX96, TickMath.getSqrtRatioAtTick(tickLower), TickMath.getSqrtRatioAtTick(tickUpper), liquidity
-        );
+    ) internal pure returns (uint256 amount0, uint256 amount1) {
+        return
+            LiquidityAmounts.getAmountsForLiquidity(
+                sqrtRatioX96,
+                TickMath.getSqrtRatioAtTick(tickLower),
+                TickMath.getSqrtRatioAtTick(tickUpper),
+                liquidity
+            );
     }
 
     /**
@@ -54,21 +59,32 @@ contract UniswapV3Calculator {
         IUniswapV3PoolMinimal pool,
         FeeParams memory feeParams,
         int24 tickCurrent
-    )
-        internal
-        view
-        returns (uint256 fee0, uint256 fee1)
-    {
-        (uint256 poolFeeGrowthInside0LastX128, uint256 poolFeeGrowthInside1LastX128) =
-            _getFeeGrowthInside(pool, tickCurrent, feeParams.tickLower, feeParams.tickUpper);
+    ) internal view returns (uint256 fee0, uint256 fee1) {
+        (
+            uint256 poolFeeGrowthInside0LastX128,
+            uint256 poolFeeGrowthInside1LastX128
+        ) = _getFeeGrowthInside(
+                pool,
+                tickCurrent,
+                feeParams.tickLower,
+                feeParams.tickUpper
+            );
 
-        fee0 = (poolFeeGrowthInside0LastX128 - feeParams.positionFeeGrowthInside0LastX128).mulDiv(
-            feeParams.liquidity, Q128
-        ) + feeParams.tokensOwed0;
+        fee0 =
+            (poolFeeGrowthInside0LastX128 -
+                feeParams.positionFeeGrowthInside0LastX128).mulDiv(
+                    feeParams.liquidity,
+                    Q128
+                ) +
+            feeParams.tokensOwed0;
 
-        fee1 = (poolFeeGrowthInside1LastX128 - feeParams.positionFeeGrowthInside1LastX128).mulDiv(
-            feeParams.liquidity, Q128
-        ) + feeParams.tokensOwed1;
+        fee1 =
+            (poolFeeGrowthInside1LastX128 -
+                feeParams.positionFeeGrowthInside1LastX128).mulDiv(
+                    feeParams.liquidity,
+                    Q128
+                ) +
+            feeParams.tokensOwed1;
     }
 
     /**
@@ -93,24 +109,56 @@ contract UniswapV3Calculator {
         returns (uint256 feeGrowthInside0X128, uint256 feeGrowthInside1X128)
     {
         // Get fee growth data from the pool's tick boundaries
-        (,, uint256 lowerFeeGrowthOutside0X128, uint256 lowerFeeGrowthOutside1X128,,,,) = pool.ticks(tickLower);
-        (,, uint256 upperFeeGrowthOutside0X128, uint256 upperFeeGrowthOutside1X128,,,,) = pool.ticks(tickUpper);
+        (
+            ,
+            ,
+            uint256 lowerFeeGrowthOutside0X128,
+            uint256 lowerFeeGrowthOutside1X128,
+            ,
+            ,
+            ,
+
+        ) = pool.ticks(tickLower);
+        (
+            ,
+            ,
+            uint256 upperFeeGrowthOutside0X128,
+            uint256 upperFeeGrowthOutside1X128,
+            ,
+            ,
+            ,
+
+        ) = pool.ticks(tickUpper);
 
         // Calculate fee growth inside based on current tick position
         if (tickCurrent < tickLower) {
             // Current price is below the position range
-            feeGrowthInside0X128 = lowerFeeGrowthOutside0X128 - upperFeeGrowthOutside0X128;
-            feeGrowthInside1X128 = lowerFeeGrowthOutside1X128 - upperFeeGrowthOutside1X128;
+            feeGrowthInside0X128 =
+                lowerFeeGrowthOutside0X128 -
+                upperFeeGrowthOutside0X128;
+            feeGrowthInside1X128 =
+                lowerFeeGrowthOutside1X128 -
+                upperFeeGrowthOutside1X128;
         } else if (tickCurrent < tickUpper) {
             // Current price is within the position range (position is active)
             uint256 feeGrowthGlobal0X128 = pool.feeGrowthGlobal0X128();
             uint256 feeGrowthGlobal1X128 = pool.feeGrowthGlobal1X128();
-            feeGrowthInside0X128 = feeGrowthGlobal0X128 - lowerFeeGrowthOutside0X128 - upperFeeGrowthOutside0X128;
-            feeGrowthInside1X128 = feeGrowthGlobal1X128 - lowerFeeGrowthOutside1X128 - upperFeeGrowthOutside1X128;
+            feeGrowthInside0X128 =
+                feeGrowthGlobal0X128 -
+                lowerFeeGrowthOutside0X128 -
+                upperFeeGrowthOutside0X128;
+            feeGrowthInside1X128 =
+                feeGrowthGlobal1X128 -
+                lowerFeeGrowthOutside1X128 -
+                upperFeeGrowthOutside1X128;
         } else {
             // Current price is above the position range
-            feeGrowthInside0X128 = upperFeeGrowthOutside0X128 - lowerFeeGrowthOutside0X128;
-            feeGrowthInside1X128 = upperFeeGrowthOutside1X128 - lowerFeeGrowthOutside1X128;
+            feeGrowthInside0X128 =
+                upperFeeGrowthOutside0X128 -
+                lowerFeeGrowthOutside0X128;
+            feeGrowthInside1X128 =
+                upperFeeGrowthOutside1X128 -
+                lowerFeeGrowthOutside1X128;
         }
     }
 }
