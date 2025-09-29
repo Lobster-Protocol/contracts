@@ -39,6 +39,7 @@ struct WithdrawParams {
     uint256 userScaledPercent;
     uint256 tvlFeeScaledPercent;
     uint256 performanceFeeScaledPercent;
+    uint256 newTvlInToken0; // Vault tvl in token 0
     address recipient; // recipient for the user's withdrawal
 }
 
@@ -154,11 +155,14 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         if (scaledPercentage == 0) revert ZeroValue();
         if (recipient == address(0)) revert ZeroAddress();
 
+        (uint256 performanceFeeScaledPercent, uint256 newTvlInToken0) = _pendingRelativePerformanceFeeAndNewTvl();
+
         (amount0, amount1) = _withdraw(
             WithdrawParams({
                 userScaledPercent: scaledPercentage,
                 tvlFeeScaledPercent: _pendingRelativeTvlFee(),
-                performanceFeeScaledPercent: _pendingRelativePerformanceFee(),
+                performanceFeeScaledPercent: performanceFeeScaledPercent,
+                newTvlInToken0: newTvlInToken0,
                 recipient: recipient
             })
         );
@@ -322,7 +326,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     function _collectFees() internal {
         uint256 tvlToCollect = _pendingRelativeTvlFee();
 
-        uint256 performanceFeeToCollect = _pendingRelativePerformanceFee();
+        (uint256 performanceFeeToCollect, uint256 newTvlInToken0) = _pendingRelativePerformanceFeeAndNewTvl();
 
         if (tvlToCollect == 0 && performanceFeeToCollect == 0) {
             tvlFeeCollectedAt = block.timestamp;
@@ -333,6 +337,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
             userScaledPercent: 0,
             tvlFeeScaledPercent: tvlToCollect,
             performanceFeeScaledPercent: performanceFeeToCollect,
+            newTvlInToken0: newTvlInToken0,
             recipient: address(0)
         });
 
@@ -399,7 +404,23 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         }
         // Performance
         if (performanceFeeScaledPercent > 0) {
-            // todo: complete
+            uint256 perfFeeFromWithdrawn0 = totalToWithdrawScaledPercent > 0
+                ? withdrawn0.mulDiv(performanceFeeScaledPercent, totalToWithdrawScaledPercent)
+                : 0;
+            uint256 perfFeeFromWithdrawn1 = totalToWithdrawScaledPercent > 0
+                ? withdrawn1.mulDiv(performanceFeeScaledPercent, totalToWithdrawScaledPercent)
+                : 0;
+
+            uint256 perfFeeAssets0 =
+                initialToken0Balance.mulDiv(performanceFeeScaledPercent, MAX_SCALED_PERCENTAGE) + perfFeeFromWithdrawn0;
+            uint256 perfFeeAssets1 =
+                initialToken1Balance.mulDiv(performanceFeeScaledPercent, MAX_SCALED_PERCENTAGE) + perfFeeFromWithdrawn1;
+
+            _safeTransferBoth(feeCollector, perfFeeAssets0, perfFeeAssets1);
+
+            emit PerformanceFeeCollected(perfFeeAssets0, perfFeeAssets1, feeCollector);
+
+            lastVaultTvl0 = withdrawParams.newTvlInToken0;
         }
 
         // User Withdraw
@@ -457,8 +478,9 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         return Math.min(tvlFeeScaled.mulDiv(deltaT, 365 days), MAX_SCALED_PERCENTAGE);
     }
 
-    function _pendingRelativePerformanceFee() internal view returns (uint256) {
-        if (performanceFeeScaled == 0) return 0;
+    // returns (0,0) if performanceFeeScaled is null
+    function _pendingRelativePerformanceFeeAndNewTvl() internal view returns (uint256 feePercent, uint256 newTvl0) {
+        if (performanceFeeScaled == 0) return (0, 0); // If performance fee is nul, we don't care about the vault tvl in token0
 
         (uint256 tvl0, uint256 tvl1) = _netAssetsValue();
 
@@ -475,17 +497,17 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
             twapValueFrom1To0 = twapResult;
         }
 
-        uint256 newTvl0 = tvl0 + twapValueFrom1To0;
+        newTvl0 = tvl0 + twapValueFrom1To0;
 
         if (newTvl0 < lastVaultTvl0) {
-            return 0;
+            return (0, 0); // If performance fee is nul, we don't care about the vault tvl in token0
         }
 
         uint256 lastVaultTvl0_secure = lastVaultTvl0 == 0 ? 1 : lastVaultTvl0; // avoid division by 0 later
 
         uint256 relativePerfScaledPercent = newTvl0.mulDiv(SCALING_FACTOR, lastVaultTvl0_secure);
 
-        return Math.min(relativePerfScaledPercent, MAX_SCALED_PERCENTAGE);
+        return (Math.min(relativePerfScaledPercent, MAX_SCALED_PERCENTAGE), newTvl0);
     }
 
     function _netAssetsValue() internal view returns (uint256 totalAssets0, uint256 totalAssets1) {
