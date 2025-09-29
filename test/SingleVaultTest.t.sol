@@ -465,6 +465,252 @@ contract SingleVaultTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////
+                            LOCK FUNCTIONALITY TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function test_Lock_ByOwner() public {
+        // Initially not locked
+        assertFalse(vault.locked());
+
+        // Owner can lock
+        vm.expectEmit(true, false, false, false);
+        emit SingleVault.VaultLocked(true);
+
+        vm.prank(owner);
+        vault.lock(true);
+
+        assertTrue(vault.locked());
+    }
+
+    function test_Lock_OnlyOwnerCanLock() public {
+        // Only owner can lock, not executor or executorManager
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", executor));
+        vm.prank(executor);
+        vault.lock(true);
+
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", executorManager));
+        vm.prank(executorManager);
+        vault.lock(true);
+    }
+
+    function test_Unlock_ByOwner() public {
+        // First lock the vault
+        vm.prank(owner);
+        vault.lock(true);
+        assertTrue(vault.locked());
+
+        // Then unlock
+        vm.expectEmit(true, false, false, false);
+        emit SingleVault.VaultLocked(false);
+
+        vm.prank(owner);
+        vault.lock(false);
+
+        assertFalse(vault.locked());
+    }
+
+    function test_Lock_RevertIf_Unauthorized() public {
+        // Only owner can lock/unlock
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", attacker));
+        vm.prank(attacker);
+        vault.lock(true);
+
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", executor));
+        vm.prank(executor);
+        vault.lock(true);
+
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", executorManager));
+        vm.prank(executorManager);
+        vault.lock(true);
+    }
+
+    function test_InheritingContract_UseWhenNotLocked() public {
+        // Test that inheriting contracts can properly use the whenNotLocked modifier
+        TestVaultWithLock testVault = new TestVaultWithLock(owner, executor, executorManager);
+
+        // When not locked, functions with whenNotLocked should work
+        vm.prank(owner);
+        testVault.testWhenNotLocked();
+
+        // Lock the vault
+        vm.prank(owner);
+        testVault.lock(true);
+
+        // Now functions with whenNotLocked should revert
+        vm.expectRevert(SingleVault.ContractLocked.selector);
+        vm.prank(owner);
+        testVault.testWhenNotLocked();
+
+        // Unlock and it should work again
+        vm.prank(owner);
+        testVault.lock(false);
+
+        vm.prank(owner);
+        testVault.testWhenNotLocked();
+    }
+
+    function test_InheritingContract_CombinedModifiers() public {
+        TestVaultWithLock testVault = new TestVaultWithLock(owner, executor, executorManager);
+
+        // Test function that combines onlyOwnerOrExecutor and whenNotLocked
+        vm.prank(owner);
+        testVault.testOnlyOwnerOrExecutorWhenNotLocked();
+
+        vm.prank(executor);
+        testVault.testOnlyOwnerOrExecutorWhenNotLocked();
+
+        // Lock the vault
+        vm.prank(owner);
+        testVault.lock(true);
+
+        // Should revert due to lock, even for authorized users
+        vm.expectRevert(SingleVault.ContractLocked.selector);
+        vm.prank(owner);
+        testVault.testOnlyOwnerOrExecutorWhenNotLocked();
+
+        vm.expectRevert(SingleVault.ContractLocked.selector);
+        vm.prank(executor);
+        testVault.testOnlyOwnerOrExecutorWhenNotLocked();
+
+        // Unauthorized users should still be rejected (access control checked first)
+        vm.expectRevert();
+        vm.prank(attacker);
+        testVault.testOnlyOwnerOrExecutorWhenNotLocked();
+    }
+
+    function test_SetExecutor_WorksWhenLocked() public {
+        // Lock the vault
+        vm.prank(owner);
+        vault.lock(true);
+
+        // Base SingleVault functions don't use whenNotLocked modifier
+        // They should work when locked since the modifier is for inheriting contracts
+        address newExecutor = makeAddr("newExecutor");
+
+        vm.prank(owner);
+        vault.setExecutor(newExecutor);
+        assertEq(vault.executor(), newExecutor);
+    }
+
+    function test_SetExecutorManager_WorksWhenLocked() public {
+        // Lock the vault
+        vm.prank(owner);
+        vault.lock(true);
+
+        // Base SingleVault functions don't use whenNotLocked modifier
+        // They should work when locked since the modifier is for inheriting contracts
+        address newManager = makeAddr("newManager");
+
+        vm.prank(owner);
+        vault.setExecutorManager(newManager);
+        assertEq(vault.executorManager(), newManager);
+    }
+
+    function test_EmergencyFunctions_WorkWhenLocked() public {
+        // Lock the vault
+        vm.prank(owner);
+        vault.lock(true);
+
+        // Emergency functions should still work when locked (owner override)
+        vm.prank(owner);
+        vault.emergencyRecoverToken(address(mockToken), user1, 100);
+
+        vm.prank(owner);
+        vault.emergencyRecoverETH(user1, 1 ether);
+    }
+
+    function test_Call_WorksWhenLocked() public {
+        // Lock the vault
+        vm.prank(owner);
+        vault.lock(true);
+
+        // Call function should still work when locked (owner can always call)
+        bytes memory data = abi.encodeWithSignature("transfer(address,uint256)", user1, 100);
+
+        vm.prank(owner);
+        vault.call(address(mockToken), 0, data);
+    }
+
+    function test_BatchCall_WorksWhenLocked() public {
+        // Lock the vault
+        vm.prank(owner);
+        vault.lock(true);
+
+        // Batch call should still work when locked (owner can always call)
+        address[] memory targets = new address[](1);
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory calldatas = new bytes[](1);
+
+        targets[0] = address(mockToken);
+        values[0] = 0;
+        calldatas[0] = abi.encodeWithSignature("transfer(address,uint256)", user1, 50);
+
+        vm.prank(owner);
+        vault.batchCall(targets, values, calldatas);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                            LOCK INTEGRATION TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    /*//////////////////////////////////////////////////////////////
+                            INHERITING CONTRACT TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function test_InheritingContract_DepositWithdrawWhenLocked() public {
+        // Test a more realistic inheriting contract with deposit/withdraw functions
+        VaultWithDepositWithdraw depositVault = new VaultWithDepositWithdraw(owner, executor, executorManager);
+
+        // Deposit should work when unlocked
+        depositVault.deposit(100e18);
+        // No revert
+
+        // Lock the vault
+        vm.prank(owner);
+        depositVault.lock(true);
+
+        // Deposit should fail when locked
+        vm.expectRevert(SingleVault.ContractLocked.selector);
+        depositVault.deposit(50e18);
+
+        // Withdraw should also fail when locked
+        vm.expectRevert(SingleVault.ContractLocked.selector);
+        depositVault.withdraw(50e18);
+
+        // Unlock
+        vm.prank(owner);
+        depositVault.lock(false);
+
+        // Operations should work again
+        depositVault.deposit(50e18);
+        // No revert
+
+        depositVault.withdraw(100e18);
+        // No revert
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                                FUZZ TESTS FOR LOCK
+    //////////////////////////////////////////////////////////////*/
+
+    function testFuzz_Lock_ToggleLockState(bool lockState) public {
+        vm.prank(owner);
+        vault.lock(lockState);
+
+        assertEq(vault.locked(), lockState);
+    }
+
+    function testFuzz_Lock_MultipleToggle(bool[] memory lockStates) public {
+        vm.assume(lockStates.length > 0 && lockStates.length <= 10);
+
+        for (uint256 i = 0; i < lockStates.length; i++) {
+            vm.prank(owner);
+            vault.lock(lockStates[i]);
+            assertEq(vault.locked(), lockStates[i]);
+        }
+    }
+
+    /*//////////////////////////////////////////////////////////////
                             INTEGRATION TESTS
     //////////////////////////////////////////////////////////////*/
 
@@ -531,4 +777,48 @@ contract SimpleReceiver {
     }
 }
 
-// todo: test lock() fct
+/*//////////////////////////////////////////////////////////////
+                        HELPER CONTRACT FOR TESTING
+//////////////////////////////////////////////////////////////*/
+
+/**
+ * @dev Helper contract for testing the whenNotLocked modifier
+ */
+contract TestVaultWithLock is SingleVault {
+    constructor(
+        address initialOwner,
+        address initialExecutor,
+        address initialExecutorManager
+    )
+        SingleVault(initialOwner, initialExecutor, initialExecutorManager)
+    {}
+
+    function testWhenNotLocked() external whenNotLocked {
+        // This function exists solely to test the modifier
+    }
+
+    function testOnlyOwnerOrExecutorWhenNotLocked() external onlyOwnerOrExecutor whenNotLocked {
+        // Test combination of modifiers
+    }
+}
+
+/**
+ * @dev More realistic example of inheriting contract with deposit/withdraw
+ */
+contract VaultWithDepositWithdraw is SingleVault {
+    constructor(
+        address initialOwner,
+        address initialExecutor,
+        address initialExecutorManager
+    )
+        SingleVault(initialOwner, initialExecutor, initialExecutorManager)
+    {}
+
+    function deposit(uint256) external whenNotLocked {}
+
+    function withdraw(uint256) external whenNotLocked {}
+
+    function balanceOf(address) external pure returns (uint256) {
+        return 42;
+    }
+}
