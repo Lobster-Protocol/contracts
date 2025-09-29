@@ -12,7 +12,6 @@ import {PositionKey} from "../libraries/uniswapV3/PositionKey.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IUniswapV3MintCallback, MintCallbackData} from "../interfaces/uniswapV3/IUniswapV3MintCallback.sol";
 import {PoolAddress} from "../libraries/uniswapV3/PoolAddress.sol";
-import {TransferHelper} from "../libraries/uniswapV3/TransferHelper.sol";
 import {UniswapV3Calculator} from "../utils/UniswapV3Calculator.sol";
 import {UniswapUtils} from "../libraries/uniswapV3/UniswapUtils.sol";
 
@@ -245,12 +244,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         // Payer must alway be this vault
         if (decoded.payer != address(this)) revert WrongPayer();
 
-        if (amount0Owed > 0) {
-            TransferHelper.safeTransfer(decoded.poolKey.token0, msg.sender, amount0Owed);
-        }
-        if (amount1Owed > 0) {
-            TransferHelper.safeTransfer(decoded.poolKey.token1, msg.sender, amount1Owed);
-        }
+        _safeTransferBoth(msg.sender, amount0Owed, amount1Owed);
     }
 
     /// @notice Collects liquidity to a Uniswap V3 pool
@@ -273,7 +267,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     function _pendingRelativeTvlFee() internal view returns (uint256) {
         uint256 deltaT = block.timestamp - tvlFeeCollectedAt;
 
-        return min(tvlFeeScaled.mulDiv(deltaT, 365 days), MAX_SCALED_PERCENTAGE);
+        return Math.min(tvlFeeScaled.mulDiv(deltaT, 365 days), MAX_SCALED_PERCENTAGE);
     }
 
     function _pendingRelativePerformanceFee() internal view returns (uint256) {
@@ -304,11 +298,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
         uint256 relativePerfScaledPercent = newTvl0.mulDiv(SCALING_FACTOR, lastVaultTvl0_secure);
 
-        return min(relativePerfScaledPercent, MAX_SCALED_PERCENTAGE);
-    }
-
-    function min(uint256 a, uint256 b) internal pure returns (uint256) {
-        return a > b ? b : a;
+        return Math.min(relativePerfScaledPercent, MAX_SCALED_PERCENTAGE);
     }
 
     function _collectFees() internal {
@@ -457,12 +447,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
             uint256 tvlFeeAssets1 =
                 initialToken1Balance.mulDiv(tvlFeeScaledPercent, MAX_SCALED_PERCENTAGE) + tvlFeeFromWithdrawn1;
 
-            if (tvlFeeAssets0 > 0) {
-                SafeERC20.safeTransfer(token0, feeCollector, tvlFeeAssets0);
-            }
-            if (tvlFeeAssets1 > 0) {
-                SafeERC20.safeTransfer(token1, feeCollector, tvlFeeAssets1);
-            }
+            _safeTransferBoth(feeCollector, tvlFeeAssets0, tvlFeeAssets1);
 
             emit TvlFeeCollected(tvlFeeAssets0, tvlFeeAssets1, feeCollector);
 
@@ -486,16 +471,9 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
             initialToken1Balance.mulDiv(userScaledPercent, MAX_SCALED_PERCENTAGE) + fromWithdrawn1;
 
         // Execute user withdraw
-        bool withdrawEvent = false;
-        if (assets0ToWithdrawForUser > 0) {
-            SafeERC20.safeTransfer(token0, withdrawParams.recipient, assets0ToWithdrawForUser);
-            withdrawEvent = true;
-        }
-        if (assets1ToWithdrawForUser > 0) {
-            SafeERC20.safeTransfer(token1, withdrawParams.recipient, assets1ToWithdrawForUser);
-            withdrawEvent = true;
-        }
-        if (withdrawEvent) {
+        _safeTransferBoth(withdrawParams.recipient, assets0ToWithdrawForUser, assets1ToWithdrawForUser);
+
+        if (assets0ToWithdrawForUser > 0 || assets1ToWithdrawForUser > 0) {
             emit Withdraw(assets0ToWithdrawForUser, assets1ToWithdrawForUser, withdrawParams.recipient);
         }
 
@@ -573,6 +551,17 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     function positionsLength() external view returns (uint256) {
         return positions.length;
+    }
+
+    function _safeTransferBoth(address to, uint256 amount0, uint256 amount1) internal returns (bool transferred) {
+        if (amount0 > 0) {
+            SafeERC20.safeTransfer(token0, to, amount0);
+            transferred = true;
+        }
+        if (amount1 > 0) {
+            SafeERC20.safeTransfer(token1, to, amount1);
+            transferred = true;
+        }
     }
 
     // todo: add preview withdraw
