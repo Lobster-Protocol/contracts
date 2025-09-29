@@ -530,3 +530,5 @@ contract SimpleReceiver {
         received = true;
     }
 }
+
+// todo: test lock() fct

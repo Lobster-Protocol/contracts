@@ -25,12 +25,16 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
     /// @notice Manager authorized to update the executor (operated by lobster team)
     address public executorManager;
 
+    /// @notice Wether the owned locked the contract or not. Blocks almost of underlying functions for the executor & executor manager
+    bool public locked;
+
     /*//////////////////////////////////////////////////////////////
                                 EVENTS
     //////////////////////////////////////////////////////////////*/
 
     event ExecutorUpdated(address indexed newExecutor);
     event ExecutorManagerUpdated(address indexed newManager);
+    event VaultLocked(bool indexed isLocked);
 
     /*//////////////////////////////////////////////////////////////
                                 ERRORS
@@ -39,12 +43,16 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
     error Unauthorized();
     error ZeroValue();
     error ZeroAddress();
+    error ContractLocked();
 
     /*//////////////////////////////////////////////////////////////
                                 MODIFIERS
     //////////////////////////////////////////////////////////////*/
 
-    // todo: add lock modifier
+    modifier whenNotLocked() {
+        if (locked) revert ContractLocked();
+        _;
+    }
 
     modifier onlyOwnerOrExecutor() {
         require(msg.sender == owner() || msg.sender == executor, Unauthorized());
@@ -190,6 +198,12 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
             // call, revert on error
             call(targets[i], values[i], calldatas[i]);
         }
+    }
+
+    function lock(bool isLocked) external {
+        locked = isLocked;
+
+        emit VaultLocked(isLocked);
     }
 
     // Allow contract to receive ETH

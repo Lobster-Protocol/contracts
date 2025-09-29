@@ -153,6 +153,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     )
         public
         onlyOwnerOrExecutor
+        whenNotLocked
         returns (uint256 amount0, uint256 amount1)
     {
         // Burn the liquidity
@@ -188,6 +189,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     function mint(MinimalMintParams memory params)
         external
         onlyOwnerOrExecutor
+        whenNotLocked
         checkDeadline(params.deadline)
         returns (uint256 amount0, uint256 amount1)
     {
@@ -258,6 +260,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     )
         public
         onlyOwnerOrExecutor
+        whenNotLocked
         returns (uint128 amount0, uint128 amount1)
     {
         return pool.collect(address(this), tickLower, tickUpper, amount0Requested, amount1Requested);
