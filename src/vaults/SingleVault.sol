@@ -200,7 +200,7 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
         }
     }
 
-    function lock(bool isLocked) external {
+    function lock(bool isLocked) external onlyOwner {
         locked = isLocked;
 
         emit VaultLocked(isLocked);
