@@ -338,7 +338,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
             tvlFeeScaledPercent: tvlToCollect,
             performanceFeeScaledPercent: performanceFeeToCollect,
             newTvlInToken0: newTvlInToken0,
-            recipient: address(0)
+            recipient: address(0) // Ok since userScaledPercent = 0
         });
 
         _withdraw(withdrawParams);
