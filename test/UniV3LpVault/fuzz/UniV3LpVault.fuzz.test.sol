@@ -15,7 +15,7 @@ contract UniV3LpVaultFuzzTest is Test {
 
     function setUp() public {
         helper = new TestHelper();
-        setup = helper.deployVaultWithPool(TestConstants.MEDIUM_TVL_FEE);
+        setup = helper.deployVaultWithPool(TestConstants.MEDIUM_TVL_FEE, TestConstants.MEDIUM_PERF_FEE);
     }
 
     // === DEPOSIT FUZZ TESTS ===
@@ -191,11 +191,11 @@ contract UniV3LpVaultFuzzTest is Test {
 
     // === TVL FEES FUZZ TESTS ===
 
-    function testFuzz_tvlFees_TimeAndRate(uint256 timeElapsed, uint256 tvlFeeRate) public {
+    function testFuzz_tvlFees_TimeAndRate(uint256 timeElapsed, uint256 tvlFeeRate, uint256 perfFee) public {
         timeElapsed = bound(timeElapsed, 1 days, 2 * TestConstants.ONE_YEAR);
         tvlFeeRate = bound(tvlFeeRate, 0, TestConstants.MAX_SCALED_PERCENTAGE / 10); // Max 10% annual
 
-        TestHelper.VaultSetup memory fuzzSetup = helper.deployVaultWithPool(tvlFeeRate);
+        TestHelper.VaultSetup memory fuzzSetup = helper.deployVaultWithPool(tvlFeeRate, perfFee);
 
         uint256 depositAmount0 = TestConstants.MEDIUM_AMOUNT;
         uint256 depositAmount1 = TestConstants.MEDIUM_AMOUNT;

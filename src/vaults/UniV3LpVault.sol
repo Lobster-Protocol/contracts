@@ -108,7 +108,8 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         address token1_,
         address pool_,
         address initialFeeCollector,
-        uint256 initialtvlFee
+        uint256 initialtvlFee,
+        uint256 initialPerformanceFee
     )
         SingleVault(initialOwner, initialExecutor, initialExecutorManager)
     {
@@ -124,6 +125,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         feeCollector = initialFeeCollector;
         tvlFeeScaled = initialtvlFee;
         tvlFeeCollectedAt = block.timestamp;
+        performanceFeeScaled = initialPerformanceFee;
     }
 
     // ========== OWNER FUNCTIONS ==========
@@ -499,13 +501,11 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
         newTvl0 = tvl0 + twapValueFrom1To0;
 
-        if (newTvl0 < lastVaultTvl0) {
-            return (0, 0); // If performance fee is nul, we don't care about the vault tvl in token0
+        if (newTvl0 <= lastVaultTvl0) {
+            return (0, 0); // If performance is nul or negative, we don't care about the vault tvl in token0
         }
 
-        uint256 lastVaultTvl0_secure = lastVaultTvl0 == 0 ? 1 : lastVaultTvl0; // avoid division by 0 later
-
-        uint256 relativePerfScaledPercent = newTvl0.mulDiv(SCALING_FACTOR, lastVaultTvl0_secure);
+        uint256 relativePerfScaledPercent = newTvl0.mulDiv(SCALING_FACTOR, newTvl0 - lastVaultTvl0);
 
         return (Math.min(relativePerfScaledPercent, MAX_SCALED_PERCENTAGE), newTvl0);
     }

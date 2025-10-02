@@ -37,6 +37,10 @@ library TestConstants {
     uint256 constant MEDIUM_TVL_FEE = 2 * SCALING_FACTOR; // 2% annual
     uint256 constant HIGH_TVL_FEE = 5 * SCALING_FACTOR; // 5% annual
 
+    uint256 constant LOW_PERF_FEE = 1 * SCALING_FACTOR; // 1%
+    uint256 constant MEDIUM_PERF_FEE = 2 * SCALING_FACTOR; // 2%
+    uint256 constant HIGH_PERF_FEE = 5 * SCALING_FACTOR; // 5%
+
     // Tolerance for approximate equality checks
     uint256 constant TOLERANCE_LOW = 1e15; // 0.1%
     uint256 constant TOLERANCE_MEDIUM = 1e16; // 1%

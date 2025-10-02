@@ -17,8 +17,11 @@ contract UniV3LpVaultFeesTest is Test {
 
     function setUp() public {
         helper = new TestHelper();
-        setup = helper.deployVaultWithPool(0); // No fees
-        feeSetup = helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE); // 5% annual
+        setup = helper.deployVaultWithPool(0, 0); // No fees
+        feeSetup = helper.deployVaultWithPool(
+            TestConstants.HIGH_TVL_FEE, // 5% annual
+            TestConstants.HIGH_PERF_FEE // 5%
+        );
     }
 
     function test_tvlFees_NoFeesConfigured_NoCollection() public {
@@ -194,7 +197,8 @@ contract UniV3LpVaultFeesTest is Test {
 
     function test_tvlFees_HighFeeRate_CollectsCorrectly() public {
         // Test with very high fee rate (20% annual)
-        TestHelper.VaultSetup memory highFeeSetup = helper.deployVaultWithPool(20 * TestConstants.SCALING_FACTOR);
+        TestHelper.VaultSetup memory highFeeSetup =
+            helper.deployVaultWithPool(20 * TestConstants.SCALING_FACTOR, 20 * TestConstants.SCALING_FACTOR);
 
         helper.depositToVault(highFeeSetup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
 

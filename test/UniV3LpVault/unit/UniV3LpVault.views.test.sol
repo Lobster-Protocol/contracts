@@ -17,7 +17,10 @@ contract UniV3LpVaultViewsTest is Test {
     function setUp() public {
         helper = new TestHelper();
         setup = helper.deployVaultWithPool();
-        feeSetup = helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE); // 5% annual
+        feeSetup = helper.deployVaultWithPool(
+            TestConstants.HIGH_TVL_FEE, // 5% annual
+            TestConstants.HIGH_PERF_FEE
+        );
     }
 
     function test_totalLpValue_EmptyVault_ReturnsZero() public view {

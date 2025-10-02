@@ -32,7 +32,8 @@ contract UniV3LpVaultConstructorTest is Test {
     }
 
     function test_constructor_WithDifferentTvlFee_Success() public {
-        TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE);
+        TestHelper.VaultSetup memory setup =
+            helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE, TestConstants.HIGH_PERF_FEE);
 
         // Vault should be deployed successfully
         assertTrue(address(setup.vault) != address(0));
@@ -70,7 +71,8 @@ contract UniV3LpVaultConstructorTest is Test {
             address(token0), // Wrong order
             address(pool),
             feeCollector,
-            TestConstants.LOW_TVL_FEE
+            TestConstants.LOW_TVL_FEE,
+            TestConstants.LOW_PERF_FEE
         );
     }
 
@@ -102,7 +104,8 @@ contract UniV3LpVaultConstructorTest is Test {
             address(token1),
             address(pool),
             address(0), // Zero address
-            TestConstants.LOW_TVL_FEE
+            TestConstants.LOW_TVL_FEE,
+            TestConstants.LOW_PERF_FEE
         );
     }
 
@@ -136,12 +139,14 @@ contract UniV3LpVaultConstructorTest is Test {
             address(token1),
             address(pool),
             feeCollector,
-            TestConstants.LOW_TVL_FEE
+            TestConstants.LOW_TVL_FEE,
+            TestConstants.LOW_PERF_FEE
         );
     }
 
     function test_constructor_InitialState_Correct() public {
-        TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(TestConstants.MEDIUM_TVL_FEE);
+        TestHelper.VaultSetup memory setup =
+            helper.deployVaultWithPool(TestConstants.MEDIUM_TVL_FEE, TestConstants.MEDIUM_PERF_FEE);
 
         // Check that TVL fee collection timestamp is set to current block timestamp
         // Note: This would require making tvlFeeCollectedAt public or adding a getter
@@ -162,14 +167,15 @@ contract UniV3LpVaultConstructorTest is Test {
     }
 
     function test_constructor_MaxTvlFee_Success() public {
-        TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(TestConstants.MAX_SCALED_PERCENTAGE);
+        TestHelper.VaultSetup memory setup =
+            helper.deployVaultWithPool(TestConstants.MAX_SCALED_PERCENTAGE, TestConstants.MAX_SCALED_PERCENTAGE);
 
         // Should not revert - 100% TVL fee is technically allowed (though impractical)
         assertTrue(address(setup.vault) != address(0));
     }
 
     function test_constructor_ZeroTvlFee_Success() public {
-        TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(0);
+        TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(0, 0);
 
         // Zero TVL fee should be allowed
         assertTrue(address(setup.vault) != address(0));

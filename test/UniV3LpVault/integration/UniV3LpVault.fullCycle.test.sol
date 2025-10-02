@@ -15,7 +15,7 @@ contract UniV3LpVaultFullCycleTest is Test {
 
     function setUp() public {
         helper = new TestHelper();
-        setup = helper.deployVaultWithPool(TestConstants.MEDIUM_TVL_FEE);
+        setup = helper.deployVaultWithPool(TestConstants.MEDIUM_TVL_FEE, TestConstants.MEDIUM_PERF_FEE);
     }
 
     function test_fullCycle_DepositMintCollectBurnWithdraw() public {

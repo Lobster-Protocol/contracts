@@ -26,10 +26,10 @@ contract TestHelper is Test {
     }
 
     function deployVaultWithPool() public returns (VaultSetup memory setup) {
-        return deployVaultWithPool(TestConstants.LOW_TVL_FEE);
+        return deployVaultWithPool(0, 0);
     }
 
-    function deployVaultWithPool(uint256 tvlFee) public returns (VaultSetup memory setup) {
+    function deployVaultWithPool(uint256 tvlFee, uint256 perfFee) public returns (VaultSetup memory setup) {
         // Create addresses
         setup.owner = makeAddr("vaultOwner");
         setup.executor = makeAddr("executor");
@@ -71,7 +71,8 @@ contract TestHelper is Test {
             address(setup.token1),
             address(setup.pool),
             setup.feeCollector,
-            tvlFee
+            tvlFee,
+            perfFee
         );
 
         // Setup approvals
