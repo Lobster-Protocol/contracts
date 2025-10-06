@@ -25,12 +25,8 @@ contract UniV3LpVaultDepositTest is Test {
         uint256 amount0 = TestConstants.MEDIUM_AMOUNT;
         uint256 amount1 = TestConstants.LARGE_AMOUNT;
 
-        uint256 initialVaultBalance0 = setup.token0.balanceOf(
-            address(setup.vault)
-        );
-        uint256 initialVaultBalance1 = setup.token1.balanceOf(
-            address(setup.vault)
-        );
+        uint256 initialVaultBalance0 = setup.token0.balanceOf(address(setup.vault));
+        uint256 initialVaultBalance1 = setup.token1.balanceOf(address(setup.vault));
         uint256 initialOwnerBalance0 = setup.token0.balanceOf(setup.owner);
         uint256 initialOwnerBalance1 = setup.token1.balanceOf(setup.owner);
 
@@ -41,36 +37,20 @@ contract UniV3LpVaultDepositTest is Test {
         setup.vault.deposit(amount0, amount1);
 
         // Check vault balances increased
-        assertEq(
-            setup.token0.balanceOf(address(setup.vault)),
-            initialVaultBalance0 + amount0
-        );
-        assertEq(
-            setup.token1.balanceOf(address(setup.vault)),
-            initialVaultBalance1 + amount1
-        );
+        assertEq(setup.token0.balanceOf(address(setup.vault)), initialVaultBalance0 + amount0);
+        assertEq(setup.token1.balanceOf(address(setup.vault)), initialVaultBalance1 + amount1);
 
         // Check owner balances decreased
-        assertEq(
-            setup.token0.balanceOf(setup.owner),
-            initialOwnerBalance0 - amount0
-        );
-        assertEq(
-            setup.token1.balanceOf(setup.owner),
-            initialOwnerBalance1 - amount1
-        );
+        assertEq(setup.token0.balanceOf(setup.owner), initialOwnerBalance0 - amount0);
+        assertEq(setup.token1.balanceOf(setup.owner), initialOwnerBalance1 - amount1);
     }
 
     function test_deposit_Token0Only_Success() public {
         uint256 amount0 = TestConstants.MEDIUM_AMOUNT;
         uint256 amount1 = 0;
 
-        uint256 initialVaultBalance0 = setup.token0.balanceOf(
-            address(setup.vault)
-        );
-        uint256 initialVaultBalance1 = setup.token1.balanceOf(
-            address(setup.vault)
-        );
+        uint256 initialVaultBalance0 = setup.token0.balanceOf(address(setup.vault));
+        uint256 initialVaultBalance1 = setup.token1.balanceOf(address(setup.vault));
 
         vm.expectEmit(true, true, true, true);
         emit UniV3LpVault.Deposit(amount0, amount1);
@@ -78,26 +58,16 @@ contract UniV3LpVaultDepositTest is Test {
         vm.prank(setup.owner);
         setup.vault.deposit(amount0, amount1);
 
-        assertEq(
-            setup.token0.balanceOf(address(setup.vault)),
-            initialVaultBalance0 + amount0
-        );
-        assertEq(
-            setup.token1.balanceOf(address(setup.vault)),
-            initialVaultBalance1
-        ); // No change
+        assertEq(setup.token0.balanceOf(address(setup.vault)), initialVaultBalance0 + amount0);
+        assertEq(setup.token1.balanceOf(address(setup.vault)), initialVaultBalance1); // No change
     }
 
     function test_deposit_Token1Only_Success() public {
         uint256 amount0 = 0;
         uint256 amount1 = TestConstants.MEDIUM_AMOUNT;
 
-        uint256 initialVaultBalance0 = setup.token0.balanceOf(
-            address(setup.vault)
-        );
-        uint256 initialVaultBalance1 = setup.token1.balanceOf(
-            address(setup.vault)
-        );
+        uint256 initialVaultBalance0 = setup.token0.balanceOf(address(setup.vault));
+        uint256 initialVaultBalance1 = setup.token1.balanceOf(address(setup.vault));
 
         vm.expectEmit(true, true, true, true);
         emit UniV3LpVault.Deposit(amount0, amount1);
@@ -105,14 +75,8 @@ contract UniV3LpVaultDepositTest is Test {
         vm.prank(setup.owner);
         setup.vault.deposit(amount0, amount1);
 
-        assertEq(
-            setup.token0.balanceOf(address(setup.vault)),
-            initialVaultBalance0
-        ); // No change
-        assertEq(
-            setup.token1.balanceOf(address(setup.vault)),
-            initialVaultBalance1 + amount1
-        );
+        assertEq(setup.token0.balanceOf(address(setup.vault)), initialVaultBalance0); // No change
+        assertEq(setup.token1.balanceOf(address(setup.vault)), initialVaultBalance1 + amount1);
     }
 
     function test_deposit_ZeroAmounts_Reverts() public {
@@ -125,35 +89,20 @@ contract UniV3LpVaultDepositTest is Test {
         address notOwner = makeAddr("notOwner");
 
         vm.prank(notOwner);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                Ownable.OwnableUnauthorizedAccount.selector,
-                notOwner
-            )
-        );
-        setup.vault.deposit(
-            TestConstants.SMALL_AMOUNT,
-            TestConstants.SMALL_AMOUNT
-        );
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, notOwner));
+        setup.vault.deposit(TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT);
     }
 
     function test_deposit_InsufficientAllowance_Reverts() public {
         // Deploy new vault setup without max approval
-        TestHelper.VaultSetup memory restrictedSetup = helper
-            .deployVaultWithPool();
+        TestHelper.VaultSetup memory restrictedSetup = helper.deployVaultWithPool();
 
         uint256 allowanceAmount = TestConstants.SMALL_AMOUNT;
         uint256 depositAmount = TestConstants.MEDIUM_AMOUNT; // More than allowance
 
         vm.startPrank(restrictedSetup.owner);
-        restrictedSetup.token0.approve(
-            address(restrictedSetup.vault),
-            allowanceAmount
-        );
-        restrictedSetup.token1.approve(
-            address(restrictedSetup.vault),
-            allowanceAmount
-        );
+        restrictedSetup.token0.approve(address(restrictedSetup.vault), allowanceAmount);
+        restrictedSetup.token1.approve(address(restrictedSetup.vault), allowanceAmount);
 
         // Should revert due to insufficient allowance
         vm.expectRevert();
@@ -181,12 +130,8 @@ contract UniV3LpVaultDepositTest is Test {
         // First deposit
         setup.vault.deposit(firstDeposit0, firstDeposit1);
 
-        uint256 intermediateBalance0 = setup.token0.balanceOf(
-            address(setup.vault)
-        );
-        uint256 intermediateBalance1 = setup.token1.balanceOf(
-            address(setup.vault)
-        );
+        uint256 intermediateBalance0 = setup.token0.balanceOf(address(setup.vault));
+        uint256 intermediateBalance1 = setup.token1.balanceOf(address(setup.vault));
 
         assertEq(intermediateBalance0, firstDeposit0);
         assertEq(intermediateBalance1, firstDeposit1);
@@ -197,31 +142,19 @@ contract UniV3LpVaultDepositTest is Test {
         vm.stopPrank();
 
         // Check final balances
-        assertEq(
-            setup.token0.balanceOf(address(setup.vault)),
-            firstDeposit0 + secondDeposit0
-        );
-        assertEq(
-            setup.token1.balanceOf(address(setup.vault)),
-            firstDeposit1 + secondDeposit1
-        );
+        assertEq(setup.token0.balanceOf(address(setup.vault)), firstDeposit0 + secondDeposit0);
+        assertEq(setup.token1.balanceOf(address(setup.vault)), firstDeposit1 + secondDeposit1);
     }
 
     function test_deposit_WithFeesAccumulated_CollectsFees() public {
         // Create vault with TVL fees
-        TestHelper.VaultSetup memory feeSetup = helper.deployVaultWithPool(
-            TestConstants.HIGH_TVL_FEE,
-            TestConstants.HIGH_PERF_FEE
-        );
+        TestHelper.VaultSetup memory feeSetup =
+            helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE, TestConstants.HIGH_PERF_FEE);
 
         // Increase observation cardinality BEFORE any time-sensitive operations
         feeSetup.pool.increaseObservationCardinalityNext(500);
 
-        helper.depositToVault(
-            feeSetup,
-            TestConstants.MEDIUM_AMOUNT,
-            TestConstants.MEDIUM_AMOUNT
-        );
+        helper.depositToVault(feeSetup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
 
         (uint256 total0, uint256 total1) = feeSetup.vault.netAssetsValue();
 
@@ -239,38 +172,19 @@ contract UniV3LpVaultDepositTest is Test {
         // Simulate time passing to accumulate TVL fees
         helper.simulateTimePass(delay);
 
-        uint256 initialFeeCollectorBalance0 = feeSetup.token0.balanceOf(
-            feeSetup.feeCollector
-        );
-        uint256 initialFeeCollectorBalance1 = feeSetup.token1.balanceOf(
-            feeSetup.feeCollector
-        );
+        uint256 initialFeeCollectorBalance0 = feeSetup.token0.balanceOf(feeSetup.feeCollector);
+        uint256 initialFeeCollectorBalance1 = feeSetup.token1.balanceOf(feeSetup.feeCollector);
 
         // Check pending performance fee
-        (uint256 expectedPerfFee0, uint256 expectedPerfFee1) = feeSetup
-            .vault
-            .pendingPerformanceFee();
+        (uint256 expectedPerfFee0, uint256 expectedPerfFee1) = feeSetup.vault.pendingPerformanceFee();
 
         // Make another deposit - this should trigger TVL fee collection
-        helper.depositToVault(
-            feeSetup,
-            TestConstants.SMALL_AMOUNT,
-            TestConstants.SMALL_AMOUNT
-        );
+        helper.depositToVault(feeSetup, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT);
 
-        uint256 tvlFeePercent = feeSetup.vault.tvlFeeScaled().mulDiv(
-            delay,
-            365 days
-        );
+        uint256 tvlFeePercent = feeSetup.vault.tvlFeeScaled().mulDiv(delay, 365 days);
 
-        uint256 expectedTvlFee0 = total0.mulDiv(
-            tvlFeePercent,
-            MAX_SCALED_PERCENTAGE
-        );
-        uint256 expectedTvlFee1 = total1.mulDiv(
-            tvlFeePercent,
-            MAX_SCALED_PERCENTAGE
-        );
+        uint256 expectedTvlFee0 = total0.mulDiv(tvlFeePercent, MAX_SCALED_PERCENTAGE);
+        uint256 expectedTvlFee1 = total1.mulDiv(tvlFeePercent, MAX_SCALED_PERCENTAGE);
 
         // Fee collector should have received fees
         assertApproxEqAbs(
@@ -289,9 +203,7 @@ contract UniV3LpVaultDepositTest is Test {
         uint256 amount0 = TestConstants.MEDIUM_AMOUNT;
         uint256 amount1 = TestConstants.LARGE_AMOUNT;
 
-        (uint256 initialNet0, uint256 initialNet1) = setup
-            .vault
-            .netAssetsValue();
+        (uint256 initialNet0, uint256 initialNet1) = setup.vault.netAssetsValue();
         assertEq(initialNet0, 0);
         assertEq(initialNet1, 0);
 

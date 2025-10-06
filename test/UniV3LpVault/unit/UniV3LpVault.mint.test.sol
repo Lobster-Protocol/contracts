@@ -18,36 +18,23 @@ contract UniV3LpVaultMintTest is Test {
         setup = helper.deployVaultWithPool();
 
         // Setup with some funds
-        helper.depositToVault(
-            setup,
-            TestConstants.LARGE_AMOUNT,
-            TestConstants.LARGE_AMOUNT
-        );
+        helper.depositToVault(setup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
     }
 
     function test_mint_NewPosition_Success() public {
-        (, int24 currentTick, , , , , ) = setup.pool.slot0();
+        (, int24 currentTick,,,,,) = setup.pool.slot0();
         uint256 amount0Desired = TestConstants.MEDIUM_AMOUNT;
         uint256 amount1Desired = TestConstants.MEDIUM_AMOUNT;
 
-        uint256 initialVaultBalance0 = setup.token0.balanceOf(
-            address(setup.vault)
-        );
-        uint256 initialVaultBalance1 = setup.token1.balanceOf(
-            address(setup.vault)
-        );
+        uint256 initialVaultBalance0 = setup.token0.balanceOf(address(setup.vault));
+        uint256 initialVaultBalance1 = setup.token1.balanceOf(address(setup.vault));
 
         int24 tickRange = TestConstants.TICK_RANGE_NARROW;
 
         vm.prank(setup.executor);
-        (uint256 amount0, uint256 amount1) = helper
-            .createPositionAroundCurrentTick(
-                setup.vault,
-                setup.executor,
-                tickRange,
-                amount0Desired,
-                amount1Desired
-            );
+        (uint256 amount0, uint256 amount1) = helper.createPositionAroundCurrentTick(
+            setup.vault, setup.executor, tickRange, amount0Desired, amount1Desired
+        );
         // Calculate desired ticks
         int24 desiredTickLower = currentTick - tickRange;
         int24 desiredTickUpper = currentTick + tickRange;
@@ -58,12 +45,8 @@ contract UniV3LpVaultMintTest is Test {
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         // Tokens should be transferred from vault to pool
-        assertTrue(
-            setup.token0.balanceOf(address(setup.vault)) < initialVaultBalance0
-        );
-        assertTrue(
-            setup.token1.balanceOf(address(setup.vault)) < initialVaultBalance1
-        );
+        assertTrue(setup.token0.balanceOf(address(setup.vault)) < initialVaultBalance0);
+        assertTrue(setup.token1.balanceOf(address(setup.vault)) < initialVaultBalance1);
         assertTrue(amount0 > 0);
         assertTrue(amount1 > 0);
 
@@ -75,22 +58,12 @@ contract UniV3LpVaultMintTest is Test {
 
         // LP value should reflect new position
         (uint256 totalLp0, uint256 totalLp1) = setup.vault.totalLpValue();
-        helper.assertApproxEqual(
-            totalLp0,
-            amount0,
-            TestConstants.TOLERANCE_LOW,
-            "LP value0 mismatch"
-        );
-        helper.assertApproxEqual(
-            totalLp1,
-            amount1,
-            TestConstants.TOLERANCE_LOW,
-            "LP value1 mismatch"
-        );
+        helper.assertApproxEqual(totalLp0, amount0, TestConstants.TOLERANCE_LOW, "LP value0 mismatch");
+        helper.assertApproxEqual(totalLp1, amount1, TestConstants.TOLERANCE_LOW, "LP value1 mismatch");
     }
 
     function test_mint_AddToExistingPosition_Success() public {
-        (, int24 currentTick, , , , , ) = setup.pool.slot0();
+        (, int24 currentTick,,,,,) = setup.pool.slot0();
 
         uint256 firstAmount0 = TestConstants.SMALL_AMOUNT;
         uint256 firstAmount1 = TestConstants.SMALL_AMOUNT;
@@ -101,13 +74,7 @@ contract UniV3LpVaultMintTest is Test {
         vm.prank(setup.executor);
         int24 tickRange = TestConstants.TICK_RANGE_NARROW;
 
-        helper.createPositionAroundCurrentTick(
-            setup.vault,
-            setup.executor,
-            tickRange,
-            firstAmount0,
-            firstAmount1
-        );
+        helper.createPositionAroundCurrentTick(setup.vault, setup.executor, tickRange, firstAmount0, firstAmount1);
         // Calculate desired ticks
         int24 desiredTickLower = currentTick - tickRange;
         int24 desiredTickUpper = currentTick + tickRange;
@@ -122,13 +89,7 @@ contract UniV3LpVaultMintTest is Test {
 
         // Add to same position
         vm.prank(setup.executor);
-        helper.createPositionAroundCurrentTick(
-            setup.vault,
-            setup.executor,
-            tickRange,
-            secondAmount0,
-            secondAmount1
-        );
+        helper.createPositionAroundCurrentTick(setup.vault, setup.executor, tickRange, secondAmount0, secondAmount1);
 
         // Should still have only one position but with more liquidity
         Position memory finalPosition = setup.vault.getPosition(0);
@@ -148,11 +109,7 @@ contract UniV3LpVaultMintTest is Test {
         int24 tickRange = TestConstants.TICK_RANGE_NARROW;
 
         helper.createPositionAroundCurrentTick(
-            setup.vault,
-            setup.executor,
-            tickRange,
-            TestConstants.SMALL_AMOUNT,
-            TestConstants.SMALL_AMOUNT
+            setup.vault, setup.executor, tickRange, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT
         );
 
         // Create second position with different range
@@ -160,27 +117,20 @@ contract UniV3LpVaultMintTest is Test {
         int24 tickRange2 = TestConstants.TICK_RANGE_WIDE;
 
         helper.createPositionAroundCurrentTick(
-            setup.vault,
-            setup.executor,
-            tickRange2,
-            TestConstants.MEDIUM_AMOUNT,
-            TestConstants.MEDIUM_AMOUNT
+            setup.vault, setup.executor, tickRange2, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
         );
 
         // Should have two separate positions
         Position memory position1 = setup.vault.getPosition(0);
         Position memory position2 = setup.vault.getPosition(1);
 
-        assertTrue(
-            position1.lowerTick != position2.lowerTick ||
-                position1.upperTick != position2.upperTick
-        );
+        assertTrue(position1.lowerTick != position2.lowerTick || position1.upperTick != position2.upperTick);
         assertTrue(position1.liquidity > 0);
         assertTrue(position2.liquidity > 0);
     }
 
     function test_mint_NotAuthorized_Reverts() public {
-        (, int24 currentTick, , , , , ) = setup.pool.slot0();
+        (, int24 currentTick,,,,,) = setup.pool.slot0();
 
         MinimalMintParams memory mintParams = MinimalMintParams({
             tickLower: currentTick - TestConstants.TICK_RANGE_NARROW,
@@ -200,7 +150,7 @@ contract UniV3LpVaultMintTest is Test {
     }
 
     function test_mint_DeadlinePassed_Reverts() public {
-        (, int24 currentTick, , , , , ) = setup.pool.slot0();
+        (, int24 currentTick,,,,,) = setup.pool.slot0();
 
         uint256 pastDeadline = block.timestamp - 1;
 
@@ -232,7 +182,7 @@ contract UniV3LpVaultMintTest is Test {
     }
 
     function test_mint_SlippageProtection_Reverts() public {
-        (, int24 currentTick, , , , , ) = setup.pool.slot0();
+        (, int24 currentTick,,,,,) = setup.pool.slot0();
 
         int24 tickSpacing = setup.pool.tickSpacing();
         int24 tickRange = TestConstants.TICK_RANGE_NARROW;
@@ -264,13 +214,9 @@ contract UniV3LpVaultMintTest is Test {
     function test_mint_InsufficientFunds_Reverts() public {
         // Deploy vault with minimal funds
         TestHelper.VaultSetup memory poorSetup = helper.deployVaultWithPool();
-        helper.depositToVault(
-            poorSetup,
-            TestConstants.SMALL_AMOUNT,
-            TestConstants.SMALL_AMOUNT
-        );
+        helper.depositToVault(poorSetup, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT);
 
-        (, int24 currentTick, , , , , ) = poorSetup.pool.slot0();
+        (, int24 currentTick,,,,,) = poorSetup.pool.slot0();
 
         int24 tickSpacing = setup.pool.tickSpacing();
         int24 tickRange = TestConstants.TICK_RANGE_NARROW;
@@ -302,14 +248,13 @@ contract UniV3LpVaultMintTest is Test {
     function test_mint_OwnerCanAlsoMint_Success() public {
         // Owner should also be able to mint (onlyOwnerOrExecutor modifier)
         vm.prank(setup.owner);
-        (uint256 amount0, uint256 amount1) = helper
-            .createPositionAroundCurrentTick(
-                setup.vault,
-                setup.owner,
-                TestConstants.TICK_RANGE_NARROW,
-                TestConstants.MEDIUM_AMOUNT,
-                TestConstants.MEDIUM_AMOUNT
-            );
+        (uint256 amount0, uint256 amount1) = helper.createPositionAroundCurrentTick(
+            setup.vault,
+            setup.owner,
+            TestConstants.TICK_RANGE_NARROW,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
 
         assertTrue(amount0 > 0);
         assertTrue(amount1 > 0);
@@ -348,7 +293,7 @@ contract UniV3LpVaultMintTest is Test {
     }
 
     function test_mint_ZeroLiquidity_HandleGracefully() public {
-        (, int24 currentTick, , , , , ) = setup.pool.slot0();
+        (, int24 currentTick,,,,,) = setup.pool.slot0();
 
         int24 tickSpacing = setup.pool.tickSpacing();
         int24 tickRange = TestConstants.TICK_RANGE_NARROW;
@@ -374,10 +319,7 @@ contract UniV3LpVaultMintTest is Test {
 
         vm.prank(setup.executor);
         // This might succeed with zero amounts or revert - both are acceptable
-        try setup.vault.mint(mintParams) returns (
-            uint256 amount0,
-            uint256 amount1
-        ) {
+        try setup.vault.mint(mintParams) returns (uint256 amount0, uint256 amount1) {
             // If it succeeds, amounts might be zero
             assertTrue(amount0 == 0 || amount0 > 0);
             assertTrue(amount1 == 0 || amount1 > 0);

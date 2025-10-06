@@ -33,10 +33,7 @@ contract TestHelper is Test {
         return deployVaultWithPool(0, 0);
     }
 
-    function deployVaultWithPool(
-        uint256 tvlFee,
-        uint256 perfFee
-    ) public returns (VaultSetup memory setup) {
+    function deployVaultWithPool(uint256 tvlFee, uint256 perfFee) public returns (VaultSetup memory setup) {
         // Create addresses
         setup.owner = makeAddr("vaultOwner");
         setup.executor = makeAddr("executor");
@@ -58,12 +55,7 @@ contract TestHelper is Test {
 
         // Deploy Uniswap V3 infrastructure
         UniswapV3Infra uniswapV3 = new UniswapV3Infra();
-        (
-            IUniswapV3FactoryMinimal factory,
-            ,
-            ,
-            IUniswapV3RouterMinimal router
-        ) = uniswapV3.deploy();
+        (IUniswapV3FactoryMinimal factory,,, IUniswapV3RouterMinimal router) = uniswapV3.deploy();
 
         setup.router = router;
 
@@ -105,17 +97,17 @@ contract TestHelper is Test {
         });
         mintProxy.mint(mintParams);
 
-        IUniswapV3RouterMinimal.ExactInputSingleParams
-            memory swapParams = IUniswapV3RouterMinimal.ExactInputSingleParams({
-                tokenIn: address(setup.token0),
-                tokenOut: address(setup.token1),
-                fee: setup.pool.fee(),
-                recipient: swapper,
-                deadline: block.timestamp,
-                amountIn: 0.5 ether,
-                amountOutMinimum: 0,
-                sqrtPriceLimitX96: TestConstants.INITIAL_SQRT_PRICE_X96 / 2
-            });
+        IUniswapV3RouterMinimal.ExactInputSingleParams memory swapParams = IUniswapV3RouterMinimal
+            .ExactInputSingleParams({
+            tokenIn: address(setup.token0),
+            tokenOut: address(setup.token1),
+            fee: setup.pool.fee(),
+            recipient: swapper,
+            deadline: block.timestamp,
+            amountIn: 0.5 ether,
+            amountOutMinimum: 0,
+            sqrtPriceLimitX96: TestConstants.INITIAL_SQRT_PRICE_X96 / 2
+        });
         setup.router.exactInputSingle(swapParams);
         vm.stopPrank();
 
@@ -149,7 +141,10 @@ contract TestHelper is Test {
         int24 tickUpper,
         uint256 amount0Desired,
         uint256 amount1Desired
-    ) public returns (uint256 amount0, uint256 amount1) {
+    )
+        public
+        returns (uint256 amount0, uint256 amount1)
+    {
         MinimalMintParams memory mintParams = MinimalMintParams({
             tickLower: tickLower,
             tickUpper: tickUpper,
@@ -170,9 +165,12 @@ contract TestHelper is Test {
         int24 tickRange,
         uint256 amount0Desired,
         uint256 amount1Desired
-    ) public returns (uint256 amount0, uint256 amount1) {
+    )
+        public
+        returns (uint256 amount0, uint256 amount1)
+    {
         IUniswapV3PoolMinimal pool = vault.pool();
-        (, int24 currentTick, , , , , ) = pool.slot0();
+        (, int24 currentTick,,,,,) = pool.slot0();
         int24 tickSpacing = pool.tickSpacing();
 
         // Calculate desired ticks
@@ -188,28 +186,17 @@ contract TestHelper is Test {
             tickUpper = tickLower + tickSpacing;
         }
 
-        return
-            createPosition(
-                vault,
-                caller,
-                tickLower,
-                tickUpper,
-                amount0Desired,
-                amount1Desired
-            );
+        return createPosition(vault, caller, tickLower, tickUpper, amount0Desired, amount1Desired);
     }
 
     function simulateTimePass(uint256 timeInSeconds) public {
         vm.warp(block.timestamp + timeInSeconds);
     }
 
-    function movePoolPriceUp(
-        IUniswapV3PoolMinimal pool,
-        uint256 percentage
-    ) public {
+    function movePoolPriceUp(IUniswapV3PoolMinimal pool, uint256 percentage) public {
         // This would require implementing swaps through a mock router
         // For now, we'll use vm.mockCall for testing purposes
-        (, int24 currentTick, , , , , ) = pool.slot0();
+        (, int24 currentTick,,,,,) = pool.slot0();
         int24 newTick = currentTick + int24(int256(percentage * 100)); // Simplified calculation
 
         vm.mockCall(
@@ -232,15 +219,16 @@ contract TestHelper is Test {
         uint256 expected,
         uint256 tolerance,
         string memory message
-    ) public pure {
+    )
+        public
+        pure
+    {
         if (expected == 0) {
             assertEq(actual, expected, message);
             return;
         }
 
-        uint256 diff = actual > expected
-            ? actual - expected
-            : expected - actual;
+        uint256 diff = actual > expected ? actual - expected : expected - actual;
         uint256 maxDiff = expected.mulDiv(tolerance, 1e18);
 
         assertLe(
@@ -265,7 +253,10 @@ contract TestHelper is Test {
         int24 tickLower,
         int24 tickUpper,
         uint128 expectedLiquidity
-    ) public view {
+    )
+        public
+        view
+    {
         // Search through positions to find matching range
         bool found = false;
         uint128 actualLiquidity = 0;
@@ -285,27 +276,15 @@ contract TestHelper is Test {
         }
 
         assertTrue(found, "Position not found");
-        assertEq(
-            actualLiquidity,
-            expectedLiquidity,
-            "Position liquidity mismatch"
-        );
+        assertEq(actualLiquidity, expectedLiquidity, "Position liquidity mismatch");
     }
 
-    function assertPositionDoesNotExist(
-        UniV3LpVault vault,
-        int24 tickLower,
-        int24 tickUpper
-    ) public view {
+    function assertPositionDoesNotExist(UniV3LpVault vault, int24 tickLower, int24 tickUpper) public view {
         bool found = false;
 
         for (uint256 i = 0; i < 10; i++) {
             try vault.getPosition(i) returns (Position memory pos) {
-                if (
-                    pos.lowerTick == tickLower &&
-                    pos.upperTick == tickUpper &&
-                    pos.liquidity > 0
-                ) {
+                if (pos.lowerTick == tickLower && pos.upperTick == tickUpper && pos.liquidity > 0) {
                     found = true;
                     break;
                 }
@@ -317,11 +296,7 @@ contract TestHelper is Test {
         assertFalse(found, "Position should not exist");
     }
 
-    function depositToVault(
-        VaultSetup memory setup,
-        uint256 amount0,
-        uint256 amount1
-    ) public {
+    function depositToVault(VaultSetup memory setup, uint256 amount0, uint256 amount1) public {
         vm.prank(setup.owner);
         setup.vault.deposit(amount0, amount1);
     }
@@ -330,7 +305,10 @@ contract TestHelper is Test {
         VaultSetup memory setup,
         uint256 scaledPercentage,
         address recipient
-    ) public returns (uint256 amount0, uint256 amount1) {
+    )
+        public
+        returns (uint256 amount0, uint256 amount1)
+    {
         vm.prank(setup.owner);
         return setup.vault.withdraw(scaledPercentage, recipient);
     }
