@@ -14,6 +14,8 @@ interface IUniswapV3PoolMinimal {
     /// @return The contract address
     function factory() external view returns (address);
 
+    function tickSpacing() external view returns (int24);
+
     /// @notice The pool's fee in hundredths of a bip, i.e. 1e-6
     /// @return The fee
     function fee() external view returns (uint24);
@@ -40,7 +42,9 @@ interface IUniswapV3PoolMinimal {
     /// Outside values can only be used if the tick is initialized, i.e. if liquidityGross is greater than 0.
     /// In addition, these values are only relative and must be used only in comparison to previous snapshots for
     /// a specific position.
-    function ticks(int24 tick)
+    function ticks(
+        int24 tick
+    )
         external
         view
         returns (
@@ -94,10 +98,15 @@ interface IUniswapV3PoolMinimal {
     /// @return tickCumulatives Cumulative tick values as of each `secondsAgos` from the current block timestamp
     /// @return secondsPerLiquidityCumulativeX128s Cumulative seconds per liquidity-in-range value as of each `secondsAgos` from the current block
     /// timestamp
-    function observe(uint32[] calldata secondsAgos)
+    function observe(
+        uint32[] calldata secondsAgos
+    )
         external
         view
-        returns (int56[] memory tickCumulatives, uint160[] memory secondsPerLiquidityCumulativeX128s);
+        returns (
+            int56[] memory tickCumulatives,
+            uint160[] memory secondsPerLiquidityCumulativeX128s
+        );
 
     /// @notice Adds liquidity for the given recipient/tickLower/tickUpper position
     /// @dev The caller of this method receives a callback in the form of IUniswapV3MintCallback#uniswapV3MintCallback
@@ -116,9 +125,7 @@ interface IUniswapV3PoolMinimal {
         int24 tickUpper,
         uint128 amount,
         bytes calldata data
-    )
-        external
-        returns (uint256 amount0, uint256 amount1);
+    ) external returns (uint256 amount0, uint256 amount1);
 
     /// @notice Collects tokens owed to a position
     /// @dev Does not recompute fees earned, which must be done either via mint or burn of any amount of liquidity.
@@ -138,9 +145,7 @@ interface IUniswapV3PoolMinimal {
         int24 tickUpper,
         uint128 amount0Requested,
         uint128 amount1Requested
-    )
-        external
-        returns (uint128 amount0, uint128 amount1);
+    ) external returns (uint128 amount0, uint128 amount1);
 
     /// @notice Burn liquidity from the sender and account tokens owed for the liquidity to the position
     /// @dev Can be used to trigger a recalculation of fees owed to a position by calling with an amount of 0
@@ -154,9 +159,7 @@ interface IUniswapV3PoolMinimal {
         int24 tickLower,
         int24 tickUpper,
         uint128 amount
-    )
-        external
-        returns (uint256 amount0, uint256 amount1);
+    ) external returns (uint256 amount0, uint256 amount1);
 
     /// @notice Swap token0 for token1, or token1 for token0
     /// @dev The caller of this method receives a callback in the form of IUniswapV3SwapCallback#uniswapV3SwapCallback
@@ -174,9 +177,7 @@ interface IUniswapV3PoolMinimal {
         int256 amountSpecified,
         uint160 sqrtPriceLimitX96,
         bytes calldata data
-    )
-        external
-        returns (int256 amount0, int256 amount1);
+    ) external returns (int256 amount0, int256 amount1);
 
     /// @notice Receive token0 and/or token1 and pay it back, plus a fee, in the callback
     /// @dev The caller of this method receives a callback in the form of IUniswapV3FlashCallback#uniswapV3FlashCallback
@@ -186,13 +187,20 @@ interface IUniswapV3PoolMinimal {
     /// @param amount0 The amount of token0 to send
     /// @param amount1 The amount of token1 to send
     /// @param data Any data to be passed through to the callback
-    function flash(address recipient, uint256 amount0, uint256 amount1, bytes calldata data) external;
+    function flash(
+        address recipient,
+        uint256 amount0,
+        uint256 amount1,
+        bytes calldata data
+    ) external;
 
     /// @notice Increase the maximum number of price and liquidity observations that this pool will store
     /// @dev This method is no-op if the pool already has an observationCardinalityNext greater than or equal to
     /// the input observationCardinalityNext.
     /// @param observationCardinalityNext The desired minimum number of observations for the pool to store
-    function increaseObservationCardinalityNext(uint16 observationCardinalityNext) external;
+    function increaseObservationCardinalityNext(
+        uint16 observationCardinalityNext
+    ) external;
 
     /// @notice Returns the information about a position by the position's key
     /// @param key The position's key is a hash of a preimage composed by the owner, tickLower and tickUpper
@@ -201,7 +209,9 @@ interface IUniswapV3PoolMinimal {
     /// Returns feeGrowthInside1LastX128 fee growth of token1 inside the tick range as of the last mint/burn/poke,
     /// Returns tokensOwed0 the computed amount of token0 owed to the position as of the last mint/burn/poke,
     /// Returns tokensOwed1 the computed amount of token1 owed to the position as of the last mint/burn/poke
-    function positions(bytes32 key)
+    function positions(
+        bytes32 key
+    )
         external
         view
         returns (

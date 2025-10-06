@@ -26,7 +26,9 @@ struct MintParams {
 /// @notice Any contract that calls IUniswapV3PoolActions#mint must implement this interface
 interface IUniswapV3MintCallback {
     /// @notice Mints liquidity to a Uniswap V3 pool
-    function mint(MintParams memory params) external returns (uint256 amount0, uint256 amount1);
+    function mint(
+        MintParams memory params
+    ) external returns (uint256 amount0, uint256 amount1);
 
     /// @notice Called to msg.sender after minting liquidity to a position from IUniswapV3Pool#mint.
     /// @dev In the implementation you must pay the pool tokens owed for the minted liquidity.
@@ -34,5 +36,9 @@ interface IUniswapV3MintCallback {
     /// @param amount0Owed The amount of token0 due to the pool for the minted liquidity
     /// @param amount1Owed The amount of token1 due to the pool for the minted liquidity
     /// @param data Any data passed through by the caller via the IUniswapV3PoolActions#mint call
-    function uniswapV3MintCallback(uint256 amount0Owed, uint256 amount1Owed, bytes calldata data) external;
+    function uniswapV3MintCallback(
+        uint256 amount0Owed,
+        uint256 amount1Owed,
+        bytes calldata data
+    ) external;
 }
