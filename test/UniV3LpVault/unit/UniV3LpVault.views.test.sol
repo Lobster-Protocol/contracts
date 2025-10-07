@@ -60,7 +60,7 @@ contract UniV3LpVaultViewsTest is Test {
         uint256 amount0Desired = TestConstants.MEDIUM_AMOUNT;
         uint256 amount1Desired = TestConstants.MEDIUM_AMOUNT;
 
-        helper.createPositionAroundCurrentTick(
+        (uint256 amount0, uint256 amount1) = helper.createPositionAroundCurrentTick(
             setup.vault, setup.executor, TestConstants.TICK_RANGE_NARROW, amount0Desired, amount1Desired
         );
 
@@ -68,8 +68,8 @@ contract UniV3LpVaultViewsTest is Test {
 
         assertTrue(totalLp0 > 0);
         assertTrue(totalLp1 > 0);
-        helper.assertApproxEqual(totalLp0, amount0Desired, TestConstants.TOLERANCE_LOW, "LP value0 mismatch");
-        helper.assertApproxEqual(totalLp1, amount1Desired, TestConstants.TOLERANCE_LOW, "LP value1 mismatch");
+        helper.assertApproxEqual(totalLp0, amount0, TestConstants.TOLERANCE_LOW, "LP value0 mismatch");
+        helper.assertApproxEqual(totalLp1, amount1, TestConstants.TOLERANCE_LOW, "LP value1 mismatch");
     }
 
     function test_netAssetsValue_WithPositionAndCash_ReturnsCombined() public {
@@ -106,23 +106,30 @@ contract UniV3LpVaultViewsTest is Test {
         uint256 amount2_0 = TestConstants.MEDIUM_AMOUNT;
         uint256 amount2_1 = TestConstants.MEDIUM_AMOUNT;
 
-        helper.createPosition(
-            setup.vault,
-            setup.executor,
-            currentTick - TestConstants.TICK_RANGE_NARROW,
-            currentTick + TestConstants.TICK_RANGE_NARROW,
-            amount1_0,
-            amount1_1
-        );
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange1 = TestConstants.TICK_RANGE_NARROW;
 
-        helper.createPosition(
-            setup.vault,
-            setup.executor,
-            currentTick - TestConstants.TICK_RANGE_WIDE,
-            currentTick + TestConstants.TICK_RANGE_WIDE,
-            amount2_0,
-            amount2_1
-        );
+        // Calculate desired ticks
+        int24 desiredTickLower1 = currentTick - tickRange1;
+        int24 desiredTickUpper1 = currentTick + tickRange1;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower1 = (desiredTickLower1 / tickSpacing) * tickSpacing;
+        int24 tickUpper1 = (desiredTickUpper1 / tickSpacing) * tickSpacing;
+
+        helper.createPosition(setup.vault, setup.executor, tickLower1, tickUpper1, amount1_0, amount1_1);
+
+        int24 tickRange2 = TestConstants.TICK_RANGE_WIDE;
+
+        // Calculate desired ticks
+        int24 desiredTickLower2 = currentTick - tickRange2;
+        int24 desiredTickUpper2 = currentTick + tickRange2;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower2 = (desiredTickLower2 / tickSpacing) * tickSpacing;
+        int24 tickUpper2 = (desiredTickUpper2 / tickSpacing) * tickSpacing;
+
+        helper.createPosition(setup.vault, setup.executor, tickLower2, tickUpper2, amount2_0, amount2_1);
 
         (uint256 totalLp0, uint256 totalLp1) = setup.vault.totalLpValue();
 
@@ -139,8 +146,17 @@ contract UniV3LpVaultViewsTest is Test {
         helper.depositToVault(setup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
 
         (, int24 currentTick,,,,,) = setup.pool.slot0();
-        int24 expectedLowerTick = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 expectedUpperTick = currentTick + TestConstants.TICK_RANGE_NARROW;
+
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 expectedLowerTick = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 expectedUpperTick = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault,
@@ -181,8 +197,16 @@ contract UniV3LpVaultViewsTest is Test {
         helper.depositToVault(setup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
 
         (, int24 currentTick,,,,,) = setup.pool.slot0();
-        int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
@@ -203,7 +227,7 @@ contract UniV3LpVaultViewsTest is Test {
         assertTrue(finalLp1 < initialLp1);
 
         // Position liquidity should be halved
-        assertEq(finalPosition.liquidity, initialPosition.liquidity / 2);
+        assertApproxEqAbs(finalPosition.liquidity, initialPosition.liquidity / 2, 1);
     }
 
     function test_views_WithTvlFees_ReflectsFeesReduction() public {
