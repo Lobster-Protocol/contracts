@@ -19,7 +19,8 @@ contract UniV3LpVaultConstructorTest is Test {
     }
 
     function test_constructor_ValidParameters_Success() public {
-        TestHelper.VaultSetup memory setup = helper.deployVaultWithPool();
+        TestHelper.VaultSetup memory setup =
+            helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE, TestConstants.HIGH_PERF_FEE);
 
         // Verify all state variables are set correctly
         assertEq(setup.vault.owner(), setup.owner);
@@ -28,15 +29,10 @@ contract UniV3LpVaultConstructorTest is Test {
         assertEq(address(setup.vault.token0()), address(setup.token0));
         assertEq(address(setup.vault.token1()), address(setup.token1));
         assertEq(address(setup.vault.pool()), address(setup.pool));
-        assertEq(setup.vault.pool().fee(), TestConstants.POOL_FEE);
-    }
-
-    function test_constructor_WithDifferentTvlFee_Success() public {
-        TestHelper.VaultSetup memory setup =
-            helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE, TestConstants.HIGH_PERF_FEE);
-
-        // Vault should be deployed successfully
-        assertTrue(address(setup.vault) != address(0));
+        assertEq(setup.vault.tvlFeeCollectedAt(), 1209601);
+        assertEq(setup.vault.tvlFeeScaled(), TestConstants.HIGH_TVL_FEE);
+        assertEq(setup.vault.performanceFeeScaled(), TestConstants.HIGH_PERF_FEE);
+        assertEq(setup.vault.feeCollector(), setup.feeCollector);
     }
 
     function test_constructor_WrongTokenOrder_Reverts() public {
@@ -166,15 +162,15 @@ contract UniV3LpVaultConstructorTest is Test {
         assertEq(netAssets1, 0);
     }
 
-    function test_constructor_MaxTvlFee_Success() public {
+    function test_constructor_MaxFee_Success() public {
         TestHelper.VaultSetup memory setup =
             helper.deployVaultWithPool(TestConstants.MAX_SCALED_PERCENTAGE, TestConstants.MAX_SCALED_PERCENTAGE);
 
-        // Should not revert - 100% TVL fee is technically allowed (though impractical)
+        // Should not revert - 100% TVL&PERF fee is technically allowed (though impractical)
         assertTrue(address(setup.vault) != address(0));
     }
 
-    function test_constructor_ZeroTvlFee_Success() public {
+    function test_constructor_ZeroFee_Success() public {
         TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(0, 0);
 
         // Zero TVL fee should be allowed
