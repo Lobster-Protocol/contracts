@@ -123,9 +123,16 @@ contract UniV3LpVaultFuzzTest is Test {
         helper.depositToVault(setup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
 
         (, int24 currentTick,,,,,) = setup.pool.slot0();
+        int24 tickSpacing = setup.pool.tickSpacing();
         int24 tickRange = int24(TestConstants.TICK_RANGE_NARROW * int256(tickRangeMultiplier));
-        int24 tickLower = currentTick - tickRange;
-        int24 tickUpper = currentTick + tickRange;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         uint256 initialLp0;
         uint256 initialLp1;
