@@ -22,8 +22,16 @@ contract UniV3LpVaultBurnTest is Test {
     function test_burn_PartialPosition_Success() public {
         // Create position first
         (, int24 currentTick,,,,,) = setup.pool.slot0();
-        int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
@@ -54,8 +62,16 @@ contract UniV3LpVaultBurnTest is Test {
 
     function test_burn_FullPosition_RemovesFromArray() public {
         (, int24 currentTick,,,,,) = setup.pool.slot0();
-        int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
@@ -76,10 +92,21 @@ contract UniV3LpVaultBurnTest is Test {
         (, int24 currentTick,,,,,) = setup.pool.slot0();
 
         // Create two different positions
-        int24 tickLower1 = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper1 = currentTick + TestConstants.TICK_RANGE_NARROW;
-        int24 tickLower2 = currentTick - TestConstants.TICK_RANGE_WIDE;
-        int24 tickUpper2 = currentTick + TestConstants.TICK_RANGE_WIDE;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange1 = TestConstants.TICK_RANGE_NARROW;
+        int24 tickRange2 = TestConstants.TICK_RANGE_WIDE;
+
+        // Calculate desired ticks
+        int24 desiredTickLower1 = currentTick - tickRange1;
+        int24 desiredTickUpper1 = currentTick + tickRange1;
+        int24 desiredTickLower2 = currentTick - tickRange2;
+        int24 desiredTickUpper2 = currentTick + tickRange2;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower1 = (desiredTickLower1 / tickSpacing) * tickSpacing;
+        int24 tickUpper1 = (desiredTickUpper1 / tickSpacing) * tickSpacing;
+        int24 tickLower2 = (desiredTickLower2 / tickSpacing) * tickSpacing;
+        int24 tickUpper2 = (desiredTickUpper2 / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault, setup.executor, tickLower1, tickUpper1, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT
@@ -111,43 +138,61 @@ contract UniV3LpVaultBurnTest is Test {
     }
 
     function test_burn_NotAuthorized_Reverts() public {
+        (, int24 currentTick,,,,,) = setup.pool.slot0();
+
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
+
         helper.createPosition(
-            setup.vault,
-            setup.executor,
-            -TestConstants.TICK_RANGE_NARROW,
-            TestConstants.TICK_RANGE_NARROW,
-            TestConstants.MEDIUM_AMOUNT,
-            TestConstants.MEDIUM_AMOUNT
+            setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
         );
 
         address unauthorized = makeAddr("unauthorized");
 
         vm.prank(unauthorized);
         vm.expectRevert(SingleVault.Unauthorized.selector);
-        setup.vault.burn(-TestConstants.TICK_RANGE_NARROW, TestConstants.TICK_RANGE_NARROW, 100);
+        setup.vault.burn(tickLower, tickUpper, 100);
     }
 
     function test_burn_NonExistentPosition_HandlesGracefully() public {
         // Try to burn from non-existent position
         (, int24 currentTick,,,,,) = setup.pool.slot0();
-        int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         vm.prank(setup.executor);
-        // This should either revert or return (0, 0) - both are acceptable
-        try setup.vault.burn(tickLower, tickUpper, 1000) returns (uint256 amount0, uint256 amount1) {
-            // If it succeeds, amounts should be zero
-            assertEq(amount0, 0);
-            assertEq(amount1, 0);
-        } catch {
-            // If it reverts, that's also acceptable
-        }
+        vm.expectRevert(bytes("LS"));
+        setup.vault.burn(tickLower, tickUpper, 1000);
     }
 
     function test_burn_ExcessiveLiquidity_HandlesGracefully() public {
         (, int24 currentTick,,,,,) = setup.pool.slot0();
-        int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault, setup.executor, tickLower, tickUpper, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT
@@ -158,14 +203,22 @@ contract UniV3LpVaultBurnTest is Test {
 
         vm.prank(setup.executor);
         // Should revert or handle gracefully
-        vm.expectRevert();
+        vm.expectRevert(bytes("LS"));
         setup.vault.burn(tickLower, tickUpper, excessiveAmount);
     }
 
     function test_burn_AutoCollect_TransfersTokens() public {
         (, int24 currentTick,,,,,) = setup.pool.slot0();
-        int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
@@ -188,8 +241,16 @@ contract UniV3LpVaultBurnTest is Test {
 
     function test_burn_UpdatesLpValue() public {
         (, int24 currentTick,,,,,) = setup.pool.slot0();
-        int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
@@ -200,19 +261,29 @@ contract UniV3LpVaultBurnTest is Test {
         Position memory position = setup.vault.getPosition(0);
 
         vm.prank(setup.executor);
-        setup.vault.burn(tickLower, tickUpper, position.liquidity / 2);
+        (uint256 amount0, uint256 amount1) = setup.vault.burn(tickLower, tickUpper, position.liquidity / 2);
 
         (uint256 finalLp0, uint256 finalLp1) = setup.vault.totalLpValue();
 
         // LP value should decrease after burning
-        assertTrue(finalLp0 < initialLp0);
-        assertTrue(finalLp1 < initialLp1);
+        assertApproxEqAbs(finalLp0 + amount0, initialLp0, 1);
+        assertApproxEqAbs(finalLp1 + amount1, initialLp1, 1);
+        assertTrue(amount0 > 0);
+        assertTrue(amount1 > 0);
     }
 
     function test_burn_ZeroAmount_Success() public {
         (, int24 currentTick,,,,,) = setup.pool.slot0();
-        int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
@@ -232,8 +303,16 @@ contract UniV3LpVaultBurnTest is Test {
 
     function test_burn_OwnerCanAlsoBurn_Success() public {
         (, int24 currentTick,,,,,) = setup.pool.slot0();
-        int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
