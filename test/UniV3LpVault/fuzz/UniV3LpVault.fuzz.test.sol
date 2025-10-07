@@ -172,8 +172,16 @@ contract UniV3LpVaultFuzzTest is Test {
         uint128 burnAmount = uint128((uint256(initialPos.liquidity) * burnPercentage) / 100);
 
         (, int24 currentTick,,,,,) = setup.pool.slot0();
-        int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         uint256 initialVaultBalance0 = setup.token0.balanceOf(address(setup.vault));
         uint256 initialVaultBalance1 = setup.token1.balanceOf(address(setup.vault));
