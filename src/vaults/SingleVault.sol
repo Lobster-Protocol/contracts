@@ -127,6 +127,8 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
      * @param amount Amount to recover
      */
     function emergencyRecoverToken(address token, address to, uint256 amount) external onlyOwner {
+        revert("Owner can partially bypass fee collection by transferring using this function");
+
         if (token == address(0) || to == address(0)) revert ZeroAddress();
         if (amount == 0) revert ZeroValue();
 
@@ -164,6 +166,7 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
         onlyOwner
         returns (bytes memory returnData)
     {
+        revert("Owner can bypass fee collection by withdrawing using this function");
         (bool success, bytes memory result) = target.call{value: value}(data);
 
         if (!success) {
