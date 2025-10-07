@@ -129,22 +129,19 @@ contract UniV3LpVaultWithdrawTest is Test {
         helper.depositToVault(setup, depositAmount0, depositAmount1);
 
         // Create multiple positions
-        (, int24 currentTick,,,,,) = setup.pool.slot0();
 
-        helper.createPosition(
+        helper.createPositionAroundCurrentTick(
             setup.vault,
             setup.executor,
-            currentTick - TestConstants.TICK_RANGE_NARROW,
-            currentTick + TestConstants.TICK_RANGE_NARROW,
+            TestConstants.TICK_RANGE_NARROW,
             TestConstants.SMALL_AMOUNT,
             TestConstants.SMALL_AMOUNT
         );
 
-        helper.createPosition(
+        helper.createPositionAroundCurrentTick(
             setup.vault,
             setup.executor,
-            currentTick - TestConstants.TICK_RANGE_WIDE,
-            currentTick + TestConstants.TICK_RANGE_WIDE,
+            TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
         );
