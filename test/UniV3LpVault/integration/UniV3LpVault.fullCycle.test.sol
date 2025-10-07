@@ -19,6 +19,7 @@ contract UniV3LpVaultFullCycleTest is Test {
     }
 
     function test_fullCycle_DepositMintCollectBurnWithdraw() public {
+        vm.warp(block.timestamp + 10 days);
         address user = setup.owner;
         address recipient = makeAddr("recipient");
 
@@ -44,8 +45,17 @@ contract UniV3LpVaultFullCycleTest is Test {
         (, int24 currentTick,,,,,) = setup.pool.slot0();
 
         // Position 1: Narrow range around current price
-        int24 narrow_lower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 narrow_upper = currentTick + TestConstants.TICK_RANGE_NARROW;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange1 = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower1 = currentTick - tickRange1;
+        int24 desiredTickUpper1 = currentTick + tickRange1;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 narrow_lower = (desiredTickLower1 / tickSpacing) * tickSpacing;
+        int24 narrow_upper = (desiredTickUpper1 / tickSpacing) * tickSpacing;
+
         uint256 narrow_amount0 = TestConstants.MEDIUM_AMOUNT;
         uint256 narrow_amount1 = TestConstants.MEDIUM_AMOUNT;
 
@@ -54,8 +64,14 @@ contract UniV3LpVaultFullCycleTest is Test {
         );
 
         // Position 2: Wide range for base liquidity
-        int24 wide_lower = currentTick - TestConstants.TICK_RANGE_WIDE;
-        int24 wide_upper = currentTick + TestConstants.TICK_RANGE_WIDE;
+        int24 tickRange2 = TestConstants.TICK_RANGE_WIDE;
+        int24 desiredTickLower2 = currentTick - tickRange2;
+        int24 desiredTickUpper2 = currentTick + tickRange2;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 wide_lower = (desiredTickLower2 / tickSpacing) * tickSpacing;
+        int24 wide_upper = (desiredTickUpper2 / tickSpacing) * tickSpacing;
+
         uint256 wide_amount0 = TestConstants.MEDIUM_AMOUNT;
         uint256 wide_amount1 = TestConstants.MEDIUM_AMOUNT;
 
@@ -256,6 +272,8 @@ contract UniV3LpVaultFullCycleTest is Test {
     }
 
     function test_fullCycle_WithRebalancing() public {
+        int24 tickSpacing = setup.pool.tickSpacing();
+
         // Test a more complex scenario with position rebalancing
         uint256 depositAmount0 = TestConstants.LARGE_AMOUNT;
         uint256 depositAmount1 = TestConstants.LARGE_AMOUNT;
@@ -266,8 +284,13 @@ contract UniV3LpVaultFullCycleTest is Test {
         address recipient = makeAddr("recipient");
 
         // === Initial Position ===
-        int24 initialLower = currentTick - TestConstants.TICK_RANGE_MEDIUM;
-        int24 initialUpper = currentTick + TestConstants.TICK_RANGE_MEDIUM;
+        // Calculate desired ticks
+        int24 desiredTickLower0 = currentTick - TestConstants.TICK_RANGE_MEDIUM;
+        int24 desiredTickUpper0 = currentTick + TestConstants.TICK_RANGE_MEDIUM;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 initialLower = (desiredTickLower0 / tickSpacing) * tickSpacing;
+        int24 initialUpper = (desiredTickUpper0 / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault,
@@ -293,8 +316,14 @@ contract UniV3LpVaultFullCycleTest is Test {
         setup.vault.getPosition(0);
 
         // Create new position at different range
-        int24 newLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 newUpper = currentTick + TestConstants.TICK_RANGE_WIDE; // Asymmetric
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
+        int24 desiredTickUpper = currentTick + TestConstants.TICK_RANGE_WIDE; // Asymmetric
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 newLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 newUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault, setup.executor, newLower, newUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT

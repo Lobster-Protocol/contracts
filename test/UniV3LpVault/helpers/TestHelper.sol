@@ -29,6 +29,13 @@ contract TestHelper is Test {
         IUniswapV3RouterMinimal router;
     }
 
+    function increaseObservationCardinality(IUniswapV3PoolMinimal pool, uint16 cardinality) public {
+        pool.increaseObservationCardinalityNext(cardinality);
+
+        // Optional: Do a small swap to actually grow the cardinality
+        // The cardinality only grows when swaps occur after calling increaseObservationCardinalityNext
+    }
+
     function deployVaultWithPool() public returns (VaultSetup memory setup) {
         return deployVaultWithPool(0, 0);
     }
@@ -67,6 +74,8 @@ contract TestHelper is Test {
             TestConstants.POOL_FEE,
             TestConstants.INITIAL_SQRT_PRICE_X96
         );
+
+        setup.pool.increaseObservationCardinalityNext(500);
 
         // Do some swaps so we can have a twap over 14 days
         address swapper = makeAddr("Swapper");
@@ -309,6 +318,8 @@ contract TestHelper is Test {
         public
         returns (uint256 amount0, uint256 amount1)
     {
+        // // Increase observation cardinality BEFORE any time-sensitive operations
+        // setup.pool.increaseObservationCardinalityNext(500);
         vm.prank(setup.owner);
         return setup.vault.withdraw(scaledPercentage, recipient);
     }
