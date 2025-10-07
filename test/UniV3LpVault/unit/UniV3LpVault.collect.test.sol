@@ -21,8 +21,16 @@ contract UniV3LpVaultCollectTest is Test {
 
     function test_collect_ExistingPosition_Success() public {
         (, int24 currentTick,,,,,) = setup.pool.slot0();
-        int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
@@ -50,8 +58,16 @@ contract UniV3LpVaultCollectTest is Test {
 
     function test_collect_PartialAmounts_Success() public {
         (, int24 currentTick,,,,,) = setup.pool.slot0();
-        int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
@@ -71,8 +87,16 @@ contract UniV3LpVaultCollectTest is Test {
 
     function test_collect_ZeroAmounts_Success() public {
         (, int24 currentTick,,,,,) = setup.pool.slot0();
-        int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
@@ -92,8 +116,16 @@ contract UniV3LpVaultCollectTest is Test {
 
     function test_collect_NonExistentPosition_HandlesGracefully() public {
         (, int24 currentTick,,,,,) = setup.pool.slot0();
-        int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         // Try to collect from position that doesn't exist
         vm.prank(setup.executor);
@@ -107,8 +139,16 @@ contract UniV3LpVaultCollectTest is Test {
 
     function test_collect_NotAuthorized_Reverts() public {
         (, int24 currentTick,,,,,) = setup.pool.slot0();
-        int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
@@ -123,8 +163,16 @@ contract UniV3LpVaultCollectTest is Test {
 
     function test_collect_OwnerCanAlsoCollect_Success() public {
         (, int24 currentTick,,,,,) = setup.pool.slot0();
-        int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
@@ -143,10 +191,21 @@ contract UniV3LpVaultCollectTest is Test {
         (, int24 currentTick,,,,,) = setup.pool.slot0();
 
         // Create two positions
-        int24 tickLower1 = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper1 = currentTick + TestConstants.TICK_RANGE_NARROW;
-        int24 tickLower2 = currentTick - TestConstants.TICK_RANGE_WIDE;
-        int24 tickUpper2 = currentTick + TestConstants.TICK_RANGE_WIDE;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange1 = TestConstants.TICK_RANGE_NARROW;
+        int24 tickRange2 = TestConstants.TICK_RANGE_WIDE;
+
+        // Calculate desired ticks
+        int24 desiredTickLower1 = currentTick - tickRange1;
+        int24 desiredTickUpper1 = currentTick + tickRange1;
+        int24 desiredTickLower2 = currentTick - tickRange2;
+        int24 desiredTickUpper2 = currentTick + tickRange2;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower1 = (desiredTickLower1 / tickSpacing) * tickSpacing;
+        int24 tickUpper1 = (desiredTickUpper1 / tickSpacing) * tickSpacing;
+        int24 tickLower2 = (desiredTickLower2 / tickSpacing) * tickSpacing;
+        int24 tickUpper2 = (desiredTickUpper2 / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault, setup.executor, tickLower1, tickUpper1, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT
@@ -180,8 +239,16 @@ contract UniV3LpVaultCollectTest is Test {
 
     function test_collect_AfterTimeAndTrades_CollectsFees() public {
         (, int24 currentTick,,,,,) = setup.pool.slot0();
-        int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault, setup.executor, tickLower, tickUpper, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT
@@ -208,8 +275,16 @@ contract UniV3LpVaultCollectTest is Test {
 
     function test_collect_MultipleCalls_DoesNotRevert() public {
         (, int24 currentTick,,,,,) = setup.pool.slot0();
-        int24 tickLower = currentTick - TestConstants.TICK_RANGE_NARROW;
-        int24 tickUpper = currentTick + TestConstants.TICK_RANGE_NARROW;
+        int24 tickSpacing = setup.pool.tickSpacing();
+        int24 tickRange = TestConstants.TICK_RANGE_NARROW;
+
+        // Calculate desired ticks
+        int24 desiredTickLower = currentTick - tickRange;
+        int24 desiredTickUpper = currentTick + tickRange;
+
+        // Align ticks to tick spacing (round down for lower, round up for upper)
+        int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
+        int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
             setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
