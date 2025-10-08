@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.28;
 
+import "forge-std/Test.sol";
+
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {SingleVault} from "./SingleVault.sol";
@@ -14,6 +16,9 @@ import {IUniswapV3MintCallback, MintCallbackData} from "../interfaces/uniswapV3/
 import {PoolAddress} from "../libraries/uniswapV3/PoolAddress.sol";
 import {UniswapV3Calculator} from "../utils/UniswapV3Calculator.sol";
 import {UniswapUtils} from "../libraries/uniswapV3/UniswapUtils.sol";
+
+// todo: collect fees quand on change l'allocator ??
+// todo: chaque user doit signer les cgu
 
 uint256 constant SCALING_FACTOR = 1e18;
 uint256 constant MAX_SCALED_PERCENTAGE = 100 * SCALING_FACTOR;
@@ -162,6 +167,8 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         if (recipient == address(0)) revert ZeroAddress();
 
         (uint256 performanceFeeScaledPercent, uint256 newTvlInToken0) = _pendingRelativePerformanceFeeAndNewTvl();
+
+        console.log("perfFeePercent in withdraw", performanceFeeScaledPercent);
 
         (amount0, amount1) = _withdraw(
             WithdrawParams({
@@ -315,22 +322,28 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     }
 
     function pendingPerformanceFee() external view returns (uint256 amount0, uint256 amount1) {
-        uint256 pendingTvlPercent = _pendingRelativeTvlFee();
+        if (performanceFeeScaled == 0) return (0, 0);
 
-        (uint256 feePercent,) = _pendingRelativePerformanceFeeAndNewTvl();
+        (uint256 tvl0, uint256 tvl1) = _rawAssetsValue();
 
-        if (pendingTvlPercent + feePercent > MAX_SCALED_PERCENTAGE) {
-            feePercent = pendingTvlPercent + feePercent - MAX_SCALED_PERCENTAGE;
+        // remove pending management fee
+        if (tvlFeeScaled > 0) {
+            (uint256 tvlFee0, uint256 tvlFee1) = _pendingTvlFee();
+            tvl0 -= tvlFee0;
+            tvl1 -= tvlFee1;
         }
 
-        (uint256 raw0, uint256 raw1) = _rawAssetsValue();
+        (uint256 perfFeePercent,) = _pendingRelativePerformanceFeeAndNewTvl();
+        console.log("perfFeePercent in pendingPerformanceFee", perfFeePercent);
+        uint256 pendingTvlPercent = _pendingRelativeTvlFee();
 
-        // Remove pending tvl fees from raw amounts
-        raw0 = raw0.mulDiv(MAX_SCALED_PERCENTAGE - pendingTvlPercent, MAX_SCALED_PERCENTAGE);
-        raw1 = raw1.mulDiv(MAX_SCALED_PERCENTAGE - pendingTvlPercent, MAX_SCALED_PERCENTAGE);
+        // todo: what if perfFeePercent + pendingTvlPercent >= 2*MAX_SCALED_PERCENTAGE ?? (extremely not probable)
+        if (pendingTvlPercent + perfFeePercent > MAX_SCALED_PERCENTAGE) {
+            perfFeePercent = pendingTvlPercent + perfFeePercent - MAX_SCALED_PERCENTAGE;
+        }
 
-        amount0 = raw0.mulDiv(feePercent, MAX_SCALED_PERCENTAGE);
-        amount1 = raw1.mulDiv(feePercent, MAX_SCALED_PERCENTAGE);
+        amount0 = tvl0.mulDiv(perfFeePercent, MAX_SCALED_PERCENTAGE);
+        amount1 = tvl0.mulDiv(perfFeePercent, MAX_SCALED_PERCENTAGE);
     }
 
     function getPosition(uint256 index) external view returns (Position memory) {
@@ -369,6 +382,18 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
             revert InvalidScalingFactor();
         }
 
+        // Collect for all positions
+        for (uint256 i = 0; i < positions.length; i++) {
+            Position memory position = positions[i];
+
+            collect(
+                position.lowerTick,
+                position.upperTick,
+                type(uint128).max, // collect all amount0
+                type(uint128).max // collect all amount1
+            );
+        }
+
         uint256 userScaledPercent = withdrawParams.userScaledPercent;
         uint256 tvlFeeScaledPercent = withdrawParams.tvlFeeScaledPercent;
         uint256 performanceFeeScaledPercent = withdrawParams.performanceFeeScaledPercent;
@@ -382,19 +407,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
             userScaledPercent, MAX_SCALED_PERCENTAGE
         );
 
-        // Collect for all positions
-        for (uint256 i = 0; i < positions.length; i++) {
-            Position memory position = positions[i];
-
-            collect(
-                position.lowerTick,
-                position.upperTick,
-                type(uint128).max, // collect all amount0
-                type(uint128).max // collect all amount1
-            );
-        }
-
-        uint256 totalToWithdrawScaledPercent = userScaledPercent + tvlFeeScaledPercent;
+        uint256 totalToWithdrawScaledPercent = userScaledPercent + tvlFeeScaledPercent + performanceFeeScaledPercent;
 
         uint256 initialToken0Balance = token0.balanceOf(address(this));
         uint256 initialToken1Balance = token1.balanceOf(address(this));
@@ -404,6 +417,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         // Extract the fees
         // TVL
         if (tvlFeeScaledPercent > 0) {
+            console.log("tvlFeeScaledPercent", tvlFeeScaledPercent);
             uint256 tvlFeeFromWithdrawn0 = totalToWithdrawScaledPercent > 0
                 ? withdrawn0.mulDiv(tvlFeeScaledPercent, totalToWithdrawScaledPercent)
                 : 0;
@@ -424,6 +438,8 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         }
         // Performance
         if (performanceFeeScaledPercent > 0) {
+            console.log("perfFeePercent in _withdraw", performanceFeeScaledPercent);
+
             uint256 perfFeeFromWithdrawn0 = totalToWithdrawScaledPercent > 0
                 ? withdrawn0.mulDiv(performanceFeeScaledPercent, totalToWithdrawScaledPercent)
                 : 0;
@@ -436,9 +452,23 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
             uint256 perfFeeAssets1 =
                 initialToken1Balance.mulDiv(performanceFeeScaledPercent, MAX_SCALED_PERCENTAGE) + perfFeeFromWithdrawn1;
 
+            // console.log("total0 from _withdraw", token0.balanceOf(withdrawn0);
+
             _safeTransferBoth(feeCollector, perfFeeAssets0, perfFeeAssets1);
 
             emit PerformanceFeeCollected(perfFeeAssets0, perfFeeAssets1, feeCollector);
+
+            // _safeTransferBoth(
+            //     feeCollector,
+            //     400006811473548777,
+            //     400006811473548777
+            // );
+
+            // emit PerformanceFeeCollected(
+            //     400006811473548777,
+            //     400006811473548777,
+            //     feeCollector
+            // );
 
             lastVaultTvl0 = withdrawParams.newTvlInToken0;
         }
@@ -532,6 +562,8 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         } else {
             twapValueFrom1To0 = twapResult;
         }
+
+        console.log("twap", twapValueFrom1To0);
 
         newTvl0 = tvl0 + twapValueFrom1To0;
 
