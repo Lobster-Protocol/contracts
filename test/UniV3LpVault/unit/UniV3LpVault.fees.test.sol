@@ -3,10 +3,11 @@ pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {UniV3LpVault, MAX_SCALED_PERCENTAGE} from "../../../src/vaults/UniV3LpVault.sol";
+import {UniV3LpVault, MAX_SCALED_PERCENTAGE, TWAP_SECONDS_AGO} from "../../../src/vaults/UniV3LpVault.sol";
 import {TestHelper} from "../helpers/TestHelper.sol";
 import {TestConstants} from "../helpers/Constants.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {UniswapUtils} from "../../../src/libraries/uniswapV3/UniswapUtils.sol";
 
 contract UniV3LpVaultFeesTest is Test {
     using Math for uint256;
@@ -327,7 +328,6 @@ contract UniV3LpVaultFeesTest is Test {
         uint256 feeScaledPercent = perfFeeSetup.vault.performanceFeeScaled();
 
         // Deposit must trigger fee collection
-
         helper.depositToVault(perfFeeSetup, 1 ether, 1 ether);
 
         uint256 expectedFee0 = deposit0.mulDiv(feeScaledPercent, MAX_SCALED_PERCENTAGE);
@@ -338,6 +338,23 @@ contract UniV3LpVaultFeesTest is Test {
 
         assertApproxEqAbs(finalFeeCollectorBalance0, initialFeeCollectorBalance0 + expectedFee0, 3);
         assertApproxEqAbs(finalFeeCollectorBalance1, initialFeeCollectorBalance1 + expectedFee1, 3);
+
+        // make sure vault.lastVaultTvl0() have been updated
+        // works since no perf since last deposit & no tvl fee
+        (uint256 final_tvl0, uint256 final_tvl1) = perfFeeSetup.vault.rawAssetsValue();
+        // Use a reasonable base amount instead of 1 if there is an overflow
+        uint128 baseAmount = final_tvl1 > type(uint128).max ? uint128(1) : uint128(final_tvl1);
+
+        uint256 twapResult = UniswapUtils.getTwap(perfFeeSetup.pool, TWAP_SECONDS_AGO, baseAmount, true);
+
+        // Scale the result if we used a smaller base amount
+        uint256 twapValueFrom1To0;
+        if (tvl1 > type(uint128).max) {
+            twapValueFrom1To0 = twapResult * tvl1;
+        } else {
+            twapValueFrom1To0 = twapResult;
+        }
+        assertEq(perfFeeSetup.vault.lastVaultTvl0(), final_tvl0 + twapValueFrom1To0);
     }
 
     function test_PerfFees_WithdrawalTriggersCollection() public {
@@ -376,10 +393,265 @@ contract UniV3LpVaultFeesTest is Test {
 
         assertApproxEqAbs(finalFeeCollectorBalance0, initialFeeCollectorBalance0 + expectedFee0, 2);
         assertApproxEqAbs(finalFeeCollectorBalance1, initialFeeCollectorBalance1 + expectedFee1, 2);
+
+        // make sure vault.lastVaultTvl0() have been updated
+        // works since no perf since last deposit & no tvl fee
+        (uint256 final_tvl0, uint256 final_tvl1) = perfFeeSetup.vault.rawAssetsValue();
+
+        // Use a reasonable base amount instead of 1 if there is an overflow
+        uint128 baseAmount = final_tvl1 > type(uint128).max ? uint128(1) : uint128(final_tvl1);
+
+        uint256 twapResult = UniswapUtils.getTwap(perfFeeSetup.pool, TWAP_SECONDS_AGO, baseAmount, true);
+
+        // Scale the result if we used a smaller base amount
+        uint256 twapValueFrom1To0;
+        if (tvl1 > type(uint128).max) {
+            twapValueFrom1To0 = twapResult * tvl1;
+        } else {
+            twapValueFrom1To0 = twapResult;
+        }
+
+        assertEq(perfFeeSetup.vault.lastVaultTvl0(), final_tvl0 + twapValueFrom1To0);
     }
-    // test_perfFees_MultipleCollections_UpdateTvl0
-    // test_perfFees_NoPerf_NoCollection
-    // test_perfFees_NegPerf_NoCollection
+
+    function test_perfFees_MultipleCollectionsWithFullWithdraw() public {
+        uint256 deposit00 = TestConstants.LARGE_AMOUNT;
+        uint256 deposit01 = TestConstants.LARGE_AMOUNT;
+
+        helper.depositToVault(perfFeeSetup, deposit00, deposit01);
+        helper.createPositionAroundCurrentTick(
+            perfFeeSetup.vault,
+            perfFeeSetup.executor,
+            TestConstants.TICK_RANGE_NARROW,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
+
+        // Mint tokens to the vault to simulate +100% performance
+        (uint256 tvl00, uint256 tvl01) = perfFeeSetup.vault.rawAssetsValue();
+        perfFeeSetup.token0.mint(address(perfFeeSetup.vault), tvl00 / 2);
+        perfFeeSetup.token1.mint(address(perfFeeSetup.vault), tvl01 / 2);
+
+        // actual_performance = +50% so perf fee will be vault.performanceFeeScaled() / 2
+        uint256 feeScaledPercent0 = perfFeeSetup.vault.performanceFeeScaled() / 2;
+
+        uint256 initialFeeCollectorBalance0 = perfFeeSetup.token0.balanceOf(perfFeeSetup.feeCollector);
+        uint256 initialFeeCollectorBalance1 = perfFeeSetup.token0.balanceOf(perfFeeSetup.feeCollector);
+
+        // Withdraw should also trigger fee collection
+        address recipient = makeAddr("recipient");
+        helper.withdrawFromVault(perfFeeSetup, TestConstants.MAX_SCALED_PERCENTAGE, recipient);
+
+        // deposit again
+        uint256 deposit10 = TestConstants.LARGE_AMOUNT;
+        uint256 deposit11 = TestConstants.LARGE_AMOUNT;
+
+        helper.depositToVault(perfFeeSetup, deposit10, deposit11);
+        helper.createPositionAroundCurrentTick(
+            perfFeeSetup.vault,
+            perfFeeSetup.executor,
+            TestConstants.TICK_RANGE_NARROW,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
+
+        // Mint tokens to the vault to simulate +100% performance
+        (uint256 tvl10, uint256 tvl11) = perfFeeSetup.vault.rawAssetsValue();
+        perfFeeSetup.token0.mint(address(perfFeeSetup.vault), tvl10 / 10);
+        perfFeeSetup.token1.mint(address(perfFeeSetup.vault), tvl11 / 10);
+
+        helper.withdrawFromVault(perfFeeSetup, TestConstants.QUARTER_SCALED_PERCENTAGE, recipient);
+
+        // actual_performance = +10% so perf fee will be vault.performanceFeeScaled() / 2
+        uint256 feeScaledPercent1 = perfFeeSetup.vault.performanceFeeScaled() / 10;
+
+        uint256 expectedFee00 = deposit00.mulDiv(feeScaledPercent0, MAX_SCALED_PERCENTAGE);
+        uint256 expectedFee01 = deposit01.mulDiv(feeScaledPercent0, MAX_SCALED_PERCENTAGE);
+
+        uint256 expectedFee10 = deposit10.mulDiv(feeScaledPercent1, MAX_SCALED_PERCENTAGE);
+        uint256 expectedFee11 = deposit11.mulDiv(feeScaledPercent1, MAX_SCALED_PERCENTAGE);
+
+        uint256 finalFeeCollectorBalance0 = perfFeeSetup.token0.balanceOf(perfFeeSetup.feeCollector);
+        uint256 finalFeeCollectorBalance1 = perfFeeSetup.token1.balanceOf(perfFeeSetup.feeCollector);
+
+        assertApproxEqAbs(finalFeeCollectorBalance0, initialFeeCollectorBalance0 + expectedFee00 + expectedFee10, 4);
+        assertApproxEqAbs(finalFeeCollectorBalance1, initialFeeCollectorBalance1 + expectedFee01 + expectedFee11, 4);
+
+        // make sure vault.lastVaultTvl0() have been updated
+        // works since no perf since last deposit & no tvl fee
+        (uint256 final_tvl0, uint256 final_tvl1) = perfFeeSetup.vault.rawAssetsValue();
+        // Use a reasonable base amount instead of 1 if there is an overflow
+        uint128 baseAmount = final_tvl1 > type(uint128).max ? uint128(1) : uint128(final_tvl1);
+
+        uint256 twapResult = UniswapUtils.getTwap(perfFeeSetup.pool, TWAP_SECONDS_AGO, baseAmount, true);
+
+        // Scale the result if we used a smaller base amount
+        uint256 twapValueFrom1To0;
+        if (tvl11 > type(uint128).max) {
+            twapValueFrom1To0 = twapResult * tvl11;
+        } else {
+            twapValueFrom1To0 = twapResult;
+        }
+        assertEq(perfFeeSetup.vault.lastVaultTvl0(), final_tvl0 + twapValueFrom1To0);
+    }
+
+    function test_perfFees_MultipleCollections() public {
+        uint256 deposit00 = TestConstants.LARGE_AMOUNT;
+        uint256 deposit01 = TestConstants.LARGE_AMOUNT;
+
+        helper.depositToVault(perfFeeSetup, deposit00, deposit01);
+        helper.createPositionAroundCurrentTick(
+            perfFeeSetup.vault,
+            perfFeeSetup.executor,
+            TestConstants.TICK_RANGE_NARROW,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
+
+        // Mint tokens to the vault to simulate +100% performance
+        (uint256 tvl00, uint256 tvl01) = perfFeeSetup.vault.rawAssetsValue();
+        perfFeeSetup.token0.mint(address(perfFeeSetup.vault), tvl00 / 2);
+        perfFeeSetup.token1.mint(address(perfFeeSetup.vault), tvl01 / 2);
+
+        // actual_performance = +50% so perf fee will be vault.performanceFeeScaled() / 2
+        uint256 feeScaledPercent0 = perfFeeSetup.vault.performanceFeeScaled() / 2;
+
+        uint256 initialFeeCollectorBalance0 = perfFeeSetup.token0.balanceOf(perfFeeSetup.feeCollector);
+        uint256 initialFeeCollectorBalance1 = perfFeeSetup.token0.balanceOf(perfFeeSetup.feeCollector);
+
+        // Withdraw should also trigger fee collection
+        address recipient = makeAddr("recipient");
+        helper.withdrawFromVault(perfFeeSetup, TestConstants.QUARTER_SCALED_PERCENTAGE, recipient);
+
+        // deposit again
+        uint256 deposit10 = TestConstants.LARGE_AMOUNT;
+        uint256 deposit11 = TestConstants.LARGE_AMOUNT;
+
+        helper.depositToVault(perfFeeSetup, deposit10, deposit11);
+        helper.createPositionAroundCurrentTick(
+            perfFeeSetup.vault,
+            perfFeeSetup.executor,
+            TestConstants.TICK_RANGE_NARROW,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
+
+        // Mint tokens to the vault to simulate +100% performance
+        (uint256 tvl10, uint256 tvl11) = perfFeeSetup.vault.rawAssetsValue();
+        perfFeeSetup.token0.mint(address(perfFeeSetup.vault), tvl10 / 10);
+        perfFeeSetup.token1.mint(address(perfFeeSetup.vault), tvl11 / 10);
+
+        helper.withdrawFromVault(perfFeeSetup, TestConstants.QUARTER_SCALED_PERCENTAGE, recipient);
+
+        // actual_performance = +10% so perf fee will be vault.performanceFeeScaled() / 2
+        uint256 feeScaledPercent1 = perfFeeSetup.vault.performanceFeeScaled() / 10;
+
+        uint256 expectedFee00 = deposit00.mulDiv(feeScaledPercent0, MAX_SCALED_PERCENTAGE);
+        uint256 expectedFee01 = deposit01.mulDiv(feeScaledPercent0, MAX_SCALED_PERCENTAGE);
+
+        uint256 expectedFee10 = tvl10.mulDiv(feeScaledPercent1, MAX_SCALED_PERCENTAGE);
+        uint256 expectedFee11 = tvl11.mulDiv(feeScaledPercent1, MAX_SCALED_PERCENTAGE);
+
+        uint256 finalFeeCollectorBalance0 = perfFeeSetup.token0.balanceOf(perfFeeSetup.feeCollector);
+        uint256 finalFeeCollectorBalance1 = perfFeeSetup.token1.balanceOf(perfFeeSetup.feeCollector);
+
+        assertApproxEqAbs(finalFeeCollectorBalance0, initialFeeCollectorBalance0 + expectedFee00 + expectedFee10, 4);
+        assertApproxEqAbs(finalFeeCollectorBalance1, initialFeeCollectorBalance1 + expectedFee01 + expectedFee11, 4);
+
+        // make sure vault.lastVaultTvl0() have been updated
+        // works since no perf since last deposit & no tvl fee
+        (uint256 final_tvl0, uint256 final_tvl1) = perfFeeSetup.vault.rawAssetsValue();
+        // Use a reasonable base amount instead of 1 if there is an overflow
+        uint128 baseAmount = final_tvl1 > type(uint128).max ? uint128(1) : uint128(final_tvl1);
+
+        uint256 twapResult = UniswapUtils.getTwap(perfFeeSetup.pool, TWAP_SECONDS_AGO, baseAmount, true);
+
+        // Scale the result if we used a smaller base amount
+        uint256 twapValueFrom1To0;
+        if (tvl11 > type(uint128).max) {
+            twapValueFrom1To0 = twapResult * tvl11;
+        } else {
+            twapValueFrom1To0 = twapResult;
+        }
+        assertEq(perfFeeSetup.vault.lastVaultTvl0(), final_tvl0 + twapValueFrom1To0);
+    }
+
+    function test_perfFees_NoPerf() public {
+        uint256 initialFeeCollectorBalance0 = perfFeeSetup.token0.balanceOf(perfFeeSetup.feeCollector);
+        uint256 initialFeeCollectorBalance1 = perfFeeSetup.token1.balanceOf(perfFeeSetup.feeCollector);
+
+        uint256 deposit0 = TestConstants.LARGE_AMOUNT;
+        uint256 deposit1 = TestConstants.LARGE_AMOUNT;
+
+        helper.depositToVault(perfFeeSetup, deposit0, deposit1);
+
+        helper.createPositionAroundCurrentTick(
+            perfFeeSetup.vault,
+            perfFeeSetup.executor,
+            TestConstants.TICK_RANGE_NARROW,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
+
+        // No perf made
+
+        // Deposit must trigger fee collection
+        helper.depositToVault(perfFeeSetup, 1 ether, 1 ether);
+
+        uint256 finalFeeCollectorBalance0 = perfFeeSetup.token0.balanceOf(perfFeeSetup.feeCollector);
+        uint256 finalFeeCollectorBalance1 = perfFeeSetup.token1.balanceOf(perfFeeSetup.feeCollector);
+
+        assertEq(finalFeeCollectorBalance0, initialFeeCollectorBalance0);
+        assertEq(finalFeeCollectorBalance1, initialFeeCollectorBalance1);
+
+        // make sure vault.lastVaultTvl0() have been updated
+        // works since no perf since last deposit & no tvl fee
+        (uint256 final_tvl0, uint256 final_tvl1) = perfFeeSetup.vault.rawAssetsValue();
+        // Use a reasonable base amount instead of 1 if there is an overflow
+        uint128 baseAmount = final_tvl1 > type(uint128).max ? uint128(1) : uint128(final_tvl1);
+
+        uint256 twapResult = UniswapUtils.getTwap(perfFeeSetup.pool, TWAP_SECONDS_AGO, baseAmount, true);
+
+        // Scale the result if we used a smaller base amount
+        uint256 twapValueFrom1To0;
+        if (final_tvl1 > type(uint128).max) {
+            twapValueFrom1To0 = twapResult * final_tvl1;
+        } else {
+            twapValueFrom1To0 = twapResult;
+        }
+        assertEq(perfFeeSetup.vault.lastVaultTvl0(), final_tvl0 + twapValueFrom1To0);
+    }
+
+    function test_perfFees_NegPerf() public {
+        uint256 initialFeeCollectorBalance0 = perfFeeSetup.token0.balanceOf(perfFeeSetup.feeCollector);
+        uint256 initialFeeCollectorBalance1 = perfFeeSetup.token1.balanceOf(perfFeeSetup.feeCollector);
+
+        uint256 deposit0 = TestConstants.LARGE_AMOUNT;
+        uint256 deposit1 = TestConstants.LARGE_AMOUNT;
+
+        helper.depositToVault(perfFeeSetup, deposit0, deposit1);
+
+        uint256 initial_lastVaultTvl0 = perfFeeSetup.vault.lastVaultTvl0();
+
+        // Burn tokens to the vault to simulate negative performance
+        perfFeeSetup.token0.burn(address(perfFeeSetup.vault), 1);
+        perfFeeSetup.token1.burn(address(perfFeeSetup.vault), 1);
+
+        // Deposit must trigger fee collection
+        helper.depositToVault(perfFeeSetup, 1, 1); // negligeable impact on new lastVaultTvl0 value
+
+        uint256 finalFeeCollectorBalance0 = perfFeeSetup.token0.balanceOf(perfFeeSetup.feeCollector);
+        uint256 finalFeeCollectorBalance1 = perfFeeSetup.token1.balanceOf(perfFeeSetup.feeCollector);
+
+        assertEq(finalFeeCollectorBalance0, initialFeeCollectorBalance0);
+        assertEq(finalFeeCollectorBalance1, initialFeeCollectorBalance1);
+
+        // make sure vault.lastVaultTvl0() have not been updated
+        assertTrue(initial_lastVaultTvl0 > 0);
+
+        // burn of -1 of each assets and deposit of 1 of each assets should cancel each other
+        assertEq(perfFeeSetup.vault.lastVaultTvl0(), initial_lastVaultTvl0);
+    }
     // test_perfAndFees_CollectionOnDeposit
     // test_perfAndFees_CollectionOnWithdraw
 }

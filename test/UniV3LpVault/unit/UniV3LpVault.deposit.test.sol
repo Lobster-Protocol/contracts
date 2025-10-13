@@ -182,8 +182,6 @@ contract UniV3LpVaultDepositTest is Test {
         // Check pending performance fee
         (uint256 expectedPerfFee0, uint256 expectedPerfFee1) = feeSetup.vault.pendingPerformanceFee();
 
-        console.log("expectedPerfFee0", expectedPerfFee0);
-
         uint256 tvlFeePercent = feeSetup.vault.tvlFeeScaled().mulDiv(delay, 365 days);
 
         (uint256 value0InVault, uint256 value1InVault) = feeSetup.vault.rawAssetsValue();

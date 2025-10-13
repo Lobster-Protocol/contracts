@@ -87,6 +87,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     error NotPool();
     error WrongPayer();
+    error InvalidValue();
     error InvalidScalingFactor();
 
     // ========== EVENTS ==========
@@ -149,10 +150,9 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         }
 
         emit Deposit(assets0, assets1);
-        // console.log("initial lastVaultTvl0", lastVaultTvl0);
+
         // Always update vault tvl in token0
         lastVaultTvl0 = _getNewVaultTvl0();
-        // console.log("final lastVaultTvl0", lastVaultTvl0);
     }
 
     function withdraw(
@@ -173,7 +173,9 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
                 userScaledPercent: scaledPercentage,
                 tvlFeeScaledPercent: _pendingRelativeTvlFee(),
                 performanceFeeScaledPercent: performanceFeeScaledPercent,
-                newTvlInToken0: newTvlInToken0,
+                newTvlInToken0: newTvlInToken0.mulDiv(
+                    MAX_SCALED_PERCENTAGE - performanceFeeScaledPercent, MAX_SCALED_PERCENTAGE
+                ),
                 recipient: recipient
             })
         );
@@ -436,8 +438,6 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
             _safeTransferBoth(feeCollector, perfFeeAssets0, perfFeeAssets1);
 
             emit PerformanceFeeCollected(perfFeeAssets0, perfFeeAssets1, feeCollector);
-
-            lastVaultTvl0 = withdrawParams.newTvlInToken0;
         }
 
         // User Withdraw
@@ -457,6 +457,11 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
         if (assets0ToWithdrawForUser > 0 || assets1ToWithdrawForUser > 0) {
             emit Withdraw(assets0ToWithdrawForUser, assets1ToWithdrawForUser, withdrawParams.recipient);
+        }
+
+        // If needed, update the lastVaultTvl0
+        if (performanceFeeScaledPercent > 0) {
+            lastVaultTvl0 = _getNewVaultTvl0();
         }
 
         return (assets0ToWithdrawForUser, assets1ToWithdrawForUser);
@@ -513,11 +518,31 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
             return (0, 0); // If performance is nul or negative, we don't care about the vault tvl in token0
         }
 
-        console.log("_getNewVaultTvl0", _getNewVaultTvl0());
-
         uint256 relativePerfScaledPercent = (newTvl0 - lastVaultTvl0).mulDiv(performanceFeeScaled, newTvl0);
 
-        return (Math.min(relativePerfScaledPercent, MAX_SCALED_PERCENTAGE), newTvl0);
+        return (
+            Math.min(relativePerfScaledPercent, MAX_SCALED_PERCENTAGE),
+            newTvl0 // to get the actual newTvl0 that will be saved in the contract, we must remve the pending performance fees
+        );
+    }
+
+    // Get the price of n amount of token 1 in token 0
+    // todo: might not work if price diff is too important
+    function _convertToToken0(uint256 amount1) internal view returns (uint256 amount0) {
+        // Use a reasonable base amount instead of 1 if there is an overflow
+        uint128 baseAmount = amount1 > type(uint128).max ? uint128(1) : uint128(amount1);
+
+        uint256 twapResult = UniswapUtils.getTwap(pool, TWAP_SECONDS_AGO, baseAmount, true);
+
+        // Scale the result if we used a smaller base amount
+        uint256 twapValueFrom1To0;
+        if (amount1 > type(uint128).max) {
+            twapValueFrom1To0 = twapResult * amount1;
+        } else {
+            twapValueFrom1To0 = twapResult;
+        }
+
+        return twapValueFrom1To0;
     }
 
     function _getNewVaultTvl0() internal view returns (uint256 newVaultTvl0) {
@@ -530,22 +555,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
             tvl1 -= tvlFee1;
         }
 
-        // Use a reasonable base amount instead of 1 if there is an overflow
-        uint128 baseAmount = tvl1 > type(uint128).max ? uint128(1) : uint128(tvl1);
-
-        uint256 twapResult = UniswapUtils.getTwap(pool, TWAP_SECONDS_AGO, baseAmount, true);
-
-        // Scale the result if we used a smaller base amount
-        uint256 twapValueFrom1To0;
-        if (tvl1 > type(uint128).max) {
-            twapValueFrom1To0 = twapResult * tvl1;
-        } else {
-            twapValueFrom1To0 = twapResult;
-        }
-
-        newVaultTvl0 = tvl0 + twapValueFrom1To0;
-
-        return newVaultTvl0;
+        newVaultTvl0 = tvl0 + _convertToToken0(tvl1);
     }
 
     function _netAssetsValue() internal view returns (uint256 totalAssets0, uint256 totalAssets1) {

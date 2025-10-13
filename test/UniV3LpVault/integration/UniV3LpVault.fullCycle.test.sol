@@ -7,6 +7,8 @@ import {UniV3LpVault, Position, MAX_SCALED_PERCENTAGE} from "../../../src/vaults
 import {TestHelper} from "../helpers/TestHelper.sol";
 import {TestConstants} from "../helpers/Constants.sol";
 
+// todo: withdraw all with perf fee collection and deposit again + deposit a second time to make sure collection works
+
 contract UniV3LpVaultFullCycleTest is Test {
     using Math for uint256;
 
