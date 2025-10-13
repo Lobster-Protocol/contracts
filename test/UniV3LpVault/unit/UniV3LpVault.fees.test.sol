@@ -13,18 +13,29 @@ contract UniV3LpVaultFeesTest is Test {
 
     TestHelper helper;
     TestHelper.VaultSetup setup;
-    TestHelper.VaultSetup feeSetup;
+    TestHelper.VaultSetup tvlFeeSetup;
+    TestHelper.VaultSetup perfFeeSetup;
+    TestHelper.VaultSetup bothFeeSetup;
 
     function setUp() public {
         helper = new TestHelper();
         setup = helper.deployVaultWithPool(0, 0); // No fees
-        feeSetup = helper.deployVaultWithPool(
+
+        tvlFeeSetup = helper.deployVaultWithPool(
+            TestConstants.HIGH_TVL_FEE, // 5% annual
+            0
+        );
+        perfFeeSetup = helper.deployVaultWithPool(
+            0,
+            TestConstants.HIGH_PERF_FEE // 5%
+        );
+        bothFeeSetup = helper.deployVaultWithPool(
             TestConstants.HIGH_TVL_FEE, // 5% annual
             TestConstants.HIGH_PERF_FEE // 5%
         );
     }
 
-    function test_tvlFees_NoFeesConfigured_NoCollection() public {
+    function test_tvlAndPerfFees_NoFeesConfigured_NoCollection() public {
         // Setup with zero TVL fee
         helper.depositToVault(setup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
         helper.createPositionAroundCurrentTick(
@@ -52,10 +63,10 @@ contract UniV3LpVaultFeesTest is Test {
         uint256 depositAmount0 = TestConstants.LARGE_AMOUNT;
         uint256 depositAmount1 = TestConstants.LARGE_AMOUNT;
 
-        helper.depositToVault(feeSetup, depositAmount0, depositAmount1);
+        helper.depositToVault(tvlFeeSetup, depositAmount0, depositAmount1);
         helper.createPositionAroundCurrentTick(
-            feeSetup.vault,
-            feeSetup.executor,
+            tvlFeeSetup.vault,
+            tvlFeeSetup.executor,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
@@ -64,22 +75,22 @@ contract UniV3LpVaultFeesTest is Test {
         uint256 delay = TestConstants.ONE_MONTH;
         helper.simulateTimePass(delay);
 
-        uint256 initialFeeCollectorBalance0 = feeSetup.token0.balanceOf(feeSetup.feeCollector);
-        uint256 initialFeeCollectorBalance1 = feeSetup.token1.balanceOf(feeSetup.feeCollector);
+        uint256 initialFeeCollectorBalance0 = tvlFeeSetup.token0.balanceOf(tvlFeeSetup.feeCollector);
+        uint256 initialFeeCollectorBalance1 = tvlFeeSetup.token1.balanceOf(tvlFeeSetup.feeCollector);
 
         vm.expectEmit(false, false, true, true);
-        emit UniV3LpVault.TvlFeeCollected(0, 0, feeSetup.feeCollector);
+        emit UniV3LpVault.TvlFeeCollected(0, 0, tvlFeeSetup.feeCollector);
 
         // Trigger fee collection
-        helper.depositToVault(feeSetup, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT);
+        helper.depositToVault(tvlFeeSetup, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT);
 
         // Fee collector should receive approximately 1/12 of 5% of the assets
-        uint256 tvlFeePercent = feeSetup.vault.tvlFeeScaled().mulDiv(delay, 365 days);
+        uint256 tvlFeePercent = tvlFeeSetup.vault.tvlFeeScaled().mulDiv(delay, 365 days);
         uint256 expectedFee0 = depositAmount0.mulDiv(tvlFeePercent, MAX_SCALED_PERCENTAGE);
         uint256 expectedFee1 = depositAmount1.mulDiv(tvlFeePercent, MAX_SCALED_PERCENTAGE);
 
-        uint256 finalFeeCollectorBalance0 = feeSetup.token0.balanceOf(feeSetup.feeCollector);
-        uint256 finalFeeCollectorBalance1 = feeSetup.token1.balanceOf(feeSetup.feeCollector);
+        uint256 finalFeeCollectorBalance0 = tvlFeeSetup.token0.balanceOf(tvlFeeSetup.feeCollector);
+        uint256 finalFeeCollectorBalance1 = tvlFeeSetup.token1.balanceOf(tvlFeeSetup.feeCollector);
 
         assertTrue(finalFeeCollectorBalance0 > initialFeeCollectorBalance0);
         assertTrue(finalFeeCollectorBalance1 > initialFeeCollectorBalance1);
@@ -91,26 +102,23 @@ contract UniV3LpVaultFeesTest is Test {
         // Fees should be positive but reasonable
         assertApproxEqAbs(collectedFee0, expectedFee0, 2);
         assertApproxEqAbs(collectedFee1, expectedFee1, 2);
-
-        assertTrue(collectedFee0 < depositAmount0 / 10); // Less than 10% of deposit
-        assertTrue(collectedFee1 < depositAmount1 / 10);
     }
 
     function test_tvlFees_OneYear_CollectsFullAnnualFee() public {
         uint256 depositAmount0 = TestConstants.MEDIUM_AMOUNT;
         uint256 depositAmount1 = TestConstants.MEDIUM_AMOUNT;
 
-        helper.depositToVault(feeSetup, depositAmount0, depositAmount1);
+        helper.depositToVault(tvlFeeSetup, depositAmount0, depositAmount1);
         // Don't create positions - keep all as cash for simpler calculation
 
         helper.simulateTimePass(TestConstants.ONE_YEAR);
 
-        uint256 initialFeeCollectorBalance0 = feeSetup.token0.balanceOf(feeSetup.feeCollector);
+        uint256 initialFeeCollectorBalance0 = tvlFeeSetup.token0.balanceOf(tvlFeeSetup.feeCollector);
 
         // Trigger fee collection
-        helper.depositToVault(feeSetup, 1, 1);
+        helper.depositToVault(tvlFeeSetup, 1, 1);
 
-        uint256 finalFeeCollectorBalance0 = feeSetup.token0.balanceOf(feeSetup.feeCollector);
+        uint256 finalFeeCollectorBalance0 = tvlFeeSetup.token0.balanceOf(tvlFeeSetup.feeCollector);
         uint256 collectedFee0 = finalFeeCollectorBalance0 - initialFeeCollectorBalance0;
 
         // Should collect approximately 5% of the deposit (HIGH_TVL_FEE = 5%)
@@ -123,19 +131,19 @@ contract UniV3LpVaultFeesTest is Test {
     }
 
     function test_tvlFees_MultipleCollections_ResetsTimer() public {
-        helper.depositToVault(feeSetup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
+        helper.depositToVault(tvlFeeSetup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
 
         // First collection after 1 month
         helper.simulateTimePass(TestConstants.ONE_MONTH);
-        helper.depositToVault(feeSetup, 1, 1); // Trigger collection
+        helper.depositToVault(tvlFeeSetup, 1, 1); // Trigger collection
 
-        uint256 balanceAfterFirst = feeSetup.token0.balanceOf(feeSetup.feeCollector);
+        uint256 balanceAfterFirst = tvlFeeSetup.token0.balanceOf(tvlFeeSetup.feeCollector);
 
         // Second collection after another month
         helper.simulateTimePass(TestConstants.ONE_MONTH);
-        helper.depositToVault(feeSetup, 1, 1); // Trigger collection again
+        helper.depositToVault(tvlFeeSetup, 1, 1); // Trigger collection again
 
-        uint256 balanceAfterSecond = feeSetup.token0.balanceOf(feeSetup.feeCollector);
+        uint256 balanceAfterSecond = tvlFeeSetup.token0.balanceOf(tvlFeeSetup.feeCollector);
 
         // Both collections should have yielded fees
         assertTrue(balanceAfterFirst > 0);
@@ -143,52 +151,101 @@ contract UniV3LpVaultFeesTest is Test {
     }
 
     function test_tvlFees_NoTimeElapsed_NoCollection() public {
-        helper.depositToVault(feeSetup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
+        helper.depositToVault(tvlFeeSetup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
 
-        uint256 initialFeeCollectorBalance = feeSetup.token0.balanceOf(feeSetup.feeCollector);
+        uint256 initialFeeCollectorBalance = tvlFeeSetup.token0.balanceOf(tvlFeeSetup.feeCollector);
 
         // Immediately trigger collection without time passing
-        helper.depositToVault(feeSetup, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT);
+        helper.depositToVault(tvlFeeSetup, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT);
 
-        uint256 finalFeeCollectorBalance = feeSetup.token0.balanceOf(feeSetup.feeCollector);
+        uint256 finalFeeCollectorBalance = tvlFeeSetup.token0.balanceOf(tvlFeeSetup.feeCollector);
 
         // No fees should be collected
         assertEq(finalFeeCollectorBalance, initialFeeCollectorBalance);
     }
 
-    function test_tvlFees_WithdrawalTriggersCollection() public {
-        helper.depositToVault(feeSetup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
+    function test_tvlFees_DepositTriggersCollection() public {
+        uint256 deposit0 = TestConstants.LARGE_AMOUNT;
+        uint256 deposit1 = TestConstants.LARGE_AMOUNT;
+
+        helper.depositToVault(tvlFeeSetup, deposit0, deposit1);
+
         helper.createPositionAroundCurrentTick(
-            feeSetup.vault,
-            feeSetup.executor,
+            tvlFeeSetup.vault,
+            tvlFeeSetup.executor,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
         );
 
-        helper.simulateTimePass(TestConstants.ONE_MONTH);
+        uint256 delay = TestConstants.ONE_MONTH;
+        helper.simulateTimePass(delay);
 
-        uint256 initialFeeCollectorBalance = feeSetup.token0.balanceOf(feeSetup.feeCollector);
+        uint256 initialFeeCollectorBalance0 = tvlFeeSetup.token0.balanceOf(tvlFeeSetup.feeCollector);
+        uint256 initialFeeCollectorBalance1 = tvlFeeSetup.token1.balanceOf(tvlFeeSetup.feeCollector);
 
         // Withdraw should also trigger fee collection
         address recipient = makeAddr("recipient");
-        helper.withdrawFromVault(feeSetup, TestConstants.QUARTER_SCALED_PERCENTAGE, recipient);
+        helper.withdrawFromVault(tvlFeeSetup, TestConstants.QUARTER_SCALED_PERCENTAGE, recipient);
 
-        uint256 finalFeeCollectorBalance = feeSetup.token0.balanceOf(feeSetup.feeCollector);
+        uint256 feeScaledPercent = tvlFeeSetup.vault.tvlFeeScaled().mulDiv(delay, 365 days);
 
-        assertTrue(finalFeeCollectorBalance > initialFeeCollectorBalance);
+        uint256 expectedFee0 = deposit0.mulDiv(feeScaledPercent, MAX_SCALED_PERCENTAGE);
+        uint256 expectedFee1 = deposit1.mulDiv(feeScaledPercent, MAX_SCALED_PERCENTAGE);
+
+        uint256 finalFeeCollectorBalance0 = tvlFeeSetup.token0.balanceOf(tvlFeeSetup.feeCollector);
+        uint256 finalFeeCollectorBalance1 = tvlFeeSetup.token1.balanceOf(tvlFeeSetup.feeCollector);
+
+        assertApproxEqAbs(finalFeeCollectorBalance0, initialFeeCollectorBalance0 + expectedFee0, 1);
+        assertApproxEqAbs(finalFeeCollectorBalance1, initialFeeCollectorBalance1 + expectedFee1, 1);
     }
 
-    function test_tvlFees_EmptyVault_NoCollection() public {
+    function test_tvlFees_WithdrawalTriggersCollection() public {
+        uint256 deposit0 = TestConstants.LARGE_AMOUNT;
+        uint256 deposit1 = TestConstants.LARGE_AMOUNT;
+
+        helper.depositToVault(tvlFeeSetup, deposit0, deposit1);
+        helper.createPositionAroundCurrentTick(
+            tvlFeeSetup.vault,
+            tvlFeeSetup.executor,
+            TestConstants.TICK_RANGE_NARROW,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
+
+        uint256 delay = TestConstants.ONE_MONTH;
+        helper.simulateTimePass(delay);
+
+        uint256 initialFeeCollectorBalance0 = tvlFeeSetup.token0.balanceOf(tvlFeeSetup.feeCollector);
+        uint256 initialFeeCollectorBalance1 = tvlFeeSetup.token0.balanceOf(tvlFeeSetup.feeCollector);
+
+        // Withdraw should also trigger fee collection
+        address recipient = makeAddr("recipient");
+        helper.withdrawFromVault(tvlFeeSetup, TestConstants.QUARTER_SCALED_PERCENTAGE, recipient);
+
+        uint256 feeScaledPercent = tvlFeeSetup.vault.tvlFeeScaled().mulDiv(delay, 365 days);
+
+        uint256 expectedFee0 = deposit0.mulDiv(feeScaledPercent, MAX_SCALED_PERCENTAGE);
+        uint256 expectedFee1 = deposit1.mulDiv(feeScaledPercent, MAX_SCALED_PERCENTAGE);
+
+        uint256 finalFeeCollectorBalance0 = tvlFeeSetup.token0.balanceOf(tvlFeeSetup.feeCollector);
+        uint256 finalFeeCollectorBalance1 = tvlFeeSetup.token1.balanceOf(tvlFeeSetup.feeCollector);
+
+        assertApproxEqAbs(finalFeeCollectorBalance0, initialFeeCollectorBalance0 + expectedFee0, 1);
+        assertApproxEqAbs(finalFeeCollectorBalance1, initialFeeCollectorBalance1 + expectedFee1, 1);
+    }
+
+    function test_tvlAndPerfFees_EmptyVault_NoCollection() public {
         // Don't deposit anything
         helper.simulateTimePass(TestConstants.ONE_YEAR);
 
-        uint256 initialFeeCollectorBalance = feeSetup.token0.balanceOf(feeSetup.feeCollector);
+        uint256 initialFeeCollectorBalance = bothFeeSetup.token0.balanceOf(bothFeeSetup.feeCollector);
 
         // Try to trigger collection on empty vault
-        helper.depositToVault(feeSetup, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT);
+        helper.depositToVault( // ---
+        bothFeeSetup, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT);
 
-        uint256 finalFeeCollectorBalance = feeSetup.token0.balanceOf(feeSetup.feeCollector);
+        uint256 finalFeeCollectorBalance = bothFeeSetup.token0.balanceOf(bothFeeSetup.feeCollector);
 
         // Since vault was empty for the period, no meaningful fees should be collected
         // (the new small deposit doesn't count for the historical period)
@@ -221,16 +278,16 @@ contract UniV3LpVaultFeesTest is Test {
     }
 
     function test_tvlFees_PartialYear_ProportionalCollection() public {
-        helper.depositToVault(feeSetup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
+        helper.depositToVault(tvlFeeSetup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
 
         // Wait for exactly half a year
         helper.simulateTimePass(TestConstants.ONE_YEAR / 2);
 
-        uint256 initialBalance = feeSetup.token0.balanceOf(feeSetup.feeCollector);
+        uint256 initialBalance = tvlFeeSetup.token0.balanceOf(tvlFeeSetup.feeCollector);
 
-        helper.depositToVault(feeSetup, 1, 1);
+        helper.depositToVault(tvlFeeSetup, 1, 1);
 
-        uint256 finalBalance = feeSetup.token0.balanceOf(feeSetup.feeCollector);
+        uint256 finalBalance = tvlFeeSetup.token0.balanceOf(tvlFeeSetup.feeCollector);
         uint256 collectedFee = finalBalance - initialBalance;
 
         // Should collect approximately 2.5% (half of 5% annual)
@@ -243,4 +300,86 @@ contract UniV3LpVaultFeesTest is Test {
             collectedFee, expectedHalfYearFee, TestConstants.TOLERANCE_MEDIUM, "Half-year fee collection mismatch"
         );
     }
+
+    function test_PerfFees_DepositTriggersCollection() public {
+        uint256 initialFeeCollectorBalance0 = perfFeeSetup.token0.balanceOf(perfFeeSetup.feeCollector);
+        uint256 initialFeeCollectorBalance1 = perfFeeSetup.token1.balanceOf(perfFeeSetup.feeCollector);
+
+        uint256 deposit0 = TestConstants.LARGE_AMOUNT;
+        uint256 deposit1 = TestConstants.LARGE_AMOUNT;
+
+        helper.depositToVault(perfFeeSetup, deposit0, deposit1);
+
+        helper.createPositionAroundCurrentTick(
+            perfFeeSetup.vault,
+            perfFeeSetup.executor,
+            TestConstants.TICK_RANGE_NARROW,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
+
+        // Mint tokens to the vault to simulate +100% performance
+        (uint256 tvl0, uint256 tvl1) = perfFeeSetup.vault.rawAssetsValue();
+        perfFeeSetup.token0.mint(address(perfFeeSetup.vault), tvl0);
+        perfFeeSetup.token1.mint(address(perfFeeSetup.vault), tvl1);
+
+        // actual_performance = +100% so perf fee will be vault.performanceFeeScaled()
+        uint256 feeScaledPercent = perfFeeSetup.vault.performanceFeeScaled();
+
+        // Deposit must trigger fee collection
+
+        helper.depositToVault(perfFeeSetup, 1 ether, 1 ether);
+
+        uint256 expectedFee0 = deposit0.mulDiv(feeScaledPercent, MAX_SCALED_PERCENTAGE);
+        uint256 expectedFee1 = deposit1.mulDiv(feeScaledPercent, MAX_SCALED_PERCENTAGE);
+
+        uint256 finalFeeCollectorBalance0 = perfFeeSetup.token0.balanceOf(perfFeeSetup.feeCollector);
+        uint256 finalFeeCollectorBalance1 = perfFeeSetup.token1.balanceOf(perfFeeSetup.feeCollector);
+
+        assertApproxEqAbs(finalFeeCollectorBalance0, initialFeeCollectorBalance0 + expectedFee0, 3);
+        assertApproxEqAbs(finalFeeCollectorBalance1, initialFeeCollectorBalance1 + expectedFee1, 3);
+    }
+
+    function test_PerfFees_WithdrawalTriggersCollection() public {
+        uint256 deposit0 = TestConstants.LARGE_AMOUNT;
+        uint256 deposit1 = TestConstants.LARGE_AMOUNT;
+
+        helper.depositToVault(perfFeeSetup, deposit0, deposit1);
+        helper.createPositionAroundCurrentTick(
+            perfFeeSetup.vault,
+            perfFeeSetup.executor,
+            TestConstants.TICK_RANGE_NARROW,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
+
+        // Mint tokens to the vault to simulate +100% performance
+        (uint256 tvl0, uint256 tvl1) = perfFeeSetup.vault.rawAssetsValue();
+        perfFeeSetup.token0.mint(address(perfFeeSetup.vault), tvl0 / 2);
+        perfFeeSetup.token1.mint(address(perfFeeSetup.vault), tvl1 / 2);
+
+        // actual_performance = +50% so perf fee will be vault.performanceFeeScaled() / 2
+        uint256 feeScaledPercent = perfFeeSetup.vault.performanceFeeScaled() / 2;
+
+        uint256 initialFeeCollectorBalance0 = perfFeeSetup.token0.balanceOf(perfFeeSetup.feeCollector);
+        uint256 initialFeeCollectorBalance1 = perfFeeSetup.token0.balanceOf(perfFeeSetup.feeCollector);
+
+        // Withdraw should also trigger fee collection
+        address recipient = makeAddr("recipient");
+        helper.withdrawFromVault(perfFeeSetup, TestConstants.QUARTER_SCALED_PERCENTAGE, recipient);
+
+        uint256 expectedFee0 = deposit0.mulDiv(feeScaledPercent, MAX_SCALED_PERCENTAGE);
+        uint256 expectedFee1 = deposit1.mulDiv(feeScaledPercent, MAX_SCALED_PERCENTAGE);
+
+        uint256 finalFeeCollectorBalance0 = perfFeeSetup.token0.balanceOf(perfFeeSetup.feeCollector);
+        uint256 finalFeeCollectorBalance1 = perfFeeSetup.token1.balanceOf(perfFeeSetup.feeCollector);
+
+        assertApproxEqAbs(finalFeeCollectorBalance0, initialFeeCollectorBalance0 + expectedFee0, 2);
+        assertApproxEqAbs(finalFeeCollectorBalance1, initialFeeCollectorBalance1 + expectedFee1, 2);
+    }
+    // test_perfFees_MultipleCollections_UpdateTvl0
+    // test_perfFees_NoPerf_NoCollection
+    // test_perfFees_NegPerf_NoCollection
+    // test_perfAndFees_CollectionOnDeposit
+    // test_perfAndFees_CollectionOnWithdraw
 }
