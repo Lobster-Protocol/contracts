@@ -2,13 +2,14 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import {UniV3LpVault, MAX_SCALED_PERCENTAGE} from "../../../src/vaults/UniV3LpVault.sol";
+import {UniV3LpVault, MAX_SCALED_PERCENTAGE, TWAP_SECONDS_AGO} from "../../../src/vaults/UniV3LpVault.sol";
 import {SingleVault} from "../../../src/vaults/SingleVault.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {TestHelper} from "../helpers/TestHelper.sol";
 import {TestConstants} from "../helpers/Constants.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {UniswapUtils} from "../../../src/libraries/uniswapV3/UniswapUtils.sol";
 
 contract UniV3LpVaultDepositTest is Test {
     using Math for uint256;
@@ -209,15 +210,16 @@ contract UniV3LpVaultDepositTest is Test {
 
     function test_deposit_WithFeesAccumulated_CollectsFees() public {
         // Create vault with TVL fees
-        TestHelper.VaultSetup memory feeSetup = helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE, 0);
-        // TestConstants.HIGH_PERF_FEE
+        TestHelper.VaultSetup memory feeSetup = helper.deployVaultWithPool(
+            TestConstants.HIGH_TVL_FEE,
+            TestConstants.HIGH_PERF_FEE
+        );
 
-        // Increase observation cardinality BEFORE any time-sensitive operations
-        feeSetup.pool.increaseObservationCardinalityNext(500);
-
-        helper.depositToVault(feeSetup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
-
-        (uint256 total0, uint256 total1) = feeSetup.vault.netAssetsValue();
+        helper.depositToVault(
+            feeSetup,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
 
         // Create a position to accumulate fees
         helper.createPositionAroundCurrentTick(
@@ -238,28 +240,42 @@ contract UniV3LpVaultDepositTest is Test {
         feeSetup.token0.mint(address(feeSetup.vault), tvl0);
         feeSetup.token1.mint(address(feeSetup.vault), tvl1);
 
-        uint256 initialFeeCollectorBalance0 = feeSetup.token0.balanceOf(feeSetup.feeCollector);
-        uint256 initialFeeCollectorBalance1 = feeSetup.token1.balanceOf(feeSetup.feeCollector);
+        uint256 initialFeeCollectorBalance0 = feeSetup.token0.balanceOf(
+            feeSetup.feeCollector
+        );
+        uint256 initialFeeCollectorBalance1 = feeSetup.token1.balanceOf(
+            feeSetup.feeCollector
+        );
 
         // Check pending performance fee
-        (uint256 expectedPerfFee0, uint256 expectedPerfFee1) = feeSetup.vault.pendingPerformanceFee();
+        (uint256 expectedPerfFee0, uint256 expectedPerfFee1) = feeSetup
+            .vault
+            .pendingPerformanceFee();
 
-        console.log("expectedPerfFee0", expectedPerfFee0);
-        console.log("expectedPerfFee1", expectedPerfFee1);
+        uint256 tvlFeePercent = feeSetup.vault.tvlFeeScaled().mulDiv(
+            delay,
+            365 days
+        );
+
+        (uint256 value0InVault, uint256 value1InVault) = feeSetup
+            .vault
+            .rawAssetsValue();
 
         // Make another deposit - this should trigger fee collection (TVL&PERF)
-        helper.depositToVault(feeSetup, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT);
+        helper.depositToVault(
+            feeSetup,
+            TestConstants.SMALL_AMOUNT,
+            TestConstants.SMALL_AMOUNT
+        );
 
-        uint256 tvlFeePercent = feeSetup.vault.tvlFeeScaled().mulDiv(delay, 365 days);
-
-        console.log("expected tvlFeePercent", tvlFeePercent);
-
-        uint256 expectedTvlFee0 = total0.mulDiv(tvlFeePercent, MAX_SCALED_PERCENTAGE);
-        uint256 expectedTvlFee1 = total1.mulDiv(tvlFeePercent, MAX_SCALED_PERCENTAGE);
-
-        console.log("collector balance0: ", feeSetup.token0.balanceOf(feeSetup.feeCollector));
-        console.log(" expected balance0: ", initialFeeCollectorBalance0 + expectedTvlFee0 + expectedPerfFee0);
-        console.log("expected tvl0", expectedTvlFee0);
+        uint256 expectedTvlFee0 = value0InVault.mulDiv(
+            tvlFeePercent,
+            MAX_SCALED_PERCENTAGE
+        );
+        uint256 expectedTvlFee1 = value1InVault.mulDiv(
+            tvlFeePercent,
+            MAX_SCALED_PERCENTAGE
+        );
 
         // Fee collector should have received fees
         assertApproxEqAbs(
@@ -270,6 +286,42 @@ contract UniV3LpVaultDepositTest is Test {
         assertApproxEqAbs(
             feeSetup.token1.balanceOf(feeSetup.feeCollector),
             initialFeeCollectorBalance1 + expectedTvlFee1 + expectedPerfFee1,
+            1
+        );
+
+        // make sure lastVaultTvl0 have been updated
+        (uint256 final_tvl0, uint256 final_tvl1) = feeSetup
+            .vault
+            .rawAssetsValue();
+        (uint256 tvl_fee0, uint256 tvl_fee1) = feeSetup.vault.pendingTvlFee();
+        final_tvl0 -= tvl_fee0;
+        final_tvl1 -= tvl_fee1;
+
+        // Use a reasonable base amount instead of 1 if there is an overflow
+        uint128 baseAmount = final_tvl1 > type(uint128).max
+            ? uint128(1)
+            : uint128(final_tvl1);
+
+        uint256 twapResult = UniswapUtils.getTwap(
+            feeSetup.pool,
+            TWAP_SECONDS_AGO,
+            baseAmount,
+            true
+        );
+
+        // Scale the result if we used a smaller base amount
+        uint256 twapValueFrom1To0;
+        if (tvl1 > type(uint128).max) {
+            twapValueFrom1To0 = twapResult * tvl1;
+        } else {
+            twapValueFrom1To0 = twapResult;
+        }
+
+        console.log("twap", twapValueFrom1To0);
+
+        assertApproxEqAbs(
+            feeSetup.vault.lastVaultTvl0(),
+            final_tvl0 + twapValueFrom1To0,
             1
         );
     }
