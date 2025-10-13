@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.28;
+
 import "forge-std/Test.sol";
 
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -91,21 +92,9 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     // ========== EVENTS ==========
 
     event Deposit(uint256 indexed assets0, uint256 indexed assets1);
-    event Withdraw(
-        uint256 indexed assets0,
-        uint256 indexed assets1,
-        address indexed receiver
-    );
-    event TvlFeeCollected(
-        uint256 indexed tvlFeeAssets0,
-        uint256 indexed tvlFeeAssets1,
-        address indexed feeCollector
-    );
-    event PerformanceFeeCollected(
-        uint256 indexed assets0,
-        uint256 indexed assets1,
-        address indexed feeCollector
-    );
+    event Withdraw(uint256 indexed assets0, uint256 indexed assets1, address indexed receiver);
+    event TvlFeeCollected(uint256 indexed tvlFeeAssets0, uint256 indexed tvlFeeAssets1, address indexed feeCollector);
+    event PerformanceFeeCollected(uint256 indexed assets0, uint256 indexed assets1, address indexed feeCollector);
 
     // ========== MODIFIERS ==========
 
@@ -126,15 +115,14 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         address initialFeeCollector,
         uint256 initialtvlFee,
         uint256 initialPerformanceFee
-    ) SingleVault(initialOwner, initialExecutor, initialExecutorManager) {
+    )
+        SingleVault(initialOwner, initialExecutor, initialExecutorManager)
+    {
         require(uint160(token0_) < uint160(token1_), "Wrong token 0 & 1 order");
         require(initialFeeCollector != address(0), ZeroAddress());
 
         pool = IUniswapV3PoolMinimal(pool_);
-        require(
-            pool.token0() == token0_ && pool.token1() == token1_,
-            "Token mismatch"
-        );
+        require(pool.token0() == token0_ && pool.token1() == token1_, "Token mismatch");
 
         token0 = IERC20(token0_);
         token1 = IERC20(token1_);
@@ -154,20 +142,10 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
         // Execute the deposit
         if (assets0 > 0) {
-            SafeERC20.safeTransferFrom(
-                token0,
-                msg.sender,
-                address(this),
-                assets0
-            );
+            SafeERC20.safeTransferFrom(token0, msg.sender, address(this), assets0);
         }
         if (assets1 > 0) {
-            SafeERC20.safeTransferFrom(
-                token1,
-                msg.sender,
-                address(this),
-                assets1
-            );
+            SafeERC20.safeTransferFrom(token1, msg.sender, address(this), assets1);
         }
 
         emit Deposit(assets0, assets1);
@@ -181,14 +159,15 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     function withdraw(
         uint256 scaledPercentage,
         address recipient
-    ) external onlyOwner returns (uint256 amount0, uint256 amount1) {
+    )
+        external
+        onlyOwner
+        returns (uint256 amount0, uint256 amount1)
+    {
         if (scaledPercentage == 0) revert ZeroValue();
         if (recipient == address(0)) revert ZeroAddress();
 
-        (
-            uint256 performanceFeeScaledPercent,
-            uint256 newTvlInToken0
-        ) = _pendingRelativePerformanceFeeAndNewTvl();
+        (uint256 performanceFeeScaledPercent, uint256 newTvlInToken0) = _pendingRelativePerformanceFeeAndNewTvl();
 
         console.log("perfFeePercent in withdraw", performanceFeeScaledPercent);
 
@@ -206,9 +185,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     // ========== EXECUTOR FUNCTIONS ==========
 
     /// @notice Mints liquidity to a Uniswap V3 pool
-    function mint(
-        MinimalMintParams memory params
-    )
+    function mint(MinimalMintParams memory params)
         external
         onlyOwnerOrExecutor
         whenNotLocked
@@ -218,49 +195,30 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         // compute the liquidity amount
         uint128 liquidity;
         {
-            (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
-            uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(
-                params.tickLower
-            );
-            uint160 sqrtRatioBX96 = TickMath.getSqrtRatioAtTick(
-                params.tickUpper
-            );
+            (uint160 sqrtPriceX96,,,,,,) = pool.slot0();
+            uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(params.tickLower);
+            uint160 sqrtRatioBX96 = TickMath.getSqrtRatioAtTick(params.tickUpper);
 
             liquidity = LiquidityAmounts.getLiquidityForAmounts(
-                sqrtPriceX96,
-                sqrtRatioAX96,
-                sqrtRatioBX96,
-                params.amount0Desired,
-                params.amount1Desired
+                sqrtPriceX96, sqrtRatioAX96, sqrtRatioBX96, params.amount0Desired, params.amount1Desired
             );
         }
 
-        PoolAddress.PoolKey memory poolKey = PoolAddress.PoolKey({
-            token0: address(token0),
-            token1: address(token1),
-            fee: pool_fee
-        });
+        PoolAddress.PoolKey memory poolKey =
+            PoolAddress.PoolKey({token0: address(token0), token1: address(token1), fee: pool_fee});
 
         (amount0, amount1) = pool.mint(
             address(this),
             params.tickLower,
             params.tickUpper,
             liquidity,
-            abi.encode(
-                MintCallbackData({poolKey: poolKey, payer: address(this)})
-            )
+            abi.encode(MintCallbackData({poolKey: poolKey, payer: address(this)}))
         );
 
-        require(
-            amount0 >= params.amount0Min && amount1 >= params.amount1Min,
-            "Price slippage check"
-        );
+        require(amount0 >= params.amount0Min && amount1 >= params.amount1Min, "Price slippage check");
 
-        Position memory newPosition = Position({
-            upperTick: params.tickUpper,
-            lowerTick: params.tickLower,
-            liquidity: liquidity
-        });
+        Position memory newPosition =
+            Position({upperTick: params.tickUpper, lowerTick: params.tickLower, liquidity: liquidity});
 
         bool isPositionCreation = true;
         for (uint256 i = 0; i < positions.length; i++) {
@@ -300,11 +258,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
             type(uint128).max // collect all amount1
         );
 
-        Position memory refPosition = Position({
-            upperTick: tickUpper,
-            lowerTick: tickLower,
-            liquidity: 0
-        });
+        Position memory refPosition = Position({upperTick: tickUpper, lowerTick: tickLower, liquidity: 0});
 
         // Properly remove from array by swapping with last element
         for (uint256 i = 0; i < positions.length; i++) {
@@ -333,23 +287,12 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         whenNotLocked
         returns (uint128 amount0, uint128 amount1)
     {
-        return
-            pool.collect(
-                address(this),
-                tickLower,
-                tickUpper,
-                amount0Requested,
-                amount1Requested
-            );
+        return pool.collect(address(this), tickLower, tickUpper, amount0Requested, amount1Requested);
     }
 
     // ========== CALLBACK FUNCTION ==========
 
-    function uniswapV3MintCallback(
-        uint256 amount0Owed,
-        uint256 amount1Owed,
-        bytes calldata data
-    ) external {
+    function uniswapV3MintCallback(uint256 amount0Owed, uint256 amount1Owed, bytes calldata data) external {
         MintCallbackData memory decoded = abi.decode(data, (MintCallbackData));
 
         if (msg.sender != address(pool)) revert NotPool();
@@ -361,45 +304,25 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     // ========== VIEW FUNCTIONS ==========
 
-    function totalLpValue()
-        external
-        view
-        returns (uint256 totalAssets0, uint256 totalAssets1)
-    {
-        (uint160 sqrtPriceX96, int24 tickCurrent, , , , , ) = pool.slot0();
+    function totalLpValue() external view returns (uint256 totalAssets0, uint256 totalAssets1) {
+        (uint160 sqrtPriceX96, int24 tickCurrent,,,,,) = pool.slot0();
 
         return _totalLpValue(sqrtPriceX96, tickCurrent);
     }
 
-    function netAssetsValue()
-        external
-        view
-        returns (uint256 totalAssets0, uint256 totalAssets1)
-    {
+    function netAssetsValue() external view returns (uint256 totalAssets0, uint256 totalAssets1) {
         return _netAssetsValue();
     }
 
-    function rawAssetsValue()
-        external
-        view
-        returns (uint256 totalAssets0, uint256 totalAssets1)
-    {
+    function rawAssetsValue() external view returns (uint256 totalAssets0, uint256 totalAssets1) {
         return _rawAssetsValue();
     }
 
-    function pendingTvlFee()
-        external
-        view
-        returns (uint256 amount0, uint256 amount1)
-    {
+    function pendingTvlFee() external view returns (uint256 amount0, uint256 amount1) {
         return _pendingTvlFee();
     }
 
-    function pendingPerformanceFee()
-        external
-        view
-        returns (uint256 amount0, uint256 amount1)
-    {
+    function pendingPerformanceFee() external view returns (uint256 amount0, uint256 amount1) {
         if (performanceFeeScaled == 0) return (0, 0);
 
         (uint256 tvl0, uint256 tvl1) = _rawAssetsValue();
@@ -411,25 +334,20 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
             tvl1 -= tvlFee1;
         }
 
-        (uint256 perfFeePercent, ) = _pendingRelativePerformanceFeeAndNewTvl();
+        (uint256 perfFeePercent,) = _pendingRelativePerformanceFeeAndNewTvl();
         console.log("perfFeePercent in pendingPerformanceFee", perfFeePercent);
         uint256 pendingTvlPercent = _pendingRelativeTvlFee();
 
         // todo: what if perfFeePercent + pendingTvlPercent >= 2*MAX_SCALED_PERCENTAGE ?? (extremely not probable)
         if (pendingTvlPercent + perfFeePercent > MAX_SCALED_PERCENTAGE) {
-            perfFeePercent =
-                pendingTvlPercent +
-                perfFeePercent -
-                MAX_SCALED_PERCENTAGE;
+            perfFeePercent = pendingTvlPercent + perfFeePercent - MAX_SCALED_PERCENTAGE;
         }
 
         amount0 = tvl0.mulDiv(perfFeePercent, MAX_SCALED_PERCENTAGE);
         amount1 = tvl0.mulDiv(perfFeePercent, MAX_SCALED_PERCENTAGE);
     }
 
-    function getPosition(
-        uint256 index
-    ) external view returns (Position memory) {
+    function getPosition(uint256 index) external view returns (Position memory) {
         return positions[index];
     }
 
@@ -442,20 +360,14 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     function _collectFees() internal {
         uint256 tvlToCollect = _pendingRelativeTvlFee();
 
-        (
-            uint256 performanceFeeToCollect,
-            uint256 newTvlInToken0
-        ) = _pendingRelativePerformanceFeeAndNewTvl();
+        (uint256 performanceFeeToCollect, uint256 newTvlInToken0) = _pendingRelativePerformanceFeeAndNewTvl();
 
         if (tvlToCollect == 0 && performanceFeeToCollect == 0) {
             tvlFeeCollectedAt = block.timestamp;
             return;
         }
 
-        console.log(
-            "'''''''''performanceFeeToCollect",
-            performanceFeeToCollect
-        );
+        console.log("'''''''''performanceFeeToCollect", performanceFeeToCollect);
 
         WithdrawParams memory withdrawParams = WithdrawParams({
             userScaledPercent: 0,
@@ -468,9 +380,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         _withdraw(withdrawParams);
     }
 
-    function _withdraw(
-        WithdrawParams memory withdrawParams
-    ) internal returns (uint256 amount0, uint256 amount1) {
+    function _withdraw(WithdrawParams memory withdrawParams) internal returns (uint256 amount0, uint256 amount1) {
         if (withdrawParams.userScaledPercent > MAX_SCALED_PERCENTAGE) {
             revert InvalidScalingFactor();
         }
@@ -489,34 +399,23 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
         uint256 userScaledPercent = withdrawParams.userScaledPercent;
         uint256 tvlFeeScaledPercent = withdrawParams.tvlFeeScaledPercent;
-        uint256 performanceFeeScaledPercent = withdrawParams
-            .performanceFeeScaledPercent;
+        uint256 performanceFeeScaledPercent = withdrawParams.performanceFeeScaledPercent;
 
-        if (
-            tvlFeeScaledPercent + performanceFeeScaledPercent >
-            MAX_SCALED_PERCENTAGE
-        ) {
+        if (tvlFeeScaledPercent + performanceFeeScaledPercent > MAX_SCALED_PERCENTAGE) {
             performanceFeeScaledPercent = 0;
             tvlFeeScaledPercent = MAX_SCALED_PERCENTAGE;
         }
 
-        userScaledPercent = (MAX_SCALED_PERCENTAGE -
-            tvlFeeScaledPercent -
-            performanceFeeScaledPercent).mulDiv(
-                userScaledPercent,
-                MAX_SCALED_PERCENTAGE
-            );
+        userScaledPercent = (MAX_SCALED_PERCENTAGE - tvlFeeScaledPercent - performanceFeeScaledPercent).mulDiv(
+            userScaledPercent, MAX_SCALED_PERCENTAGE
+        );
 
-        uint256 totalToWithdrawScaledPercent = userScaledPercent +
-            tvlFeeScaledPercent +
-            performanceFeeScaledPercent;
+        uint256 totalToWithdrawScaledPercent = userScaledPercent + tvlFeeScaledPercent + performanceFeeScaledPercent;
 
         uint256 initialToken0Balance = token0.balanceOf(address(this));
         uint256 initialToken1Balance = token1.balanceOf(address(this));
 
-        (uint256 withdrawn0, uint256 withdrawn1) = _withdrawFromPositions(
-            totalToWithdrawScaledPercent
-        );
+        (uint256 withdrawn0, uint256 withdrawn1) = _withdrawFromPositions(totalToWithdrawScaledPercent);
 
         // Extract the fees
         // TVL
@@ -524,26 +423,16 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
             console.log("tvlFeeScaledPercent", tvlFeeScaledPercent);
 
             uint256 tvlFeeFromWithdrawn0 = totalToWithdrawScaledPercent > 0
-                ? withdrawn0.mulDiv(
-                    tvlFeeScaledPercent,
-                    totalToWithdrawScaledPercent
-                )
+                ? withdrawn0.mulDiv(tvlFeeScaledPercent, totalToWithdrawScaledPercent)
                 : 0;
             uint256 tvlFeeFromWithdrawn1 = totalToWithdrawScaledPercent > 0
-                ? withdrawn1.mulDiv(
-                    tvlFeeScaledPercent,
-                    totalToWithdrawScaledPercent
-                )
+                ? withdrawn1.mulDiv(tvlFeeScaledPercent, totalToWithdrawScaledPercent)
                 : 0;
 
-            uint256 tvlFeeAssets0 = initialToken0Balance.mulDiv(
-                tvlFeeScaledPercent,
-                MAX_SCALED_PERCENTAGE
-            ) + tvlFeeFromWithdrawn0;
-            uint256 tvlFeeAssets1 = initialToken1Balance.mulDiv(
-                tvlFeeScaledPercent,
-                MAX_SCALED_PERCENTAGE
-            ) + tvlFeeFromWithdrawn1;
+            uint256 tvlFeeAssets0 =
+                initialToken0Balance.mulDiv(tvlFeeScaledPercent, MAX_SCALED_PERCENTAGE) + tvlFeeFromWithdrawn0;
+            uint256 tvlFeeAssets1 =
+                initialToken1Balance.mulDiv(tvlFeeScaledPercent, MAX_SCALED_PERCENTAGE) + tvlFeeFromWithdrawn1;
 
             _safeTransferBoth(feeCollector, tvlFeeAssets0, tvlFeeAssets1);
 
@@ -553,42 +442,25 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         }
         // Performance
         if (performanceFeeScaledPercent > 0) {
-            console.log(
-                "perfFeePercent in _withdraw",
-                performanceFeeScaledPercent
-            );
+            console.log("perfFeePercent in _withdraw", performanceFeeScaledPercent);
 
             uint256 perfFeeFromWithdrawn0 = totalToWithdrawScaledPercent > 0
-                ? withdrawn0.mulDiv(
-                    performanceFeeScaledPercent,
-                    totalToWithdrawScaledPercent
-                )
+                ? withdrawn0.mulDiv(performanceFeeScaledPercent, totalToWithdrawScaledPercent)
                 : 0;
             uint256 perfFeeFromWithdrawn1 = totalToWithdrawScaledPercent > 0
-                ? withdrawn1.mulDiv(
-                    performanceFeeScaledPercent,
-                    totalToWithdrawScaledPercent
-                )
+                ? withdrawn1.mulDiv(performanceFeeScaledPercent, totalToWithdrawScaledPercent)
                 : 0;
 
-            uint256 perfFeeAssets0 = initialToken0Balance.mulDiv(
-                performanceFeeScaledPercent,
-                MAX_SCALED_PERCENTAGE
-            ) + perfFeeFromWithdrawn0;
-            uint256 perfFeeAssets1 = initialToken1Balance.mulDiv(
-                performanceFeeScaledPercent,
-                MAX_SCALED_PERCENTAGE
-            ) + perfFeeFromWithdrawn1;
+            uint256 perfFeeAssets0 =
+                initialToken0Balance.mulDiv(performanceFeeScaledPercent, MAX_SCALED_PERCENTAGE) + perfFeeFromWithdrawn0;
+            uint256 perfFeeAssets1 =
+                initialToken1Balance.mulDiv(performanceFeeScaledPercent, MAX_SCALED_PERCENTAGE) + perfFeeFromWithdrawn1;
 
             // console.log("total0 from _withdraw", token0.balanceOf(withdrawn0);
 
             _safeTransferBoth(feeCollector, perfFeeAssets0, perfFeeAssets1);
 
-            emit PerformanceFeeCollected(
-                perfFeeAssets0,
-                perfFeeAssets1,
-                feeCollector
-            );
+            emit PerformanceFeeCollected(perfFeeAssets0, perfFeeAssets1, feeCollector);
 
             // _safeTransferBoth(
             //     feeCollector,
@@ -607,44 +479,31 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         }
 
         // User Withdraw
-        uint256 fromWithdrawn0 = totalToWithdrawScaledPercent > 0
-            ? withdrawn0.mulDiv(userScaledPercent, totalToWithdrawScaledPercent)
-            : 0;
-        uint256 fromWithdrawn1 = totalToWithdrawScaledPercent > 0
-            ? withdrawn1.mulDiv(userScaledPercent, totalToWithdrawScaledPercent)
-            : 0;
+        uint256 fromWithdrawn0 =
+            totalToWithdrawScaledPercent > 0 ? withdrawn0.mulDiv(userScaledPercent, totalToWithdrawScaledPercent) : 0;
+        uint256 fromWithdrawn1 =
+            totalToWithdrawScaledPercent > 0 ? withdrawn1.mulDiv(userScaledPercent, totalToWithdrawScaledPercent) : 0;
 
-        uint256 assets0ToWithdrawForUser = initialToken0Balance.mulDiv(
-            userScaledPercent,
-            MAX_SCALED_PERCENTAGE
-        ) + fromWithdrawn0;
+        uint256 assets0ToWithdrawForUser =
+            initialToken0Balance.mulDiv(userScaledPercent, MAX_SCALED_PERCENTAGE) + fromWithdrawn0;
 
-        uint256 assets1ToWithdrawForUser = initialToken1Balance.mulDiv(
-            userScaledPercent,
-            MAX_SCALED_PERCENTAGE
-        ) + fromWithdrawn1;
+        uint256 assets1ToWithdrawForUser =
+            initialToken1Balance.mulDiv(userScaledPercent, MAX_SCALED_PERCENTAGE) + fromWithdrawn1;
 
         // Execute user withdraw
-        _safeTransferBoth(
-            withdrawParams.recipient,
-            assets0ToWithdrawForUser,
-            assets1ToWithdrawForUser
-        );
+        _safeTransferBoth(withdrawParams.recipient, assets0ToWithdrawForUser, assets1ToWithdrawForUser);
 
         if (assets0ToWithdrawForUser > 0 || assets1ToWithdrawForUser > 0) {
-            emit Withdraw(
-                assets0ToWithdrawForUser,
-                assets1ToWithdrawForUser,
-                withdrawParams.recipient
-            );
+            emit Withdraw(assets0ToWithdrawForUser, assets1ToWithdrawForUser, withdrawParams.recipient);
         }
 
         return (assets0ToWithdrawForUser, assets1ToWithdrawForUser);
     }
 
-    function _withdrawFromPositions(
-        uint256 scaledPercentage
-    ) private returns (uint256 withdrawn0, uint256 withdrawn1) {
+    function _withdrawFromPositions(uint256 scaledPercentage)
+        private
+        returns (uint256 withdrawn0, uint256 withdrawn1)
+    {
         uint256 positionsCount = positions.length;
         // Create a copy of positions array to iterate safely
         Position[] memory positionsToProcess = new Position[](positionsCount);
@@ -655,18 +514,11 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         for (uint256 i = 0; i < positionsCount; i++) {
             Position memory position = positionsToProcess[i];
 
-            uint128 liquidityToWithdraw = uint128(
-                uint256(position.liquidity).mulDiv(
-                    scaledPercentage,
-                    MAX_SCALED_PERCENTAGE
-                )
-            );
+            uint128 liquidityToWithdraw =
+                uint128(uint256(position.liquidity).mulDiv(scaledPercentage, MAX_SCALED_PERCENTAGE));
 
-            (uint256 amount0Burnt, uint256 amount1Burnt) = burn(
-                position.lowerTick,
-                position.upperTick,
-                liquidityToWithdraw
-            );
+            (uint256 amount0Burnt, uint256 amount1Burnt) =
+                burn(position.lowerTick, position.upperTick, liquidityToWithdraw);
 
             withdrawn0 += amount0Burnt;
             withdrawn1 += amount1Burnt;
@@ -675,11 +527,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     // ========== INTERNAL VIEW FUNCTIONS ==========
 
-    function _pendingTvlFee()
-        internal
-        view
-        returns (uint256 amount0, uint256 amount1)
-    {
+    function _pendingTvlFee() internal view returns (uint256 amount0, uint256 amount1) {
         uint256 pendingRelativeTvlFee = _pendingRelativeTvlFee();
 
         (amount0, amount1) = _rawAssetsValue();
@@ -691,18 +539,14 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     function _pendingRelativeTvlFee() internal view returns (uint256) {
         uint256 deltaT = block.timestamp - tvlFeeCollectedAt;
 
-        return
-            Math.min(
-                tvlFeeScaled.mulDiv(deltaT, 365 days),
-                MAX_SCALED_PERCENTAGE
-            );
+        return Math.min(tvlFeeScaled.mulDiv(deltaT, 365 days), MAX_SCALED_PERCENTAGE);
     }
 
     // returns (0,0) if performanceFeeScaled is null
     function _pendingRelativePerformanceFeeAndNewTvl()
         public
-        view
-        returns (/* internal */ uint256 feePercent, uint256 newTvl0)
+        view /* internal */
+        returns (uint256 feePercent, uint256 newTvl0)
     {
         if (performanceFeeScaled == 0 || lastVaultTvl0 == 0) return (0, 0); // If performance fee is nul, we don't care about the vault tvl in token0
 
@@ -716,16 +560,9 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         }
 
         // Use a reasonable base amount instead of 1 if there is an overflow
-        uint128 baseAmount = tvl1 > type(uint128).max
-            ? uint128(1)
-            : uint128(tvl1);
+        uint128 baseAmount = tvl1 > type(uint128).max ? uint128(1) : uint128(tvl1);
 
-        uint256 twapResult = UniswapUtils.getTwap(
-            pool,
-            TWAP_SECONDS_AGO,
-            baseAmount,
-            true
-        );
+        uint256 twapResult = UniswapUtils.getTwap(pool, TWAP_SECONDS_AGO, baseAmount, true);
 
         // Scale the result if we used a smaller base amount
         uint256 twapValueFrom1To0;
@@ -744,41 +581,22 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         }
 
         //
-        uint256 relativePerfScaledPercent = newTvl0.mulDiv(
-            performanceFeeScaled,
-            lastVaultTvl0
-        );
+        uint256 relativePerfScaledPercent = newTvl0.mulDiv(performanceFeeScaled, lastVaultTvl0);
 
-        console.log(
-            Math.min(relativePerfScaledPercent, MAX_SCALED_PERCENTAGE),
-            newTvl0
-        );
+        console.log(Math.min(relativePerfScaledPercent, MAX_SCALED_PERCENTAGE), newTvl0);
 
-        return (
-            Math.min(relativePerfScaledPercent, MAX_SCALED_PERCENTAGE),
-            newTvl0
-        );
+        return (Math.min(relativePerfScaledPercent, MAX_SCALED_PERCENTAGE), newTvl0);
     }
 
-    function _netAssetsValue()
-        internal
-        view
-        returns (uint256 totalAssets0, uint256 totalAssets1)
-    {
+    function _netAssetsValue() internal view returns (uint256 totalAssets0, uint256 totalAssets1) {
         (totalAssets0, totalAssets1) = _rawAssetsValue();
 
-        (
-            uint256 pendingRelativePerfFee,
-
-        ) = _pendingRelativePerformanceFeeAndNewTvl();
+        (uint256 pendingRelativePerfFee,) = _pendingRelativePerformanceFeeAndNewTvl();
 
         // Apply TVL fee deduction
-        uint256 tokensLeft = _pendingRelativeTvlFee() + pendingRelativePerfFee >
-            MAX_SCALED_PERCENTAGE
+        uint256 tokensLeft = _pendingRelativeTvlFee() + pendingRelativePerfFee > MAX_SCALED_PERCENTAGE
             ? MAX_SCALED_PERCENTAGE
-            : MAX_SCALED_PERCENTAGE -
-                _pendingRelativeTvlFee() -
-                pendingRelativePerfFee;
+            : MAX_SCALED_PERCENTAGE - _pendingRelativeTvlFee() - pendingRelativePerfFee;
 
         totalAssets0 = totalAssets0.mulDiv(tokensLeft, MAX_SCALED_PERCENTAGE);
         totalAssets1 = totalAssets1.mulDiv(tokensLeft, MAX_SCALED_PERCENTAGE);
@@ -786,12 +604,8 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         return (totalAssets0, totalAssets1);
     }
 
-    function _rawAssetsValue()
-        internal
-        view
-        returns (uint256 totalAssets0, uint256 totalAssets1)
-    {
-        (uint160 sqrtPriceX96, int24 tickCurrent, , , , , ) = pool.slot0();
+    function _rawAssetsValue() internal view returns (uint256 totalAssets0, uint256 totalAssets1) {
+        (uint160 sqrtPriceX96, int24 tickCurrent,,,,,) = pool.slot0();
 
         (totalAssets0, totalAssets1) = _totalLpValue(sqrtPriceX96, tickCurrent);
 
@@ -803,19 +617,16 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     function _totalLpValue(
         uint160 sqrtPriceX96,
         int24 currentTick
-    ) internal view returns (uint256 amount0, uint256 amount1) {
-        (
-            uint256 position0,
-            uint256 position1,
-            uint256 uncollected0,
-            uint256 uncollected1
-        ) = _totalLpState(sqrtPriceX96, currentTick);
+    )
+        internal
+        view
+        returns (uint256 amount0, uint256 amount1)
+    {
+        (uint256 position0, uint256 position1, uint256 uncollected0, uint256 uncollected1) =
+            _totalLpState(sqrtPriceX96, currentTick);
 
         // raw values
-        (amount0, amount1) = (
-            position0 + uncollected0,
-            position1 + uncollected1
-        );
+        (amount0, amount1) = (position0 + uncollected0, position1 + uncollected1);
     }
 
     // returns raw value, pending fees must be deduced
@@ -825,21 +636,12 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     )
         private
         view
-        returns (
-            uint256 assets0,
-            uint256 assets1,
-            uint256 uncollected0,
-            uint256 uncollected1
-        )
+        returns (uint256 assets0, uint256 assets1, uint256 uncollected0, uint256 uncollected1)
     {
         for (uint256 i = 0; i < positions.length; i++) {
             Position memory position = positions[i];
 
-            bytes32 positionKey = PositionKey.compute(
-                address(this),
-                position.lowerTick,
-                position.upperTick
-            );
+            bytes32 positionKey = PositionKey.compute(address(this), position.lowerTick, position.upperTick);
 
             (
                 uint128 liquidity,
@@ -849,35 +651,25 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
                 uint128 tokensOwed1
             ) = pool.positions(positionKey);
 
-            (
-                uint256 positiontAssets0,
-                uint256 positiontAssets1
-            ) = _principalPosition(
-                    sqrtPriceX96,
-                    position.lowerTick,
-                    position.upperTick,
-                    liquidity
-                );
+            (uint256 positiontAssets0, uint256 positiontAssets1) =
+                _principalPosition(sqrtPriceX96, position.lowerTick, position.upperTick, liquidity);
 
-            (
-                uint256 uncollectedAssets0,
-                uint256 uncollectedAssets1
-            ) = _feePosition(
-                    pool,
-                    FeeParams({
-                        token0: address(token0),
-                        token1: address(token1),
-                        fee: pool_fee,
-                        tickLower: position.lowerTick,
-                        tickUpper: position.upperTick,
-                        liquidity: liquidity,
-                        positionFeeGrowthInside0LastX128: feeGrowthInside0LastX128,
-                        positionFeeGrowthInside1LastX128: feeGrowthInside1LastX128,
-                        tokensOwed0: tokensOwed0,
-                        tokensOwed1: tokensOwed1
-                    }),
-                    currentTick
-                );
+            (uint256 uncollectedAssets0, uint256 uncollectedAssets1) = _feePosition(
+                pool,
+                FeeParams({
+                    token0: address(token0),
+                    token1: address(token1),
+                    fee: pool_fee,
+                    tickLower: position.lowerTick,
+                    tickUpper: position.upperTick,
+                    liquidity: liquidity,
+                    positionFeeGrowthInside0LastX128: feeGrowthInside0LastX128,
+                    positionFeeGrowthInside1LastX128: feeGrowthInside1LastX128,
+                    tokensOwed0: tokensOwed0,
+                    tokensOwed1: tokensOwed1
+                }),
+                currentTick
+            );
 
             assets0 += positiontAssets0;
             assets1 += positiontAssets1;
@@ -888,21 +680,12 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     // ========== UTILITY FUNCTIONS ==========
 
-    function haveSameRange(
-        Position memory pos1,
-        Position memory pos2
-    ) internal pure returns (bool) {
-        if (
-            pos1.lowerTick == pos2.lowerTick && pos1.upperTick == pos2.upperTick
-        ) return true;
+    function haveSameRange(Position memory pos1, Position memory pos2) internal pure returns (bool) {
+        if (pos1.lowerTick == pos2.lowerTick && pos1.upperTick == pos2.upperTick) return true;
         return false;
     }
 
-    function _safeTransferBoth(
-        address to,
-        uint256 amount0,
-        uint256 amount1
-    ) internal returns (bool transferred) {
+    function _safeTransferBoth(address to, uint256 amount0, uint256 amount1) internal returns (bool transferred) {
         if (amount0 > 0) {
             SafeERC20.safeTransfer(token0, to, amount0);
             transferred = true;

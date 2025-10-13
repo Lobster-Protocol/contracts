@@ -210,16 +210,10 @@ contract UniV3LpVaultDepositTest is Test {
 
     function test_deposit_WithFeesAccumulated_CollectsFees() public {
         // Create vault with TVL fees
-        TestHelper.VaultSetup memory feeSetup = helper.deployVaultWithPool(
-            TestConstants.HIGH_TVL_FEE,
-            TestConstants.HIGH_PERF_FEE
-        );
+        TestHelper.VaultSetup memory feeSetup =
+            helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE, TestConstants.HIGH_PERF_FEE);
 
-        helper.depositToVault(
-            feeSetup,
-            TestConstants.MEDIUM_AMOUNT,
-            TestConstants.MEDIUM_AMOUNT
-        );
+        helper.depositToVault(feeSetup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
 
         // Create a position to accumulate fees
         helper.createPositionAroundCurrentTick(
@@ -240,42 +234,21 @@ contract UniV3LpVaultDepositTest is Test {
         feeSetup.token0.mint(address(feeSetup.vault), tvl0);
         feeSetup.token1.mint(address(feeSetup.vault), tvl1);
 
-        uint256 initialFeeCollectorBalance0 = feeSetup.token0.balanceOf(
-            feeSetup.feeCollector
-        );
-        uint256 initialFeeCollectorBalance1 = feeSetup.token1.balanceOf(
-            feeSetup.feeCollector
-        );
+        uint256 initialFeeCollectorBalance0 = feeSetup.token0.balanceOf(feeSetup.feeCollector);
+        uint256 initialFeeCollectorBalance1 = feeSetup.token1.balanceOf(feeSetup.feeCollector);
 
         // Check pending performance fee
-        (uint256 expectedPerfFee0, uint256 expectedPerfFee1) = feeSetup
-            .vault
-            .pendingPerformanceFee();
+        (uint256 expectedPerfFee0, uint256 expectedPerfFee1) = feeSetup.vault.pendingPerformanceFee();
 
-        uint256 tvlFeePercent = feeSetup.vault.tvlFeeScaled().mulDiv(
-            delay,
-            365 days
-        );
+        uint256 tvlFeePercent = feeSetup.vault.tvlFeeScaled().mulDiv(delay, 365 days);
 
-        (uint256 value0InVault, uint256 value1InVault) = feeSetup
-            .vault
-            .rawAssetsValue();
+        (uint256 value0InVault, uint256 value1InVault) = feeSetup.vault.rawAssetsValue();
 
         // Make another deposit - this should trigger fee collection (TVL&PERF)
-        helper.depositToVault(
-            feeSetup,
-            TestConstants.SMALL_AMOUNT,
-            TestConstants.SMALL_AMOUNT
-        );
+        helper.depositToVault(feeSetup, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT);
 
-        uint256 expectedTvlFee0 = value0InVault.mulDiv(
-            tvlFeePercent,
-            MAX_SCALED_PERCENTAGE
-        );
-        uint256 expectedTvlFee1 = value1InVault.mulDiv(
-            tvlFeePercent,
-            MAX_SCALED_PERCENTAGE
-        );
+        uint256 expectedTvlFee0 = value0InVault.mulDiv(tvlFeePercent, MAX_SCALED_PERCENTAGE);
+        uint256 expectedTvlFee1 = value1InVault.mulDiv(tvlFeePercent, MAX_SCALED_PERCENTAGE);
 
         // Fee collector should have received fees
         assertApproxEqAbs(
@@ -290,24 +263,15 @@ contract UniV3LpVaultDepositTest is Test {
         );
 
         // make sure lastVaultTvl0 have been updated
-        (uint256 final_tvl0, uint256 final_tvl1) = feeSetup
-            .vault
-            .rawAssetsValue();
+        (uint256 final_tvl0, uint256 final_tvl1) = feeSetup.vault.rawAssetsValue();
         (uint256 tvl_fee0, uint256 tvl_fee1) = feeSetup.vault.pendingTvlFee();
         final_tvl0 -= tvl_fee0;
         final_tvl1 -= tvl_fee1;
 
         // Use a reasonable base amount instead of 1 if there is an overflow
-        uint128 baseAmount = final_tvl1 > type(uint128).max
-            ? uint128(1)
-            : uint128(final_tvl1);
+        uint128 baseAmount = final_tvl1 > type(uint128).max ? uint128(1) : uint128(final_tvl1);
 
-        uint256 twapResult = UniswapUtils.getTwap(
-            feeSetup.pool,
-            TWAP_SECONDS_AGO,
-            baseAmount,
-            true
-        );
+        uint256 twapResult = UniswapUtils.getTwap(feeSetup.pool, TWAP_SECONDS_AGO, baseAmount, true);
 
         // Scale the result if we used a smaller base amount
         uint256 twapValueFrom1To0;
@@ -319,11 +283,7 @@ contract UniV3LpVaultDepositTest is Test {
 
         console.log("twap", twapValueFrom1To0);
 
-        assertApproxEqAbs(
-            feeSetup.vault.lastVaultTvl0(),
-            final_tvl0 + twapValueFrom1To0,
-            1
-        );
+        assertApproxEqAbs(feeSetup.vault.lastVaultTvl0(), final_tvl0 + twapValueFrom1To0, 1);
     }
 
     // function test_deposit_NetAssetsValue_UpdatesCorrectly() public {
