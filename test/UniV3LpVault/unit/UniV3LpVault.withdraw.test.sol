@@ -158,7 +158,7 @@ contract UniV3LpVaultWithdrawTest is Test {
         assertTrue(setup.token1.balanceOf(recipient) == withdrawn1);
     }
 
-    function test_withdraw_WithTvlFees_CollectsFeesFirst() public {
+    function test_withdraw_WithTvlFees_CollectsFees() public {
         TestHelper.VaultSetup memory feeSetup =
             helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE, TestConstants.HIGH_PERF_FEE);
 
@@ -185,6 +185,7 @@ contract UniV3LpVaultWithdrawTest is Test {
         feeSetup.vault.withdraw(TestConstants.HALF_SCALED_PERCENTAGE, recipient);
 
         // Fee collector should have received fees
+        // todo: improve the assertiosn to assertEq(balance delta, expected tvl fees + expected perf fee)
         assertTrue(feeSetup.token0.balanceOf(feeSetup.feeCollector) > initialFeeCollectorBalance0);
         assertTrue(feeSetup.token1.balanceOf(feeSetup.feeCollector) > initialFeeCollectorBalance1);
     }
