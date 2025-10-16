@@ -77,7 +77,7 @@ contract UniV3LpVaultFuzzTest is Test {
         );
 
         address recipient = makeAddr("recipient");
-        (uint256 initialNet0,) = setup.vault.netAssetsValue();
+        (uint256 initialNet0, uint256 initialNet1) = setup.vault.netAssetsValue();
 
         vm.prank(setup.owner);
         (uint256 withdrawn0, uint256 withdrawn1) = setup.vault.withdraw(scaledPercentage, recipient);
@@ -86,23 +86,18 @@ contract UniV3LpVaultFuzzTest is Test {
         if (scaledPercentage == TestConstants.MAX_SCALED_PERCENTAGE) {
             // Full withdrawal should leave vault nearly empty
             (uint256 finalNet0, uint256 finalNet1) = setup.vault.netAssetsValue();
-            helper.assertApproxEqual(finalNet0, 0, TestConstants.TOLERANCE_HIGH, "Full withdrawal should empty vault");
-            helper.assertApproxEqual(finalNet1, 0, TestConstants.TOLERANCE_HIGH, "Full withdrawal should empty vault");
+            helper.assertApproxEqual(finalNet0, 0, TestConstants.TOLERANCE_LOW, "Full withdrawal should empty vault");
+            helper.assertApproxEqual(finalNet1, 0, TestConstants.TOLERANCE_LOW, "Full withdrawal should empty vault");
         } else {
             // Partial withdrawal - check proportionality
             assertTrue(withdrawn0 > 0 || withdrawn1 > 0, "Should withdraw something");
 
-            uint256 expectedProportion = scaledPercentage.mulDiv(1e18, TestConstants.MAX_SCALED_PERCENTAGE);
-            if (withdrawn0 > 0 && initialNet0 > 0) {
-                uint256 actualProportion0 = withdrawn0.mulDiv(1e18, initialNet0);
-                // Allow 50% tolerance due to LP position management complexity
-                helper.assertApproxEqual(
-                    actualProportion0,
-                    expectedProportion,
-                    5e17, // 50% tolerance
-                    "Withdrawal proportion0 incorrect"
-                );
-            }
+            uint256 expected0 = scaledPercentage.mulDiv(initialNet0, TestConstants.MAX_SCALED_PERCENTAGE);
+
+            uint256 expected1 = scaledPercentage.mulDiv(initialNet1, TestConstants.MAX_SCALED_PERCENTAGE);
+
+            assertApproxEqAbs(expected0, withdrawn0, 1);
+            assertApproxEqAbs(expected1, withdrawn1, 1);
         }
     }
 
