@@ -187,226 +187,14 @@ contract SingleVaultTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////
-                        EMERGENCY RECOVERY TESTS
-    //////////////////////////////////////////////////////////////*/
-
-    function test_EmergencyRecoverToken() public {
-        uint256 amount = 100 * 1e18;
-        uint256 initialBalance = mockToken.balanceOf(user1);
-
-        vm.prank(owner);
-        vault.emergencyRecoverToken(address(mockToken), user1, amount);
-
-        assertEq(mockToken.balanceOf(user1), initialBalance + amount);
-        assertEq(mockToken.balanceOf(address(vault)), 1000 * 1e18 - amount);
-    }
-
-    function test_EmergencyRecoverToken_RevertIf_NotOwner() public {
-        uint256 amount = 100 * 1e18;
-
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", attacker));
-        vm.prank(attacker);
-        vault.emergencyRecoverToken(address(mockToken), user1, amount);
-    }
-
-    function test_EmergencyRecoverToken_RevertIf_ZeroToken() public {
-        vm.expectRevert(SingleVault.ZeroAddress.selector);
-        vm.prank(owner);
-        vault.emergencyRecoverToken(address(0), user1, 100);
-    }
-
-    function test_EmergencyRecoverToken_RevertIf_ZeroRecipient() public {
-        vm.expectRevert(SingleVault.ZeroAddress.selector);
-        vm.prank(owner);
-        vault.emergencyRecoverToken(address(mockToken), address(0), 100);
-    }
-
-    function test_EmergencyRecoverToken_RevertIf_ZeroAmount() public {
-        vm.expectRevert(SingleVault.ZeroValue.selector);
-        vm.prank(owner);
-        vault.emergencyRecoverToken(address(mockToken), user1, 0);
-    }
-
-    function test_EmergencyRecoverETH() public {
-        uint256 amount = 1 ether;
-        uint256 initialBalance = user1.balance;
-
-        vm.prank(owner);
-        vault.emergencyRecoverETH(user1, amount);
-
-        assertEq(user1.balance, initialBalance + amount);
-        assertEq(address(vault).balance, 10 ether - amount);
-    }
-
-    function test_EmergencyRecoverETH_RevertIf_NotOwner() public {
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", attacker));
-        vm.prank(attacker);
-        vault.emergencyRecoverETH(user1, 1 ether);
-    }
-
-    function test_EmergencyRecoverETH_RevertIf_ZeroRecipient() public {
-        vm.expectRevert(SingleVault.ZeroAddress.selector);
-        vm.prank(owner);
-        vault.emergencyRecoverETH(address(0), 1 ether);
-    }
-
-    function test_EmergencyRecoverETH_RevertIf_ZeroAmount() public {
-        vm.expectRevert(SingleVault.ZeroValue.selector);
-        vm.prank(owner);
-        vault.emergencyRecoverETH(user1, 0);
-    }
-
-    function test_EmergencyRecoverETH_RevertIf_InsufficientBalance() public {
-        uint256 excessiveAmount = 20 ether;
-
-        vm.expectRevert("Insufficient balance");
-        vm.prank(owner);
-        vault.emergencyRecoverETH(user1, excessiveAmount);
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                            CALL FUNCTION TESTS
-    //////////////////////////////////////////////////////////////*/
-
-    function test_Call_Success() public {
-        // Test calling a simple contract function
-        bytes memory data = abi.encodeWithSignature("transfer(address,uint256)", user1, 100);
-
-        vm.prank(owner);
-        bytes memory returnData = vault.call(address(mockToken), 0, data);
-
-        // ERC20 transfer returns true on success
-        bool success = abi.decode(returnData, (bool));
-        assertTrue(success);
-    }
-
-    function test_Call_WithValue() public {
-        // Create a simple contract to test calling with ETH
-        SimpleReceiver receiver = new SimpleReceiver();
-        bytes memory data = abi.encodeWithSignature("receiveETH()");
-
-        vm.prank(owner);
-        vault.call(address(receiver), 1 ether, data);
-
-        assertEq(address(receiver).balance, 1 ether);
-        assertEq(receiver.received(), true);
-    }
-
-    function test_Call_RevertIf_NotOwner() public {
-        bytes memory data = abi.encodeWithSignature("transfer(address,uint256)", user1, 100);
-
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", attacker));
-        vm.prank(attacker);
-        vault.call(address(mockToken), 0, data);
-    }
-
-    function test_Call_PropagatesRevert() public {
-        // Try to call a function that doesn't exist
-        bytes memory data = abi.encodeWithSignature("nonExistentFunction()");
-
-        vm.expectRevert();
-        vm.prank(owner);
-        vault.call(address(mockToken), 0, data);
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                        BATCH CALL FUNCTION TESTS
-    //////////////////////////////////////////////////////////////*/
-
-    function test_BatchCall_Success() public {
-        address[] memory targets = new address[](2);
-        uint256[] memory values = new uint256[](2);
-        bytes[] memory calldatas = new bytes[](2);
-
-        targets[0] = address(mockToken);
-        values[0] = 0;
-        calldatas[0] = abi.encodeWithSignature("transfer(address,uint256)", user1, 50);
-
-        targets[1] = address(mockToken);
-        values[1] = 0;
-        calldatas[1] = abi.encodeWithSignature("transfer(address,uint256)", user2, 50);
-
-        uint256 user1InitialBalance = mockToken.balanceOf(user1);
-        uint256 user2InitialBalance = mockToken.balanceOf(user2);
-
-        vm.prank(owner);
-        vault.batchCall(targets, values, calldatas);
-
-        assertEq(mockToken.balanceOf(user1), user1InitialBalance + 50);
-        assertEq(mockToken.balanceOf(user2), user2InitialBalance + 50);
-    }
-
-    function test_BatchCall_WithETH() public {
-        SimpleReceiver receiver1 = new SimpleReceiver();
-        SimpleReceiver receiver2 = new SimpleReceiver();
-
-        address[] memory targets = new address[](2);
-        uint256[] memory values = new uint256[](2);
-        bytes[] memory calldatas = new bytes[](2);
-
-        targets[0] = address(receiver1);
-        values[0] = 1 ether;
-        calldatas[0] = abi.encodeWithSignature("receiveETH()");
-
-        targets[1] = address(receiver2);
-        values[1] = 2 ether;
-        calldatas[1] = abi.encodeWithSignature("receiveETH()");
-
-        vm.prank(owner);
-        vault.batchCall{value: 3 ether}(targets, values, calldatas);
-
-        assertEq(address(receiver1).balance, 1 ether);
-        assertEq(address(receiver2).balance, 2 ether);
-        assertTrue(receiver1.received());
-        assertTrue(receiver2.received());
-    }
-
-    function test_BatchCall_RevertIf_ArrayLengthMismatch() public {
-        address[] memory targets = new address[](2);
-        uint256[] memory values = new uint256[](1); // Different length
-        bytes[] memory calldatas = new bytes[](2);
-
-        vm.expectRevert("Array length mismatch");
-        vm.prank(owner);
-        vault.batchCall(targets, values, calldatas);
-    }
-
-    function test_BatchCall_RevertIf_NotOwner() public {
-        address[] memory targets = new address[](1);
-        uint256[] memory values = new uint256[](1);
-        bytes[] memory calldatas = new bytes[](1);
-
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", attacker));
-        vm.prank(attacker);
-        vault.batchCall(targets, values, calldatas);
-    }
-
-    function test_BatchCall_RevertsOnFailedCall() public {
-        address[] memory targets = new address[](1);
-        uint256[] memory values = new uint256[](1);
-        bytes[] memory calldatas = new bytes[](1);
-
-        targets[0] = address(mockToken);
-        values[0] = 0;
-        calldatas[0] = abi.encodeWithSignature("nonExistentFunction()");
-
-        vm.expectRevert();
-        vm.prank(owner);
-        vault.batchCall(targets, values, calldatas);
-    }
-
-    /*//////////////////////////////////////////////////////////////
                         RECEIVE FUNCTION TESTS
     //////////////////////////////////////////////////////////////*/
 
     function test_ReceiveETH() public {
-        uint256 initialBalance = address(vault).balance;
-
         vm.prank(user1);
         (bool success,) = payable(address(vault)).call{value: 1 ether}("");
 
-        assertTrue(success);
-        assertEq(address(vault).balance, initialBalance + 1 ether);
+        assertFalse(success);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -452,16 +240,6 @@ contract SingleVaultTest is Test {
         vault.setExecutorManager(newManager);
 
         assertEq(vault.executorManager(), newManager);
-    }
-
-    function testFuzz_EmergencyRecoverETH(uint256 amount) public {
-        amount = bound(amount, 1, address(vault).balance);
-        uint256 initialBalance = user1.balance;
-
-        vm.prank(owner);
-        vault.emergencyRecoverETH(user1, amount);
-
-        assertEq(user1.balance, initialBalance + amount);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -606,53 +384,6 @@ contract SingleVaultTest is Test {
         assertEq(vault.executorManager(), newManager);
     }
 
-    function test_EmergencyFunctions_WorkWhenLocked() public {
-        // Lock the vault
-        vm.prank(owner);
-        vault.lock(true);
-
-        // Emergency functions should still work when locked (owner override)
-        vm.prank(owner);
-        vault.emergencyRecoverToken(address(mockToken), user1, 100);
-
-        vm.prank(owner);
-        vault.emergencyRecoverETH(user1, 1 ether);
-    }
-
-    function test_Call_WorksWhenLocked() public {
-        // Lock the vault
-        vm.prank(owner);
-        vault.lock(true);
-
-        // Call function should still work when locked (owner can always call)
-        bytes memory data = abi.encodeWithSignature("transfer(address,uint256)", user1, 100);
-
-        vm.prank(owner);
-        vault.call(address(mockToken), 0, data);
-    }
-
-    function test_BatchCall_WorksWhenLocked() public {
-        // Lock the vault
-        vm.prank(owner);
-        vault.lock(true);
-
-        // Batch call should still work when locked (owner can always call)
-        address[] memory targets = new address[](1);
-        uint256[] memory values = new uint256[](1);
-        bytes[] memory calldatas = new bytes[](1);
-
-        targets[0] = address(mockToken);
-        values[0] = 0;
-        calldatas[0] = abi.encodeWithSignature("transfer(address,uint256)", user1, 50);
-
-        vm.prank(owner);
-        vault.batchCall(targets, values, calldatas);
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                            LOCK INTEGRATION TESTS
-    //////////////////////////////////////////////////////////////*/
-
     /*//////////////////////////////////////////////////////////////
                             INHERITING CONTRACT TESTS
     //////////////////////////////////////////////////////////////*/
@@ -727,11 +458,7 @@ contract SingleVaultTest is Test {
         vault.setExecutorManager(newManager);
         assertEq(vault.executorManager(), newManager);
 
-        // 3. Emergency recover some tokens
-        vm.prank(owner);
-        vault.emergencyRecoverToken(address(mockToken), user1, 100);
-
-        // 4. Transfer ownership
+        // 3. Transfer ownership
         address newOwner = makeAddr("newOwner");
         vm.prank(owner);
         vault.transferOwnership(newOwner);
@@ -739,9 +466,10 @@ contract SingleVaultTest is Test {
         vault.acceptOwnership();
         assertEq(vault.owner(), newOwner);
 
-        // 5. New owner can perform emergency functions
+        // 5. New owner can lock
         vm.prank(newOwner);
-        vault.emergencyRecoverETH(user2, 1 ether);
+        vault.lock(true);
+        assertEq(vault.locked(), true);
     }
 }
 
@@ -759,21 +487,6 @@ contract TestVault is SingleVault {
 
     function testOnlyOwnerOrExecutor() external onlyOwnerOrExecutor {
         // This function exists solely to test the modifier
-    }
-}
-
-/**
- * @dev Helper contract for testing ETH transfers
- */
-contract SimpleReceiver {
-    bool public received = false;
-
-    function receiveETH() external payable {
-        received = true;
-    }
-
-    receive() external payable {
-        received = true;
     }
 }
 

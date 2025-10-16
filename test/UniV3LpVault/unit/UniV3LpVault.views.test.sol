@@ -332,5 +332,39 @@ contract UniV3LpVaultViewsTest is Test {
         assertEq(pending1, pending1Computed);
     }
 
+    function test_pendingPerformanceFee_noPerfFee() public view {
+        assertEq(0, setup.vault.performanceFeeScaled());
+    }
+
+    function test_pendingPerformanceFee() public {
+        uint256 deposit0 = TestConstants.LARGE_AMOUNT;
+        uint256 deposit1 = TestConstants.LARGE_AMOUNT;
+
+        helper.depositToVault(setup, deposit0, deposit1);
+        helper.createPositionAroundCurrentTick(
+            setup.vault,
+            setup.executor,
+            TestConstants.TICK_RANGE_NARROW,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
+
+        // Mint tokens to the vault to simulate +100% performance
+        (uint256 tvl0, uint256 tvl1) = setup.vault.rawAssetsValue();
+        setup.token0.mint(address(setup.vault), tvl0 / 2);
+        setup.token1.mint(address(setup.vault), tvl1 / 2);
+
+        // actual_performance = +50% so perf fee will be vault.performanceFeeScaled() / 2
+        uint256 feeScaledPercent = setup.vault.performanceFeeScaled() / 2;
+
+        uint256 expectedFee0 = deposit0.mulDiv(feeScaledPercent, MAX_SCALED_PERCENTAGE);
+        uint256 expectedFee1 = deposit1.mulDiv(feeScaledPercent, MAX_SCALED_PERCENTAGE);
+
+        (uint256 fee0, uint256 fee1) = setup.vault.pendingPerformanceFee();
+        assertEq(expectedFee0, fee0);
+        assertEq(expectedFee1, fee1);
+    }
+
     // todo: test positionsLength()
+    // todo: test netAssetsValue with perf and tvl fees (add perf and delay before calling the fct. setup already has fees)
 }
