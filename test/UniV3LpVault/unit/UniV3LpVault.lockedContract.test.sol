@@ -31,7 +31,7 @@ contract UniV3LpVaultLockTest is Test {
         uint256 amount1Desired = TestConstants.MEDIUM_AMOUNT;
 
         vm.expectRevert(SingleVault.ContractLocked.selector);
-        helper.createPosition(setup.vault, setup.executor, tickLower, tickUpper, amount0Desired, amount1Desired);
+        helper.createPosition(setup.vault, setup.allocator, tickLower, tickUpper, amount0Desired, amount1Desired);
     }
 
     function test_burn_locked() public {
@@ -39,7 +39,7 @@ contract UniV3LpVaultLockTest is Test {
         setup.vault.lock(true);
         vm.stopPrank();
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         vm.expectRevert(SingleVault.ContractLocked.selector);
         setup.vault.burn(-1, 1, 10); // random values since we should not even enter the function
     }
@@ -49,7 +49,7 @@ contract UniV3LpVaultLockTest is Test {
         setup.vault.lock(true);
         vm.stopPrank();
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         vm.expectRevert(SingleVault.ContractLocked.selector);
         setup.vault.collect(-1, 1, 10, 10); // random values since we should not even enter the function
     }

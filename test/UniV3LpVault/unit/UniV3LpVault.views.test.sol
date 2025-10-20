@@ -61,7 +61,7 @@ contract UniV3LpVaultViewsTest is Test {
         uint256 amount1Desired = TestConstants.MEDIUM_AMOUNT;
 
         (uint256 amount0, uint256 amount1) = helper.createPositionAroundCurrentTick(
-            setup.vault, setup.executor, TestConstants.TICK_RANGE_NARROW, amount0Desired, amount1Desired
+            setup.vault, setup.allocator, TestConstants.TICK_RANGE_NARROW, amount0Desired, amount1Desired
         );
 
         (uint256 totalLp0, uint256 totalLp1) = setup.vault.totalLpValue();
@@ -80,7 +80,7 @@ contract UniV3LpVaultViewsTest is Test {
 
         helper.depositToVault(setup, totalDeposit0, totalDeposit1);
         helper.createPositionAroundCurrentTick(
-            setup.vault, setup.executor, TestConstants.TICK_RANGE_NARROW, positionAmount0, positionAmount1
+            setup.vault, setup.allocator, TestConstants.TICK_RANGE_NARROW, positionAmount0, positionAmount1
         );
 
         (uint256 netAssets0, uint256 netAssets1) = setup.vault.netAssetsValue();
@@ -117,7 +117,7 @@ contract UniV3LpVaultViewsTest is Test {
         int24 tickLower1 = (desiredTickLower1 / tickSpacing) * tickSpacing;
         int24 tickUpper1 = (desiredTickUpper1 / tickSpacing) * tickSpacing;
 
-        helper.createPosition(setup.vault, setup.executor, tickLower1, tickUpper1, amount1_0, amount1_1);
+        helper.createPosition(setup.vault, setup.allocator, tickLower1, tickUpper1, amount1_0, amount1_1);
 
         int24 tickRange2 = TestConstants.TICK_RANGE_WIDE;
 
@@ -129,7 +129,7 @@ contract UniV3LpVaultViewsTest is Test {
         int24 tickLower2 = (desiredTickLower2 / tickSpacing) * tickSpacing;
         int24 tickUpper2 = (desiredTickUpper2 / tickSpacing) * tickSpacing;
 
-        helper.createPosition(setup.vault, setup.executor, tickLower2, tickUpper2, amount2_0, amount2_1);
+        helper.createPosition(setup.vault, setup.allocator, tickLower2, tickUpper2, amount2_0, amount2_1);
 
         (uint256 totalLp0, uint256 totalLp1) = setup.vault.totalLpValue();
 
@@ -160,7 +160,7 @@ contract UniV3LpVaultViewsTest is Test {
 
         helper.createPosition(
             setup.vault,
-            setup.executor,
+            setup.allocator,
             expectedLowerTick,
             expectedUpperTick,
             TestConstants.MEDIUM_AMOUNT,
@@ -183,7 +183,7 @@ contract UniV3LpVaultViewsTest is Test {
         helper.depositToVault(setup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
         helper.createPositionAroundCurrentTick(
             setup.vault,
-            setup.executor,
+            setup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
@@ -209,14 +209,14 @@ contract UniV3LpVaultViewsTest is Test {
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
-            setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
+            setup.vault, setup.allocator, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
         );
 
         (uint256 initialLp0, uint256 initialLp1) = setup.vault.totalLpValue();
         Position memory initialPosition = setup.vault.getPosition(0);
 
         // Burn half the position
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         setup.vault.burn(tickLower, tickUpper, initialPosition.liquidity / 2);
 
         (uint256 finalLp0, uint256 finalLp1) = setup.vault.totalLpValue();
@@ -234,7 +234,7 @@ contract UniV3LpVaultViewsTest is Test {
         helper.depositToVault(feeSetup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
         helper.createPositionAroundCurrentTick(
             feeSetup.vault,
-            feeSetup.executor,
+            feeSetup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
@@ -262,7 +262,7 @@ contract UniV3LpVaultViewsTest is Test {
         helper.depositToVault(setup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
         helper.createPositionAroundCurrentTick(
             setup.vault,
-            setup.executor,
+            setup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.SMALL_AMOUNT,
             TestConstants.SMALL_AMOUNT
@@ -284,7 +284,7 @@ contract UniV3LpVaultViewsTest is Test {
         helper.depositToVault(setup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
         helper.createPositionAroundCurrentTick(
             setup.vault,
-            setup.executor,
+            setup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.SMALL_AMOUNT,
             TestConstants.SMALL_AMOUNT
@@ -343,7 +343,7 @@ contract UniV3LpVaultViewsTest is Test {
         helper.depositToVault(setup, deposit0, deposit1);
         helper.createPositionAroundCurrentTick(
             setup.vault,
-            setup.executor,
+            setup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT

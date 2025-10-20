@@ -16,7 +16,7 @@ contract SingleVaultTest is Test {
     ERC20Mock public mockToken;
 
     address public owner = makeAddr("owner");
-    address public executor = makeAddr("executor");
+    address public allocator = makeAddr("allocator");
     address public user1 = makeAddr("user1");
     address public user2 = makeAddr("user2");
     address public attacker = makeAddr("attacker");
@@ -27,7 +27,7 @@ contract SingleVaultTest is Test {
                                 EVENTS
     //////////////////////////////////////////////////////////////*/
 
-    event ExecutorUpdated(address indexed newExecutor);
+    event AllocatorUpdated(address indexed newAllocator);
     event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
@@ -39,12 +39,12 @@ contract SingleVaultTest is Test {
         mockToken = new ERC20Mock();
         mockToken.mint(address(this), INITIAL_SUPPLY);
 
-        vault = new SingleVault(owner, executor);
+        vault = new SingleVault(owner, allocator);
 
         // Fund test addresses with ETH
         vm.deal(address(vault), 10 ether);
         vm.deal(owner, 10 ether);
-        vm.deal(executor, 10 ether);
+        vm.deal(allocator, 10 ether);
         vm.deal(user1, 10 ether);
         vm.deal(user2, 10 ether);
         vm.deal(attacker, 10 ether);
@@ -60,18 +60,18 @@ contract SingleVaultTest is Test {
     //////////////////////////////////////////////////////////////*/
 
     function test_Constructor_Success() public {
-        SingleVault newVault = new SingleVault(owner, executor);
+        SingleVault newVault = new SingleVault(owner, allocator);
 
         assertEq(newVault.owner(), owner);
-        assertEq(newVault.executor(), executor);
+        assertEq(newVault.allocator(), allocator);
     }
 
     function test_Constructor_RevertIf_ZeroOwner() public {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
-        new SingleVault(address(0), executor);
+        new SingleVault(address(0), allocator);
     }
 
-    function test_Constructor_RevertIf_ZeroExecutor() public {
+    function test_Constructor_RevertIf_ZeroAllocator() public {
         vm.expectRevert(SingleVault.ZeroAddress.selector);
 
         new SingleVault(owner, address(0));
@@ -81,24 +81,24 @@ contract SingleVaultTest is Test {
                         EXECUTOR MANAGEMENT TESTS
     //////////////////////////////////////////////////////////////*/
 
-    function test_SetExecutor_ByOwner() public {
-        address newExecutor = makeAddr("newExecutor");
+    function test_SetAllocator_ByOwner() public {
+        address newAllocator = makeAddr("newAllocator");
 
         vm.expectEmit(true, false, false, false);
-        emit ExecutorUpdated(newExecutor);
+        emit AllocatorUpdated(newAllocator);
 
         vm.prank(owner);
-        vault.setExecutor(newExecutor);
+        vault.setAllocator(newAllocator);
 
-        assertEq(vault.executor(), newExecutor);
+        assertEq(vault.allocator(), newAllocator);
     }
 
-    function test_SetExecutor_RevertIf_Unauthorized() public {
-        address newExecutor = makeAddr("newExecutor");
+    function test_SetAllocator_RevertIf_Unauthorized() public {
+        address newAllocator = makeAddr("newAllocator");
 
         vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", attacker));
         vm.prank(attacker);
-        vault.setExecutor(newExecutor);
+        vault.setAllocator(newAllocator);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -156,36 +156,36 @@ contract SingleVaultTest is Test {
                             ACCESS CONTROL TESTS
     //////////////////////////////////////////////////////////////*/
 
-    function test_OnlyOwnerOrExecutor_Modifier() public {
+    function test_OnlyOwnerOrAllocator_Modifier() public {
         // This modifier is defined but not used in any function in the contract
         // We can test it by creating a test contract that uses it
-        TestVault testVault = new TestVault(owner, executor);
+        TestVault testVault = new TestVault(owner, allocator);
 
         // Owner should be able to call
         vm.prank(owner);
-        testVault.testOnlyOwnerOrExecutor();
+        testVault.testOnlyOwnerOrAllocator();
 
-        // Executor should be able to call
-        vm.prank(executor);
-        testVault.testOnlyOwnerOrExecutor();
+        // Allocator should be able to call
+        vm.prank(allocator);
+        testVault.testOnlyOwnerOrAllocator();
 
         // Others should not be able to call
         vm.expectRevert();
         vm.prank(attacker);
-        testVault.testOnlyOwnerOrExecutor();
+        testVault.testOnlyOwnerOrAllocator();
     }
 
     /*//////////////////////////////////////////////////////////////
                             FUZZ TESTS
     //////////////////////////////////////////////////////////////*/
 
-    function testFuzz_SetExecutor(address newExecutor) public {
-        vm.assume(newExecutor != address(0));
+    function testFuzz_SetAllocator(address newAllocator) public {
+        vm.assume(newAllocator != address(0));
 
         vm.prank(owner);
-        vault.setExecutor(newExecutor);
+        vault.setAllocator(newAllocator);
 
-        assertEq(vault.executor(), newExecutor);
+        assertEq(vault.allocator(), newAllocator);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -207,9 +207,9 @@ contract SingleVaultTest is Test {
     }
 
     function test_Lock_OnlyOwnerCanLock() public {
-        // Only owner can lock, not executor
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", executor));
-        vm.prank(executor);
+        // Only owner can lock, not allocator
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", allocator));
+        vm.prank(allocator);
         vault.lock(true);
 
         vm.prank(owner);
@@ -238,14 +238,14 @@ contract SingleVaultTest is Test {
         vm.prank(attacker);
         vault.lock(true);
 
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", executor));
-        vm.prank(executor);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", allocator));
+        vm.prank(allocator);
         vault.lock(true);
     }
 
     function test_InheritingContract_UseWhenNotLocked() public {
         // Test that inheriting contracts can properly use the whenNotLocked modifier
-        TestVaultWithLock testVault = new TestVaultWithLock(owner, executor);
+        TestVaultWithLock testVault = new TestVaultWithLock(owner, allocator);
 
         // When not locked, functions with whenNotLocked should work
         vm.prank(owner);
@@ -269,14 +269,14 @@ contract SingleVaultTest is Test {
     }
 
     function test_InheritingContract_CombinedModifiers() public {
-        TestVaultWithLock testVault = new TestVaultWithLock(owner, executor);
+        TestVaultWithLock testVault = new TestVaultWithLock(owner, allocator);
 
-        // Test function that combines onlyOwnerOrExecutor and whenNotLocked
+        // Test function that combines onlyOwnerOrAllocator and whenNotLocked
         vm.prank(owner);
-        testVault.testOnlyOwnerOrExecutorWhenNotLocked();
+        testVault.testOnlyOwnerOrAllocatorWhenNotLocked();
 
-        vm.prank(executor);
-        testVault.testOnlyOwnerOrExecutorWhenNotLocked();
+        vm.prank(allocator);
+        testVault.testOnlyOwnerOrAllocatorWhenNotLocked();
 
         // Lock the vault
         vm.prank(owner);
@@ -285,30 +285,30 @@ contract SingleVaultTest is Test {
         // Should revert due to lock, even for authorized users
         vm.expectRevert(SingleVault.ContractLocked.selector);
         vm.prank(owner);
-        testVault.testOnlyOwnerOrExecutorWhenNotLocked();
+        testVault.testOnlyOwnerOrAllocatorWhenNotLocked();
 
         vm.expectRevert(SingleVault.ContractLocked.selector);
-        vm.prank(executor);
-        testVault.testOnlyOwnerOrExecutorWhenNotLocked();
+        vm.prank(allocator);
+        testVault.testOnlyOwnerOrAllocatorWhenNotLocked();
 
         // Unauthorized users should still be rejected (access control checked first)
         vm.expectRevert();
         vm.prank(attacker);
-        testVault.testOnlyOwnerOrExecutorWhenNotLocked();
+        testVault.testOnlyOwnerOrAllocatorWhenNotLocked();
     }
 
-    function test_SetExecutor_WorksWhenLocked() public {
+    function test_SetAllocator_WorksWhenLocked() public {
         // Lock the vault
         vm.prank(owner);
         vault.lock(true);
 
         // Base SingleVault functions don't use whenNotLocked modifier
         // They should work when locked since the modifier is for inheriting contracts
-        address newExecutor = makeAddr("newExecutor");
+        address newAllocator = makeAddr("newAllocator");
 
         vm.prank(owner);
-        vault.setExecutor(newExecutor);
-        assertEq(vault.executor(), newExecutor);
+        vault.setAllocator(newAllocator);
+        assertEq(vault.allocator(), newAllocator);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -317,7 +317,7 @@ contract SingleVaultTest is Test {
 
     function test_InheritingContract_DepositWithdrawWhenLocked() public {
         // Test a more realistic inheriting contract with deposit/withdraw functions
-        VaultWithDepositWithdraw depositVault = new VaultWithDepositWithdraw(owner, executor);
+        VaultWithDepositWithdraw depositVault = new VaultWithDepositWithdraw(owner, allocator);
 
         // Deposit should work when unlocked
         depositVault.deposit(100e18);
@@ -373,11 +373,11 @@ contract SingleVaultTest is Test {
     //////////////////////////////////////////////////////////////*/
 
     function test_FullWorkflow() public {
-        // 1. Change executor
-        address newExecutor = makeAddr("newExecutor");
+        // 1. Change allocator
+        address newAllocator = makeAddr("newAllocator");
         vm.prank(owner);
-        vault.setExecutor(newExecutor);
-        assertEq(vault.executor(), newExecutor);
+        vault.setAllocator(newAllocator);
+        assertEq(vault.allocator(), newAllocator);
 
         // 2. Transfer ownership
         address newOwner = makeAddr("newOwner");
@@ -395,12 +395,12 @@ contract SingleVaultTest is Test {
 }
 
 /**
- * @dev Helper contract for testing the onlyOwnerOrExecutor modifier
+ * @dev Helper contract for testing the onlyOwnerOrAllocator modifier
  */
 contract TestVault is SingleVault {
-    constructor(address initialOwner, address initialExecutor) SingleVault(initialOwner, initialExecutor) {}
+    constructor(address initialOwner, address initialAllocator) SingleVault(initialOwner, initialAllocator) {}
 
-    function testOnlyOwnerOrExecutor() external onlyOwnerOrExecutor {
+    function testOnlyOwnerOrAllocator() external onlyOwnerOrAllocator {
         // This function exists solely to test the modifier
     }
 }
@@ -413,13 +413,13 @@ contract TestVault is SingleVault {
  * @dev Helper contract for testing the whenNotLocked modifier
  */
 contract TestVaultWithLock is SingleVault {
-    constructor(address initialOwner, address initialExecutor) SingleVault(initialOwner, initialExecutor) {}
+    constructor(address initialOwner, address initialAllocator) SingleVault(initialOwner, initialAllocator) {}
 
     function testWhenNotLocked() external whenNotLocked {
         // This function exists solely to test the modifier
     }
 
-    function testOnlyOwnerOrExecutorWhenNotLocked() external onlyOwnerOrExecutor whenNotLocked {
+    function testOnlyOwnerOrAllocatorWhenNotLocked() external onlyOwnerOrAllocator whenNotLocked {
         // Test combination of modifiers
     }
 }
@@ -428,7 +428,7 @@ contract TestVaultWithLock is SingleVault {
  * @dev More realistic example of inheriting contract with deposit/withdraw
  */
 contract VaultWithDepositWithdraw is SingleVault {
-    constructor(address initialOwner, address initialExecutor) SingleVault(initialOwner, initialExecutor) {}
+    constructor(address initialOwner, address initialAllocator) SingleVault(initialOwner, initialAllocator) {}
 
     function deposit(uint256) external whenNotLocked {}
 

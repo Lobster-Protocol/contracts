@@ -24,7 +24,7 @@ contract UniV3LpVaultConstructorTest is Test {
 
         // Verify all state variables are set correctly
         assertEq(setup.vault.owner(), setup.owner);
-        assertEq(setup.vault.executor(), setup.executor);
+        assertEq(setup.vault.allocator(), setup.allocator);
         assertEq(address(setup.vault.token0()), address(setup.token0));
         assertEq(address(setup.vault.token1()), address(setup.token1));
         assertEq(address(setup.vault.pool()), address(setup.pool));
@@ -36,7 +36,7 @@ contract UniV3LpVaultConstructorTest is Test {
 
     function test_constructor_WrongTokenOrder_Reverts() public {
         address owner = makeAddr("owner");
-        address executor = makeAddr("executor");
+        address allocator = makeAddr("allocator");
         address feeCollector = makeAddr("feeCollector");
 
         MockERC20 token0 = new MockERC20();
@@ -59,7 +59,7 @@ contract UniV3LpVaultConstructorTest is Test {
         vm.expectRevert("Wrong token 0 & 1 order");
         new UniV3LpVault(
             owner,
-            executor,
+            allocator,
             address(token1), // Wrong order
             address(token0), // Wrong order
             address(pool),
@@ -71,7 +71,7 @@ contract UniV3LpVaultConstructorTest is Test {
 
     function test_constructor_ZeroFeeCollector_Reverts() public {
         address owner = makeAddr("owner");
-        address executor = makeAddr("executor");
+        address allocator = makeAddr("allocator");
 
         MockERC20 token0 = new MockERC20();
         MockERC20 token1 = new MockERC20();
@@ -90,7 +90,7 @@ contract UniV3LpVaultConstructorTest is Test {
         vm.expectRevert(SingleVault.ZeroAddress.selector);
         new UniV3LpVault(
             owner,
-            executor,
+            allocator,
             address(token0),
             address(token1),
             address(pool),
@@ -102,7 +102,7 @@ contract UniV3LpVaultConstructorTest is Test {
 
     function test_constructor_TokenMismatch_Reverts() public {
         address owner = makeAddr("owner");
-        address executor = makeAddr("executor");
+        address allocator = makeAddr("allocator");
         address feeCollector = makeAddr("feeCollector");
         MockERC20 token0 = new MockERC20();
         MockERC20 token1 = new MockERC20();
@@ -122,7 +122,7 @@ contract UniV3LpVaultConstructorTest is Test {
         vm.expectRevert("Token mismatch");
         new UniV3LpVault(
             owner,
-            executor,
+            allocator,
             address(wrongToken), // Wrong token
             address(token1),
             address(pool),

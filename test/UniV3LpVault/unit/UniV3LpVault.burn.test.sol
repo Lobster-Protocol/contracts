@@ -34,7 +34,7 @@ contract UniV3LpVaultBurnTest is Test {
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
-            setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
+            setup.vault, setup.allocator, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
         );
 
         Position memory initialPosition = setup.vault.getPosition(0);
@@ -44,7 +44,7 @@ contract UniV3LpVaultBurnTest is Test {
         uint256 initialVaultBalance0 = setup.token0.balanceOf(address(setup.vault));
         uint256 initialVaultBalance1 = setup.token1.balanceOf(address(setup.vault));
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         (uint256 amount0, uint256 amount1) = setup.vault.burn(tickLower, tickUpper, burnAmount);
 
         // Should receive tokens back to vault
@@ -74,13 +74,13 @@ contract UniV3LpVaultBurnTest is Test {
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
-            setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
+            setup.vault, setup.allocator, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
         );
 
         Position memory position = setup.vault.getPosition(0);
         uint128 fullLiquidity = position.liquidity;
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         setup.vault.burn(tickLower, tickUpper, fullLiquidity);
 
         // Position should be removed from array
@@ -109,11 +109,11 @@ contract UniV3LpVaultBurnTest is Test {
         int24 tickUpper2 = (desiredTickUpper2 / tickSpacing) * tickSpacing;
 
         helper.createPosition(
-            setup.vault, setup.executor, tickLower1, tickUpper1, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT
+            setup.vault, setup.allocator, tickLower1, tickUpper1, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT
         );
         helper.createPosition(
             setup.vault,
-            setup.executor,
+            setup.allocator,
             tickLower2,
             tickUpper2,
             TestConstants.MEDIUM_AMOUNT,
@@ -125,7 +125,7 @@ contract UniV3LpVaultBurnTest is Test {
         uint128 liquidity2 = position2.liquidity;
 
         // Burn second position completely
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         setup.vault.burn(tickLower2, tickUpper2, liquidity2);
 
         // First position should still exist
@@ -152,7 +152,7 @@ contract UniV3LpVaultBurnTest is Test {
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
-            setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
+            setup.vault, setup.allocator, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
         );
 
         address unauthorized = makeAddr("unauthorized");
@@ -176,7 +176,7 @@ contract UniV3LpVaultBurnTest is Test {
         int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         vm.expectRevert(bytes("LS"));
         setup.vault.burn(tickLower, tickUpper, 1000);
     }
@@ -195,13 +195,13 @@ contract UniV3LpVaultBurnTest is Test {
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
-            setup.vault, setup.executor, tickLower, tickUpper, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT
+            setup.vault, setup.allocator, tickLower, tickUpper, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT
         );
 
         Position memory position = setup.vault.getPosition(0);
         uint128 excessiveAmount = position.liquidity * 2; // More than available
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         // Should revert or handle gracefully
         vm.expectRevert(bytes("LS"));
         setup.vault.burn(tickLower, tickUpper, excessiveAmount);
@@ -221,7 +221,7 @@ contract UniV3LpVaultBurnTest is Test {
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
-            setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
+            setup.vault, setup.allocator, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
         );
 
         // todo:
@@ -231,7 +231,7 @@ contract UniV3LpVaultBurnTest is Test {
         uint256 initialBalance0 = setup.token0.balanceOf(address(setup.vault));
         uint256 initialBalance1 = setup.token1.balanceOf(address(setup.vault));
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         (uint256 amount0, uint256 amount1) = setup.vault.burn(tickLower, tickUpper, position.liquidity / 4);
 
         // Vault balance should increase (tokens returned from pool)
@@ -253,14 +253,14 @@ contract UniV3LpVaultBurnTest is Test {
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
-            setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
+            setup.vault, setup.allocator, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
         );
 
         (uint256 initialLp0, uint256 initialLp1) = setup.vault.totalLpValue();
 
         Position memory position = setup.vault.getPosition(0);
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         (uint256 amount0, uint256 amount1) = setup.vault.burn(tickLower, tickUpper, position.liquidity / 2);
 
         (uint256 finalLp0, uint256 finalLp1) = setup.vault.totalLpValue();
@@ -286,10 +286,10 @@ contract UniV3LpVaultBurnTest is Test {
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
-            setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
+            setup.vault, setup.allocator, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
         );
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         (uint256 amount0, uint256 amount1) = setup.vault.burn(tickLower, tickUpper, 0);
 
         // Should return zero amounts
@@ -315,12 +315,12 @@ contract UniV3LpVaultBurnTest is Test {
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
-            setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
+            setup.vault, setup.allocator, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
         );
 
         Position memory position = setup.vault.getPosition(0);
 
-        // Owner should be able to burn (onlyOwnerOrExecutor modifier)
+        // Owner should be able to burn (onlyOwnerOrAllocator modifier)
         vm.prank(setup.owner);
         (uint256 amount0, uint256 amount1) = setup.vault.burn(tickLower, tickUpper, position.liquidity / 4);
 

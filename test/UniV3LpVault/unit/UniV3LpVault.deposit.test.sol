@@ -160,7 +160,7 @@ contract UniV3LpVaultDepositTest is Test {
         // Create a position to accumulate fees
         helper.createPositionAroundCurrentTick(
             feeSetup.vault,
-            feeSetup.executor,
+            feeSetup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.SMALL_AMOUNT,
             TestConstants.SMALL_AMOUNT

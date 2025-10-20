@@ -41,7 +41,7 @@ contract UniV3LpVaultFeesTest is Test {
         helper.depositToVault(setup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
         helper.createPositionAroundCurrentTick(
             setup.vault,
-            setup.executor,
+            setup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
@@ -67,7 +67,7 @@ contract UniV3LpVaultFeesTest is Test {
         helper.depositToVault(tvlFeeSetup, depositAmount0, depositAmount1);
         helper.createPositionAroundCurrentTick(
             tvlFeeSetup.vault,
-            tvlFeeSetup.executor,
+            tvlFeeSetup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
@@ -173,7 +173,7 @@ contract UniV3LpVaultFeesTest is Test {
 
         helper.createPositionAroundCurrentTick(
             tvlFeeSetup.vault,
-            tvlFeeSetup.executor,
+            tvlFeeSetup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
@@ -208,7 +208,7 @@ contract UniV3LpVaultFeesTest is Test {
         helper.depositToVault(tvlFeeSetup, deposit0, deposit1);
         helper.createPositionAroundCurrentTick(
             tvlFeeSetup.vault,
-            tvlFeeSetup.executor,
+            tvlFeeSetup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
@@ -313,7 +313,7 @@ contract UniV3LpVaultFeesTest is Test {
 
         helper.createPositionAroundCurrentTick(
             perfFeeSetup.vault,
-            perfFeeSetup.executor,
+            perfFeeSetup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
@@ -364,7 +364,7 @@ contract UniV3LpVaultFeesTest is Test {
         helper.depositToVault(perfFeeSetup, deposit0, deposit1);
         helper.createPositionAroundCurrentTick(
             perfFeeSetup.vault,
-            perfFeeSetup.executor,
+            perfFeeSetup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
@@ -421,7 +421,7 @@ contract UniV3LpVaultFeesTest is Test {
         helper.depositToVault(perfFeeSetup, deposit00, deposit01);
         helper.createPositionAroundCurrentTick(
             perfFeeSetup.vault,
-            perfFeeSetup.executor,
+            perfFeeSetup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
@@ -449,7 +449,7 @@ contract UniV3LpVaultFeesTest is Test {
         helper.depositToVault(perfFeeSetup, deposit10, deposit11);
         helper.createPositionAroundCurrentTick(
             perfFeeSetup.vault,
-            perfFeeSetup.executor,
+            perfFeeSetup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
@@ -502,7 +502,7 @@ contract UniV3LpVaultFeesTest is Test {
         helper.depositToVault(perfFeeSetup, deposit00, deposit01);
         helper.createPositionAroundCurrentTick(
             perfFeeSetup.vault,
-            perfFeeSetup.executor,
+            perfFeeSetup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
@@ -530,7 +530,7 @@ contract UniV3LpVaultFeesTest is Test {
         helper.depositToVault(perfFeeSetup, deposit10, deposit11);
         helper.createPositionAroundCurrentTick(
             perfFeeSetup.vault,
-            perfFeeSetup.executor,
+            perfFeeSetup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
@@ -587,7 +587,7 @@ contract UniV3LpVaultFeesTest is Test {
 
         helper.createPositionAroundCurrentTick(
             perfFeeSetup.vault,
-            perfFeeSetup.executor,
+            perfFeeSetup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
@@ -660,7 +660,7 @@ contract UniV3LpVaultFeesTest is Test {
         helper.depositToVault(perfFeeSetup, deposit0, deposit1);
         helper.createPositionAroundCurrentTick(
             perfFeeSetup.vault,
-            perfFeeSetup.executor,
+            perfFeeSetup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
@@ -716,7 +716,7 @@ contract UniV3LpVaultFeesTest is Test {
         helper.depositToVault(perfFeeSetup, deposit0, deposit1);
         helper.createPositionAroundCurrentTick(
             perfFeeSetup.vault,
-            perfFeeSetup.executor,
+            perfFeeSetup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT

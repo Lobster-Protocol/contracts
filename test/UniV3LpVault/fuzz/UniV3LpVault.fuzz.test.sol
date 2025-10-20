@@ -73,7 +73,7 @@ contract UniV3LpVaultFuzzTest is Test {
         // Use high values to make sure roundings does not lead to 0 for excessively small scaledPercentage values
         helper.depositToVault(setup, 10_000 ether, 10_000 ether);
         helper.createPositionAroundCurrentTick(
-            setup.vault, setup.executor, TestConstants.TICK_RANGE_NARROW, 1000 ether, 1000 ether
+            setup.vault, setup.allocator, TestConstants.TICK_RANGE_NARROW, 1000 ether, 1000 ether
         );
 
         address recipient = makeAddr("recipient");
@@ -133,9 +133,9 @@ contract UniV3LpVaultFuzzTest is Test {
         uint256 initialLp1;
         (initialLp0, initialLp1) = setup.vault.totalLpValue();
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         (uint256 actualAmount0, uint256 actualAmount1) =
-            helper.createPosition(setup.vault, setup.executor, tickLower, tickUpper, amount0Desired, amount1Desired);
+            helper.createPosition(setup.vault, setup.allocator, tickLower, tickUpper, amount0Desired, amount1Desired);
 
         // LP value should increase
         (uint256 finalLp0, uint256 finalLp1) = setup.vault.totalLpValue();
@@ -157,7 +157,7 @@ contract UniV3LpVaultFuzzTest is Test {
         helper.depositToVault(setup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
         helper.createPositionAroundCurrentTick(
             setup.vault,
-            setup.executor,
+            setup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
@@ -181,7 +181,7 @@ contract UniV3LpVaultFuzzTest is Test {
         uint256 initialVaultBalance0 = setup.token0.balanceOf(address(setup.vault));
         uint256 initialVaultBalance1 = setup.token1.balanceOf(address(setup.vault));
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         setup.vault.burn(tickLower, tickUpper, burnAmount);
 
         // Should receive tokens back
@@ -271,7 +271,7 @@ contract UniV3LpVaultFuzzTest is Test {
 
         // Create position
         helper.createPositionAroundCurrentTick(
-            setup.vault, setup.executor, TestConstants.TICK_RANGE_NARROW, mintAmount0, mintAmount1
+            setup.vault, setup.allocator, TestConstants.TICK_RANGE_NARROW, mintAmount0, mintAmount1
         );
 
         // Time passes
@@ -317,7 +317,7 @@ contract UniV3LpVaultFuzzTest is Test {
                 // Mint position
                 try helper.createPositionAroundCurrentTick(
                     setup.vault,
-                    setup.executor,
+                    setup.allocator,
                     TestConstants.TICK_RANGE_NARROW,
                     TestConstants.SMALL_AMOUNT,
                     TestConstants.SMALL_AMOUNT
@@ -325,7 +325,7 @@ contract UniV3LpVaultFuzzTest is Test {
             } else if (op == 1) {
                 // Collect fees
                 (, int24 currentTick,,,,,) = setup.pool.slot0();
-                vm.prank(setup.executor);
+                vm.prank(setup.allocator);
                 try setup.vault.collect(
                     currentTick - TestConstants.TICK_RANGE_NARROW,
                     currentTick + TestConstants.TICK_RANGE_NARROW,
@@ -336,7 +336,7 @@ contract UniV3LpVaultFuzzTest is Test {
                 // Burn position
                 try setup.vault.getPosition(0) returns (Position memory pos) {
                     if (pos.liquidity > 0) {
-                        vm.prank(setup.executor);
+                        vm.prank(setup.allocator);
                         try setup.vault.burn(pos.lowerTick, pos.upperTick, pos.liquidity / 2) {} catch {}
                     }
                 } catch {}

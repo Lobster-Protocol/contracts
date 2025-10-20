@@ -33,13 +33,13 @@ contract UniV3LpVaultCollectTest is Test {
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
-            setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
+            setup.vault, setup.allocator, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
         );
 
         uint256 initialVaultBalance0 = setup.token0.balanceOf(address(setup.vault));
         uint256 initialVaultBalance1 = setup.token1.balanceOf(address(setup.vault));
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         (uint128 amount0, uint128 amount1) = setup.vault.collect(
             tickLower,
             tickUpper,
@@ -70,13 +70,13 @@ contract UniV3LpVaultCollectTest is Test {
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
-            setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
+            setup.vault, setup.allocator, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
         );
 
         uint128 requestedAmount0 = 1000;
         uint128 requestedAmount1 = 2000;
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         (uint128 collected0, uint128 collected1) =
             setup.vault.collect(tickLower, tickUpper, requestedAmount0, requestedAmount1);
 
@@ -99,10 +99,10 @@ contract UniV3LpVaultCollectTest is Test {
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
-            setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
+            setup.vault, setup.allocator, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
         );
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         (uint128 collected0, uint128 collected1) = setup.vault.collect(
             tickLower,
             tickUpper,
@@ -128,7 +128,7 @@ contract UniV3LpVaultCollectTest is Test {
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         // Try to collect from position that doesn't exist
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         (uint128 collected0, uint128 collected1) =
             setup.vault.collect(tickLower, tickUpper, type(uint128).max, type(uint128).max);
 
@@ -151,7 +151,7 @@ contract UniV3LpVaultCollectTest is Test {
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
-            setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
+            setup.vault, setup.allocator, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
         );
 
         address unauthorized = makeAddr("unauthorized");
@@ -175,10 +175,10 @@ contract UniV3LpVaultCollectTest is Test {
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
-            setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
+            setup.vault, setup.allocator, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
         );
 
-        // Owner should be able to collect (onlyOwnerOrExecutor modifier)
+        // Owner should be able to collect (onlyOwnerOrAllocator modifier)
         vm.prank(setup.owner);
         (uint128 collected0, uint128 collected1) =
             setup.vault.collect(tickLower, tickUpper, type(uint128).max, type(uint128).max);
@@ -208,11 +208,11 @@ contract UniV3LpVaultCollectTest is Test {
         int24 tickUpper2 = (desiredTickUpper2 / tickSpacing) * tickSpacing;
 
         helper.createPosition(
-            setup.vault, setup.executor, tickLower1, tickUpper1, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT
+            setup.vault, setup.allocator, tickLower1, tickUpper1, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT
         );
         helper.createPosition(
             setup.vault,
-            setup.executor,
+            setup.allocator,
             tickLower2,
             tickUpper2,
             TestConstants.MEDIUM_AMOUNT,
@@ -223,7 +223,7 @@ contract UniV3LpVaultCollectTest is Test {
         uint256 initialBalance1 = setup.token1.balanceOf(address(setup.vault));
 
         // Collect from first position only
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         setup.vault.collect(tickLower1, tickUpper1, type(uint128).max, type(uint128).max);
 
         // Balance should be >= initial (may have collected fees)
@@ -251,7 +251,7 @@ contract UniV3LpVaultCollectTest is Test {
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
-            setup.vault, setup.executor, tickLower, tickUpper, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT
+            setup.vault, setup.allocator, tickLower, tickUpper, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT
         );
 
         uint256 initialBalance0 = setup.token0.balanceOf(address(setup.vault));
@@ -261,7 +261,7 @@ contract UniV3LpVaultCollectTest is Test {
         // For testing purposes, we simulate time passing
         helper.simulateTimePass(TestConstants.ONE_DAY);
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         (uint128 collected0, uint128 collected1) =
             setup.vault.collect(tickLower, tickUpper, type(uint128).max, type(uint128).max);
 
@@ -287,10 +287,10 @@ contract UniV3LpVaultCollectTest is Test {
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
-            setup.vault, setup.executor, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
+            setup.vault, setup.allocator, tickLower, tickUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
         );
 
-        vm.startPrank(setup.executor);
+        vm.startPrank(setup.allocator);
 
         // First collect
         (uint128 first0, uint128 first1) =

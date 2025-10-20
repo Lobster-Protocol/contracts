@@ -6,11 +6,10 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-// todo: rename executor -> allocator + add fct to update it ?
 /**
  * @title SingleVault
  * @author Elli <nathan@lobster-protocol.com>
- * @notice A vault contract with time-delayed executor updates and approved depositor functionality
+ * @notice A vault contract with time-delayed allocator updates and approved depositor functionality
  * @dev Inherits from Ownable2Step for secure ownership transfers and includes reentrancy protection
  */
 contract SingleVault is Ownable2Step, ReentrancyGuard {
@@ -20,17 +19,17 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
                             STATE VARIABLES
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Current executor address authorized to perform vault operations
-    address public executor;
+    /// @notice Current allocator address authorized to perform vault operations
+    address public allocator;
 
-    /// @notice Wether the owned locked the contract or not. Blocks almost of underlying functions for the executor & executor manager
+    /// @notice Wether the owned locked the contract or not. Blocks almost of underlying functions for the allocator & allocator manager
     bool public locked;
 
     /*//////////////////////////////////////////////////////////////
                                 EVENTS
     //////////////////////////////////////////////////////////////*/
 
-    event ExecutorUpdated(address indexed newExecutor);
+    event AllocatorUpdated(address indexed newAllocator);
     event VaultLocked(bool indexed isLocked);
 
     /*//////////////////////////////////////////////////////////////
@@ -51,8 +50,8 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
         _;
     }
 
-    modifier onlyOwnerOrExecutor() {
-        if (msg.sender != executor && msg.sender != owner()) {
+    modifier onlyOwnerOrAllocator() {
+        if (msg.sender != allocator && msg.sender != owner()) {
             revert Unauthorized();
         }
 
@@ -67,12 +66,12 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
      * @notice Initialize the vault with an initial owner
      * @param initialOwner The address that will become the initial owner
      */
-    constructor(address initialOwner, address initialExecutor) Ownable(initialOwner) {
-        if (initialOwner == address(0) || initialExecutor == address(0)) {
+    constructor(address initialOwner, address initialAllocator) Ownable(initialOwner) {
+        if (initialOwner == address(0) || initialAllocator == address(0)) {
             revert ZeroAddress();
         }
 
-        executor = initialExecutor;
+        allocator = initialAllocator;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -80,12 +79,12 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     /**
-     * @notice Initiate executor update with time delay
-     * @param newExecutor Address of the new executor
+     * @notice Initiate allocator update with time delay
+     * @param newAllocator Address of the new allocator
      */
-    function setExecutor(address newExecutor) external onlyOwner {
-        executor = newExecutor;
-        emit ExecutorUpdated(newExecutor);
+    function setAllocator(address newAllocator) external onlyOwner {
+        allocator = newAllocator;
+        emit AllocatorUpdated(newAllocator);
     }
 
     /*//////////////////////////////////////////////////////////////

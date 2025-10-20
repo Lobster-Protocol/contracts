@@ -23,8 +23,8 @@ contract TestHelper is Test {
         MockERC20 token1;
         IUniswapV3PoolMinimal pool;
         address owner;
-        address executor;
-        address executorManager;
+        address allocator;
+        address allocatorManager;
         address feeCollector;
         IUniswapV3RouterMinimal router;
     }
@@ -43,8 +43,8 @@ contract TestHelper is Test {
     function deployVaultWithPool(uint256 tvlFee, uint256 perfFee) public returns (VaultSetup memory setup) {
         // Create addresses
         setup.owner = makeAddr("vaultOwner");
-        setup.executor = makeAddr("executor");
-        setup.executorManager = makeAddr("executorManager");
+        setup.allocator = makeAddr("allocator");
+        setup.allocatorManager = makeAddr("allocatorManager");
         setup.feeCollector = makeAddr("feeCollector");
 
         // Deploy mock tokens
@@ -126,7 +126,7 @@ contract TestHelper is Test {
         // Deploy vault
         setup.vault = new UniV3LpVault(
             setup.owner,
-            setup.executor,
+            setup.allocator,
             address(setup.token0),
             address(setup.token1),
             address(setup.pool),

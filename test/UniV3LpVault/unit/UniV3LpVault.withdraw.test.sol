@@ -28,7 +28,7 @@ contract UniV3LpVaultWithdrawTest is Test {
         helper.depositToVault(setup, depositAmount0, depositAmount1);
         helper.createPositionAroundCurrentTick(
             setup.vault,
-            setup.executor,
+            setup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
@@ -65,7 +65,7 @@ contract UniV3LpVaultWithdrawTest is Test {
         helper.depositToVault(setup, depositAmount0, depositAmount1);
         helper.createPositionAroundCurrentTick(
             setup.vault,
-            setup.executor,
+            setup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.SMALL_AMOUNT,
             TestConstants.SMALL_AMOUNT
@@ -132,7 +132,7 @@ contract UniV3LpVaultWithdrawTest is Test {
 
         helper.createPositionAroundCurrentTick(
             setup.vault,
-            setup.executor,
+            setup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.SMALL_AMOUNT,
             TestConstants.SMALL_AMOUNT
@@ -140,7 +140,7 @@ contract UniV3LpVaultWithdrawTest is Test {
 
         helper.createPositionAroundCurrentTick(
             setup.vault,
-            setup.executor,
+            setup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
@@ -165,7 +165,7 @@ contract UniV3LpVaultWithdrawTest is Test {
         helper.depositToVault(feeSetup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
         helper.createPositionAroundCurrentTick(
             feeSetup.vault,
-            feeSetup.executor,
+            feeSetup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
@@ -231,7 +231,7 @@ contract UniV3LpVaultWithdrawTest is Test {
         helper.depositToVault(setup, depositAmount0, depositAmount1);
         helper.createPositionAroundCurrentTick(
             setup.vault,
-            setup.executor,
+            setup.allocator,
             TestConstants.TICK_RANGE_MEDIUM,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT

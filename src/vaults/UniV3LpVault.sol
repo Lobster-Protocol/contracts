@@ -106,7 +106,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     constructor(
         address initialOwner,
-        address initialExecutor,
+        address initialAllocator,
         address token0_,
         address token1_,
         address pool_,
@@ -114,7 +114,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         uint256 initialtvlFee,
         uint256 initialPerformanceFee
     )
-        SingleVault(initialOwner, initialExecutor)
+        SingleVault(initialOwner, initialAllocator)
     {
         require(uint160(token0_) < uint160(token1_), "Wrong token 0 & 1 order");
         require(initialFeeCollector != address(0), ZeroAddress());
@@ -183,7 +183,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     /// @notice Mints liquidity to a Uniswap V3 pool
     function mint(MinimalMintParams memory params)
         external
-        onlyOwnerOrExecutor
+        onlyOwnerOrAllocator
         whenNotLocked
         checkDeadline(params.deadline)
         returns (uint256 amount0, uint256 amount1)
@@ -238,7 +238,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         uint128 amount
     )
         public
-        onlyOwnerOrExecutor
+        onlyOwnerOrAllocator
         whenNotLocked
         returns (uint256 amount0, uint256 amount1)
     {
@@ -279,7 +279,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         uint128 amount1Requested
     )
         public
-        onlyOwnerOrExecutor
+        onlyOwnerOrAllocator
         whenNotLocked
         returns (uint128 amount0, uint128 amount1)
     {

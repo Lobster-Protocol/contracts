@@ -31,9 +31,9 @@ contract UniV3LpVaultMintTest is Test {
 
         int24 tickRange = TestConstants.TICK_RANGE_NARROW;
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         (uint256 amount0, uint256 amount1) = helper.createPositionAroundCurrentTick(
-            setup.vault, setup.executor, tickRange, amount0Desired, amount1Desired
+            setup.vault, setup.allocator, tickRange, amount0Desired, amount1Desired
         );
         // Calculate desired ticks
         int24 desiredTickLower = currentTick - tickRange;
@@ -71,10 +71,10 @@ contract UniV3LpVaultMintTest is Test {
         uint256 secondAmount1 = TestConstants.MEDIUM_AMOUNT;
 
         // Create first position
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         int24 tickRange = TestConstants.TICK_RANGE_NARROW;
 
-        helper.createPositionAroundCurrentTick(setup.vault, setup.executor, tickRange, firstAmount0, firstAmount1);
+        helper.createPositionAroundCurrentTick(setup.vault, setup.allocator, tickRange, firstAmount0, firstAmount1);
         // Calculate desired ticks
         int24 desiredTickLower = currentTick - tickRange;
         int24 desiredTickUpper = currentTick + tickRange;
@@ -88,8 +88,8 @@ contract UniV3LpVaultMintTest is Test {
         uint128 initialLiquidity = initialPosition.liquidity;
 
         // Add to same position
-        vm.prank(setup.executor);
-        helper.createPositionAroundCurrentTick(setup.vault, setup.executor, tickRange, secondAmount0, secondAmount1);
+        vm.prank(setup.allocator);
+        helper.createPositionAroundCurrentTick(setup.vault, setup.allocator, tickRange, secondAmount0, secondAmount1);
 
         // Should still have only one position but with more liquidity
         Position memory finalPosition = setup.vault.getPosition(0);
@@ -104,20 +104,20 @@ contract UniV3LpVaultMintTest is Test {
 
     function test_mint_MultipleRanges_Success() public {
         // Create first position
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
 
         int24 tickRange = TestConstants.TICK_RANGE_NARROW;
 
         helper.createPositionAroundCurrentTick(
-            setup.vault, setup.executor, tickRange, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT
+            setup.vault, setup.allocator, tickRange, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT
         );
 
         // Create second position with different range
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         int24 tickRange2 = TestConstants.TICK_RANGE_WIDE;
 
         helper.createPositionAroundCurrentTick(
-            setup.vault, setup.executor, tickRange2, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
+            setup.vault, setup.allocator, tickRange2, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
         );
 
         // Should have two separate positions
@@ -176,7 +176,7 @@ contract UniV3LpVaultMintTest is Test {
             deadline: pastDeadline
         });
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         vm.expectRevert("Transaction too old");
         setup.vault.mint(mintParams);
     }
@@ -206,7 +206,7 @@ contract UniV3LpVaultMintTest is Test {
             deadline: block.timestamp + 1 hours
         });
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         vm.expectRevert("Price slippage check");
         setup.vault.mint(mintParams);
     }
@@ -240,13 +240,13 @@ contract UniV3LpVaultMintTest is Test {
             deadline: block.timestamp + 1 hours
         });
 
-        vm.prank(poorSetup.executor);
+        vm.prank(poorSetup.allocator);
         vm.expectRevert(); // Should revert due to insufficient balance for transfer
         poorSetup.vault.mint(mintParams);
     }
 
     function test_mint_OwnerCanAlsoMint_Success() public {
-        // Owner should also be able to mint (onlyOwnerOrExecutor modifier)
+        // Owner should also be able to mint (onlyOwnerOrAllocator modifier)
         vm.prank(setup.owner);
         (uint256 amount0, uint256 amount1) = helper.createPositionAroundCurrentTick(
             setup.vault,
@@ -317,7 +317,7 @@ contract UniV3LpVaultMintTest is Test {
             deadline: block.timestamp + 1 hours
         });
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         // This might succeed with zero amounts or revert - both are acceptable
         try setup.vault.mint(mintParams) returns (uint256 amount0, uint256 amount1) {
             // If it succeeds, amounts might be zero

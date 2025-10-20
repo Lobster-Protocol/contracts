@@ -62,7 +62,7 @@ contract UniV3LpVaultFullCycleTest is Test {
         uint256 narrow_amount1 = TestConstants.MEDIUM_AMOUNT;
 
         (uint256 actual_narrow_0, uint256 actual_narrow_1) = helper.createPosition(
-            setup.vault, setup.executor, narrow_lower, narrow_upper, narrow_amount0, narrow_amount1
+            setup.vault, setup.allocator, narrow_lower, narrow_upper, narrow_amount0, narrow_amount1
         );
 
         // Position 2: Wide range for base liquidity
@@ -78,7 +78,7 @@ contract UniV3LpVaultFullCycleTest is Test {
         uint256 wide_amount1 = TestConstants.MEDIUM_AMOUNT;
 
         (uint256 actual_wide_0, uint256 actual_wide_1) =
-            helper.createPosition(setup.vault, setup.executor, wide_lower, wide_upper, wide_amount0, wide_amount1);
+            helper.createPosition(setup.vault, setup.allocator, wide_lower, wide_upper, wide_amount0, wide_amount1);
 
         // Verify positions created
         Position memory pos1 = setup.vault.getPosition(0);
@@ -108,7 +108,7 @@ contract UniV3LpVaultFullCycleTest is Test {
         uint256 vaultBalanceBeforeCollect0 = setup.token0.balanceOf(address(setup.vault));
         uint256 vaultBalanceBeforeCollect1 = setup.token1.balanceOf(address(setup.vault));
 
-        vm.startPrank(setup.executor);
+        vm.startPrank(setup.allocator);
         // Collect from both positions
         setup.vault.collect(narrow_lower, narrow_upper, type(uint128).max, type(uint128).max);
         setup.vault.collect(wide_lower, wide_upper, type(uint128).max, type(uint128).max);
@@ -122,7 +122,7 @@ contract UniV3LpVaultFullCycleTest is Test {
         // Burn half of the narrow position
         uint128 burnAmount = pos1.liquidity / 2;
 
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         (uint256 burned0, uint256 burned1) = setup.vault.burn(narrow_lower, narrow_upper, burnAmount);
 
         assertTrue(burned0 > 0 || burned1 > 0);
@@ -138,7 +138,9 @@ contract UniV3LpVaultFullCycleTest is Test {
         uint256 additionalAmount0 = TestConstants.SMALL_AMOUNT;
         uint256 additionalAmount1 = TestConstants.SMALL_AMOUNT;
 
-        helper.createPosition(setup.vault, setup.executor, wide_lower, wide_upper, additionalAmount0, additionalAmount1);
+        helper.createPosition(
+            setup.vault, setup.allocator, wide_lower, wide_upper, additionalAmount0, additionalAmount1
+        );
 
         // Should still have 2 positions, but wide position should have more liquidity
         Position memory pos2_after_addition = setup.vault.getPosition(1);
@@ -296,7 +298,7 @@ contract UniV3LpVaultFullCycleTest is Test {
 
         helper.createPosition(
             setup.vault,
-            setup.executor,
+            setup.allocator,
             initialLower,
             initialUpper,
             TestConstants.MEDIUM_AMOUNT,
@@ -310,7 +312,7 @@ contract UniV3LpVaultFullCycleTest is Test {
         helper.movePoolPriceUp(setup.pool, 10); // Mock 10% price increase
 
         // === Rebalance: Close old position, open new ===
-        vm.prank(setup.executor);
+        vm.prank(setup.allocator);
         setup.vault.burn(initialLower, initialUpper, initialPos.liquidity);
 
         // No positions should exist now
@@ -328,7 +330,7 @@ contract UniV3LpVaultFullCycleTest is Test {
         int24 newUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
         helper.createPosition(
-            setup.vault, setup.executor, newLower, newUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
+            setup.vault, setup.allocator, newLower, newUpper, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT
         );
 
         // Should have one position again
@@ -362,7 +364,7 @@ contract UniV3LpVaultFullCycleTest is Test {
         helper.depositToVault(setup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
         helper.createPositionAroundCurrentTick(
             setup.vault,
-            setup.executor,
+            setup.allocator,
             TestConstants.TICK_RANGE_NARROW,
             TestConstants.SMALL_AMOUNT,
             TestConstants.SMALL_AMOUNT
@@ -375,7 +377,7 @@ contract UniV3LpVaultFullCycleTest is Test {
         helper.depositToVault(setup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
         helper.createPositionAroundCurrentTick(
             setup.vault,
-            setup.executor,
+            setup.allocator,
             TestConstants.TICK_RANGE_WIDE,
             TestConstants.MEDIUM_AMOUNT,
             TestConstants.MEDIUM_AMOUNT
