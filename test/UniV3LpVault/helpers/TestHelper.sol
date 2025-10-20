@@ -127,7 +127,6 @@ contract TestHelper is Test {
         setup.vault = new UniV3LpVault(
             setup.owner,
             setup.executor,
-            setup.executorManager,
             address(setup.token0),
             address(setup.token1),
             address(setup.pool),

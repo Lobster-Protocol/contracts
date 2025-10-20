@@ -25,7 +25,6 @@ contract UniV3LpVaultConstructorTest is Test {
         // Verify all state variables are set correctly
         assertEq(setup.vault.owner(), setup.owner);
         assertEq(setup.vault.executor(), setup.executor);
-        assertEq(setup.vault.executorManager(), setup.executorManager);
         assertEq(address(setup.vault.token0()), address(setup.token0));
         assertEq(address(setup.vault.token1()), address(setup.token1));
         assertEq(address(setup.vault.pool()), address(setup.pool));
@@ -38,7 +37,6 @@ contract UniV3LpVaultConstructorTest is Test {
     function test_constructor_WrongTokenOrder_Reverts() public {
         address owner = makeAddr("owner");
         address executor = makeAddr("executor");
-        address executorManager = makeAddr("executorManager");
         address feeCollector = makeAddr("feeCollector");
 
         MockERC20 token0 = new MockERC20();
@@ -62,7 +60,6 @@ contract UniV3LpVaultConstructorTest is Test {
         new UniV3LpVault(
             owner,
             executor,
-            executorManager,
             address(token1), // Wrong order
             address(token0), // Wrong order
             address(pool),
@@ -75,7 +72,6 @@ contract UniV3LpVaultConstructorTest is Test {
     function test_constructor_ZeroFeeCollector_Reverts() public {
         address owner = makeAddr("owner");
         address executor = makeAddr("executor");
-        address executorManager = makeAddr("executorManager");
 
         MockERC20 token0 = new MockERC20();
         MockERC20 token1 = new MockERC20();
@@ -95,7 +91,6 @@ contract UniV3LpVaultConstructorTest is Test {
         new UniV3LpVault(
             owner,
             executor,
-            executorManager,
             address(token0),
             address(token1),
             address(pool),
@@ -108,9 +103,7 @@ contract UniV3LpVaultConstructorTest is Test {
     function test_constructor_TokenMismatch_Reverts() public {
         address owner = makeAddr("owner");
         address executor = makeAddr("executor");
-        address executorManager = makeAddr("executorManager");
         address feeCollector = makeAddr("feeCollector");
-
         MockERC20 token0 = new MockERC20();
         MockERC20 token1 = new MockERC20();
         MockERC20 wrongToken = new MockERC20();
@@ -130,7 +123,6 @@ contract UniV3LpVaultConstructorTest is Test {
         new UniV3LpVault(
             owner,
             executor,
-            executorManager,
             address(wrongToken), // Wrong token
             address(token1),
             address(pool),

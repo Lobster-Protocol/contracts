@@ -17,7 +17,6 @@ contract UniV3LpVaultFactoryTest is Test {
 
     address public owner = address(0x100);
     address public executor = address(0x200);
-    address public executorManager = address(0x300);
     address public token0 = address(0x400);
     address public token1 = address(0x500);
     IUniswapV3PoolMinimal public pool;
@@ -43,17 +42,17 @@ contract UniV3LpVaultFactoryTest is Test {
 
         // Deploy uniV3 infra
         UniswapV3Infra uniswapV3 = new UniswapV3Infra();
-        (IUniswapV3FactoryMinimal factory, IWETH weth_,,) = uniswapV3.deploy();
+        (IUniswapV3FactoryMinimal uni_v3_factory,,,) = uniswapV3.deploy();
 
         uint160 initialSqrtPriceX96 = 2 ** 96; // = quote = 1:1 if both tokens have the same decimals value
 
         // Deploy pool
-        pool = uniswapV3.createPoolAndInitialize(factory, token0, token1, FEE, initialSqrtPriceX96);
+        pool = uniswapV3.createPoolAndInitialize(uni_v3_factory, token0, token1, FEE, initialSqrtPriceX96);
     }
 
     function test_DeployVault() public {
         address vault = factory.deployVault(
-            salt, owner, executor, executorManager, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
+            salt, owner, executor, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
         );
 
         // Verify vault was deployed
@@ -75,20 +74,18 @@ contract UniV3LpVaultFactoryTest is Test {
         vm.expectEmit(false, true, true, true);
         emit VaultDeployed(address(0), address(pool), address(this), salt);
 
-        factory.deployVault(
-            salt, owner, executor, executorManager, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
-        );
+        factory.deployVault(salt, owner, executor, token0, token1, address(pool), feeCollector, tvlFee, performanceFee);
     }
 
     function test_ComputeVaultAddress() public {
         // Compute the expected address
         address predicted = factory.computeVaultAddress(
-            salt, owner, executor, executorManager, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
+            salt, owner, executor, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
         );
 
         // Deploy the vault
         address deployed = factory.deployVault(
-            salt, owner, executor, executorManager, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
+            salt, owner, executor, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
         );
 
         // Verify they match
@@ -105,11 +102,11 @@ contract UniV3LpVaultFactoryTest is Test {
 
         // Compute addresses on both "chains"
         address predicted1 = factory1.computeVaultAddress(
-            salt, owner, executor, executorManager, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
+            salt, owner, executor, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
         );
 
         address predicted2 = factory2.computeVaultAddress(
-            salt, owner, executor, executorManager, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
+            salt, owner, executor, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
         );
 
         // They should be different because factories have different addresses
@@ -121,15 +118,11 @@ contract UniV3LpVaultFactoryTest is Test {
 
     function test_CannotDeployTwiceWithSameSalt() public {
         // Deploy once
-        factory.deployVault(
-            salt, owner, executor, executorManager, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
-        );
+        factory.deployVault(salt, owner, executor, token0, token1, address(pool), feeCollector, tvlFee, performanceFee);
 
         // Try to deploy again with same salt - should revert
         vm.expectRevert();
-        factory.deployVault(
-            salt, owner, executor, executorManager, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
-        );
+        factory.deployVault(salt, owner, executor, token0, token1, address(pool), feeCollector, tvlFee, performanceFee);
     }
 
     function test_DifferentSaltsDifferentAddresses() public {
@@ -137,11 +130,11 @@ contract UniV3LpVaultFactoryTest is Test {
         bytes32 salt2 = keccak256("salt2");
 
         address vault1 = factory.deployVault(
-            salt1, owner, executor, executorManager, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
+            salt1, owner, executor, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
         );
 
         address vault2 = factory.deployVault(
-            salt2, owner, executor, executorManager, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
+            salt2, owner, executor, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
         );
 
         assertTrue(vault1 != vault2, "Different salts should produce different addresses");
@@ -151,7 +144,7 @@ contract UniV3LpVaultFactoryTest is Test {
 
     function test_DifferentParametersDifferentAddresses() public {
         address vault1 = factory.deployVault(
-            salt, owner, executor, executorManager, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
+            salt, owner, executor, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
         );
 
         // Different salt for second deployment
@@ -162,7 +155,6 @@ contract UniV3LpVaultFactoryTest is Test {
             salt2,
             owner,
             executor,
-            executorManager,
             token0,
             token1,
             address(pool),
@@ -174,7 +166,7 @@ contract UniV3LpVaultFactoryTest is Test {
         assertTrue(vault1 != vault2, "Different parameters should produce different addresses");
     }
 
-    function test_IsVaultReturnsFalseForNonVault() public {
+    function test_IsVaultReturnsFalseForNonVault() public view {
         address randomAddress = address(0x999);
         assertFalse(factory.isVault(randomAddress), "Random address should not be marked as vault");
     }
@@ -186,16 +178,7 @@ contract UniV3LpVaultFactoryTest is Test {
         for (uint256 i = 0; i < numVaults; i++) {
             bytes32 uniqueSalt = keccak256(abi.encodePacked("salt", i));
             vaults[i] = factory.deployVault(
-                uniqueSalt,
-                owner,
-                executor,
-                executorManager,
-                token0,
-                token1,
-                address(pool),
-                feeCollector,
-                tvlFee,
-                performanceFee
+                uniqueSalt, owner, executor, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
             );
 
             assertTrue(factory.isVault(vaults[i]), "Each vault should be marked as deployed");
@@ -215,7 +198,6 @@ contract UniV3LpVaultFactoryTest is Test {
             _salt,
             owner,
             executor,
-            executorManager,
             address(token0),
             address(token1),
             address(pool),
@@ -230,7 +212,6 @@ contract UniV3LpVaultFactoryTest is Test {
             _salt,
             owner,
             executor,
-            executorManager,
             address(token0),
             address(token1),
             address(pool),
@@ -245,7 +226,7 @@ contract UniV3LpVaultFactoryTest is Test {
 
     function test_VaultDeployedWithCorrectParameters() public {
         address vault = factory.deployVault(
-            salt, owner, executor, executorManager, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
+            salt, owner, executor, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
         );
 
         // Verify the vault was deployed

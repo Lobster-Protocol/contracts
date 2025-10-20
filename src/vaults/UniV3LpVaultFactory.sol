@@ -20,7 +20,6 @@ contract UniV3LpVaultFactory {
      * @param salt Unique salt for deterministic address generation
      * @param initialOwner Owner address for the vault
      * @param initialExecutor Executor address for the vault
-     * @param initialExecutorManager Executor manager address
      * @param token0 First token in the Uniswap V3 pool
      * @param token1 Second token in the Uniswap V3 pool
      * @param pool Uniswap V3 pool address
@@ -33,7 +32,6 @@ contract UniV3LpVaultFactory {
         bytes32 salt,
         address initialOwner,
         address initialExecutor,
-        address initialExecutorManager,
         address token0,
         address token1,
         address pool,
@@ -49,7 +47,6 @@ contract UniV3LpVaultFactory {
             new UniV3LpVault{salt: salt}(
                 initialOwner,
                 initialExecutor,
-                initialExecutorManager,
                 token0,
                 token1,
                 pool,
@@ -72,7 +69,6 @@ contract UniV3LpVaultFactory {
      * @param salt Unique salt for deterministic address generation
      * @param initialOwner Owner address for the vault
      * @param initialExecutor Executor address for the vault
-     * @param initialExecutorManager Executor manager address
      * @param token0 First token in the Uniswap V3 pool
      * @param token1 Second token in the Uniswap V3 pool
      * @param pool Uniswap V3 pool address
@@ -85,7 +81,6 @@ contract UniV3LpVaultFactory {
         bytes32 salt,
         address initialOwner,
         address initialExecutor,
-        address initialExecutorManager,
         address token0,
         address token1,
         address pool,
@@ -102,7 +97,6 @@ contract UniV3LpVaultFactory {
             abi.encode(
                 initialOwner,
                 initialExecutor,
-                initialExecutorManager,
                 token0,
                 token1,
                 pool,

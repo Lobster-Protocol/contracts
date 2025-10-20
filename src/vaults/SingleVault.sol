@@ -6,7 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-// todo: rm allocator manager
+// todo: rename executor -> allocator + add fct to update it ?
 /**
  * @title SingleVault
  * @author Elli <nathan@lobster-protocol.com>
@@ -23,9 +23,6 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
     /// @notice Current executor address authorized to perform vault operations
     address public executor;
 
-    /// @notice Manager authorized to update the executor (operated by lobster team)
-    address public executorManager;
-
     /// @notice Wether the owned locked the contract or not. Blocks almost of underlying functions for the executor & executor manager
     bool public locked;
 
@@ -34,7 +31,6 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     event ExecutorUpdated(address indexed newExecutor);
-    event ExecutorManagerUpdated(address indexed newManager);
     event VaultLocked(bool indexed isLocked);
 
     /*//////////////////////////////////////////////////////////////
@@ -56,14 +52,10 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
     }
 
     modifier onlyOwnerOrExecutor() {
-        require(msg.sender == owner() || msg.sender == executor, Unauthorized());
-        _;
-    }
-
-    modifier onlyExecutorManagerOrOwner() {
-        if (msg.sender != executorManager && msg.sender != owner()) {
+        if (msg.sender != executor && msg.sender != owner()) {
             revert Unauthorized();
         }
+
         _;
     }
 
@@ -75,20 +67,13 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
      * @notice Initialize the vault with an initial owner
      * @param initialOwner The address that will become the initial owner
      */
-    constructor(address initialOwner, address initialExecutor, address initialExecutorManager) Ownable(initialOwner) {
-        if (initialOwner == address(0) || initialExecutor == address(0) || initialExecutorManager == address(0)) {
+    constructor(address initialOwner, address initialExecutor) Ownable(initialOwner) {
+        if (initialOwner == address(0) || initialExecutor == address(0)) {
             revert ZeroAddress();
         }
 
         executor = initialExecutor;
-        executorManager = initialExecutorManager;
     }
-
-    /*//////////////////////////////////////////////////////////////
-                        CORE VAULT FUNCTIONS
-    //////////////////////////////////////////////////////////////*/
-
-    // Contract inheriting this one must include a Deposit & Withdraw functions
 
     /*//////////////////////////////////////////////////////////////
                         EXECUTOR MANAGEMENT
@@ -98,7 +83,7 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
      * @notice Initiate executor update with time delay
      * @param newExecutor Address of the new executor
      */
-    function setExecutor(address newExecutor) external onlyExecutorManagerOrOwner {
+    function setExecutor(address newExecutor) external onlyOwner {
         executor = newExecutor;
         emit ExecutorUpdated(newExecutor);
     }
@@ -106,16 +91,6 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
     /*//////////////////////////////////////////////////////////////
                     EXECUTOR MANAGER MANAGEMENT
     //////////////////////////////////////////////////////////////*/
-
-    /**
-     * @notice Initiate executor manager update with time delay
-     * @param newExecutorManager Address of the new executor manager
-     */
-    function setExecutorManager(address newExecutorManager) external onlyOwner {
-        executorManager = newExecutorManager;
-
-        emit ExecutorManagerUpdated(newExecutorManager);
-    }
 
     function lock(bool isLocked) external onlyOwner {
         locked = isLocked;

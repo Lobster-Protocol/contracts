@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.28;
 
-import "forge-std/Test.sol";
-
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {SingleVault} from "./SingleVault.sol";
@@ -109,7 +107,6 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     constructor(
         address initialOwner,
         address initialExecutor,
-        address initialExecutorManager,
         address token0_,
         address token1_,
         address pool_,
@@ -117,7 +114,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         uint256 initialtvlFee,
         uint256 initialPerformanceFee
     )
-        SingleVault(initialOwner, initialExecutor, initialExecutorManager)
+        SingleVault(initialOwner, initialExecutor)
     {
         require(uint160(token0_) < uint160(token1_), "Wrong token 0 & 1 order");
         require(initialFeeCollector != address(0), ZeroAddress());
