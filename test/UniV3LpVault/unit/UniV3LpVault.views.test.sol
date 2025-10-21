@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import {UniV3LpVault, Position, MAX_SCALED_PERCENTAGE} from "../../../src/vaults/UniV3LpVault.sol";
+import {Position, MAX_SCALED_PERCENTAGE} from "../../../src/vaults/UniV3LpVault.sol";
 import {TestHelper} from "../helpers/TestHelper.sol";
 import {TestConstants} from "../helpers/Constants.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
@@ -269,15 +269,15 @@ contract UniV3LpVaultViewsTest is Test {
         );
 
         // Multiple calls should return consistent values
-        (uint256 lp0_1, uint256 lp1_1) = setup.vault.totalLpValue();
-        (uint256 lp0_2, uint256 lp1_2) = setup.vault.totalLpValue();
-        (uint256 net0_1, uint256 net1_1) = setup.vault.netAssetsValue();
-        (uint256 net0_2, uint256 net1_2) = setup.vault.netAssetsValue();
+        (uint256 lp0x1, uint256 lp1x1) = setup.vault.totalLpValue();
+        (uint256 lp0x2, uint256 lp1x2) = setup.vault.totalLpValue();
+        (uint256 net0x1, uint256 net1x1) = setup.vault.netAssetsValue();
+        (uint256 net0x2, uint256 net1x2) = setup.vault.netAssetsValue();
 
-        assertEq(lp0_1, lp0_2);
-        assertEq(lp1_1, lp1_2);
-        assertEq(net0_1, net0_2);
-        assertEq(net1_1, net1_2);
+        assertEq(lp0x1, lp0x2);
+        assertEq(lp1x1, lp1x2);
+        assertEq(net0x1, net0x2);
+        assertEq(net1x1, net1x2);
     }
 
     function test_views_AfterFullWithdrawal_ReturnsZero() public {

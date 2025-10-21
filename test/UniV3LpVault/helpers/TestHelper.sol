@@ -9,7 +9,6 @@ import {UniswapV3Infra} from "../../Mocks/uniswapV3/UniswapV3Infra.sol";
 import {IUniswapV3FactoryMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
 import {IUniswapV3RouterMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3RouterMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
-import {IWETH} from "../../../src/interfaces/IWETH.sol";
 import {TestConstants} from "./Constants.sol";
 import {UniswapV3Proxy} from "../../../src/UniswapV3Proxy.sol";
 import {MintParams} from "src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
@@ -106,8 +105,7 @@ contract TestHelper is Test {
         });
         mintProxy.mint(mintParams);
 
-        IUniswapV3RouterMinimal.ExactInputSingleParams memory swapParams = IUniswapV3RouterMinimal
-            .ExactInputSingleParams({
+        IUniswapV3RouterMinimal.ExactInputSingleParams memory swapParams = IUniswapV3RouterMinimal.ExactInputSingleParams({
             tokenIn: address(setup.token0),
             tokenOut: address(setup.token1),
             fee: setup.pool.fee(),
@@ -177,7 +175,7 @@ contract TestHelper is Test {
         public
         returns (uint256 amount0, uint256 amount1)
     {
-        IUniswapV3PoolMinimal pool = vault.pool();
+        IUniswapV3PoolMinimal pool = vault.POOL();
         (, int24 currentTick,,,,,) = pool.slot0();
         int24 tickSpacing = pool.tickSpacing();
 
@@ -205,6 +203,7 @@ contract TestHelper is Test {
         // This would require implementing swaps through a mock router
         // For now, we'll use vm.mockCall for testing purposes
         (, int24 currentTick,,,,,) = pool.slot0();
+        // forge-lint: disable-next-line(unsafe-typecast)
         int24 newTick = currentTick + int24(int256(percentage * 100)); // Simplified calculation
 
         vm.mockCall(

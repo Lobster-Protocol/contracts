@@ -25,9 +25,9 @@ contract UniV3LpVaultConstructorTest is Test {
         // Verify all state variables are set correctly
         assertEq(setup.vault.owner(), setup.owner);
         assertEq(setup.vault.allocator(), setup.allocator);
-        assertEq(address(setup.vault.token0()), address(setup.token0));
-        assertEq(address(setup.vault.token1()), address(setup.token1));
-        assertEq(address(setup.vault.pool()), address(setup.pool));
+        assertEq(address(setup.vault.TOKEN0()), address(setup.token0));
+        assertEq(address(setup.vault.TOKEN1()), address(setup.token1));
+        assertEq(address(setup.vault.POOL()), address(setup.pool));
         assertEq(setup.vault.tvlFeeCollectedAt(), 1209601);
         assertEq(setup.vault.tvlFeeScaled(), TestConstants.HIGH_TVL_FEE);
         assertEq(setup.vault.performanceFeeScaled(), TestConstants.HIGH_PERF_FEE);

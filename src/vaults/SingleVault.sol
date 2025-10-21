@@ -46,14 +46,12 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     modifier whenNotLocked() {
-        if (locked) revert ContractLocked();
+        _whenNotLocked();
         _;
     }
 
     modifier onlyOwnerOrAllocator() {
-        if (msg.sender != allocator && msg.sender != owner()) {
-            revert Unauthorized();
-        }
+        _onlyOwnerOrAllocator();
 
         _;
     }
@@ -103,5 +101,19 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
 
     fallback() external payable {
         revert("ETH not accepted");
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                                HELPERS
+    //////////////////////////////////////////////////////////////*/
+
+    function _onlyOwnerOrAllocator() internal view {
+        if (msg.sender != allocator && msg.sender != owner()) {
+            revert Unauthorized();
+        }
+    }
+
+    function _whenNotLocked() internal view {
+        if (locked) revert ContractLocked();
     }
 }

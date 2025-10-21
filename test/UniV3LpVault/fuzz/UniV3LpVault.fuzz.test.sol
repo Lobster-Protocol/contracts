@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {UniV3LpVault, Position, MAX_SCALED_PERCENTAGE} from "../../../src/vaults/UniV3LpVault.sol";
+import {Position, MAX_SCALED_PERCENTAGE} from "../../../src/vaults/UniV3LpVault.sol";
 import {TestHelper} from "../helpers/TestHelper.sol";
 import {TestConstants} from "../helpers/Constants.sol";
 
@@ -119,7 +119,10 @@ contract UniV3LpVaultFuzzTest is Test {
 
         (, int24 currentTick,,,,,) = setup.pool.slot0();
         int24 tickSpacing = setup.pool.tickSpacing();
-        int24 tickRange = int24(TestConstants.TICK_RANGE_NARROW * int256(tickRangeMultiplier));
+        // forge-lint: disable-next-line(unsafe-typecast)
+        int256 result = TestConstants.TICK_RANGE_NARROW * int256(tickRangeMultiplier);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        int24 tickRange = int24(result);
 
         // Calculate desired ticks
         int24 desiredTickLower = currentTick - tickRange;
@@ -303,7 +306,13 @@ contract UniV3LpVaultFuzzTest is Test {
         );
     }
 
-    function testFuzz_invariant_NetAssetsNonNegative(uint256 amount0, uint256 amount1, uint256 operations) public {
+    function testFuzz_invariant_NetAssetsNonNegative(
+        uint256 amount0,
+        uint256 amount1,
+        uint256 operations
+    )
+        public
+    {
         amount0 = bound(amount0, TestConstants.SMALL_AMOUNT, TestConstants.LARGE_AMOUNT);
         amount1 = bound(amount1, TestConstants.SMALL_AMOUNT, TestConstants.LARGE_AMOUNT);
         operations = bound(operations, 1, 5);
@@ -321,17 +330,20 @@ contract UniV3LpVaultFuzzTest is Test {
                     TestConstants.TICK_RANGE_NARROW,
                     TestConstants.SMALL_AMOUNT,
                     TestConstants.SMALL_AMOUNT
-                ) {} catch {}
+                ) {}
+                    catch {}
             } else if (op == 1) {
                 // Collect fees
                 (, int24 currentTick,,,,,) = setup.pool.slot0();
                 vm.prank(setup.allocator);
-                try setup.vault.collect(
-                    currentTick - TestConstants.TICK_RANGE_NARROW,
-                    currentTick + TestConstants.TICK_RANGE_NARROW,
-                    type(uint128).max,
-                    type(uint128).max
-                ) {} catch {}
+                try setup.vault
+                    .collect(
+                        currentTick - TestConstants.TICK_RANGE_NARROW,
+                        currentTick + TestConstants.TICK_RANGE_NARROW,
+                        type(uint128).max,
+                        type(uint128).max
+                    ) {}
+                    catch {}
             } else {
                 // Burn position
                 try setup.vault.getPosition(0) returns (Position memory pos) {

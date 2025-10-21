@@ -40,7 +40,7 @@ contract UniV3LpVaultMintTest is Test {
         int24 desiredTickUpper = currentTick + tickRange;
 
         // Align ticks to tick spacing (round down for lower, round up for upper)
-        int24 tickSpacing = setup.vault.pool().tickSpacing();
+        int24 tickSpacing = setup.vault.POOL().tickSpacing();
         int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
@@ -80,7 +80,7 @@ contract UniV3LpVaultMintTest is Test {
         int24 desiredTickUpper = currentTick + tickRange;
 
         // Align ticks to tick spacing (round down for lower, round up for upper)
-        int24 tickSpacing = setup.vault.pool().tickSpacing();
+        int24 tickSpacing = setup.vault.POOL().tickSpacing();
         int24 tickLower = (desiredTickLower / tickSpacing) * tickSpacing;
         int24 tickUpper = (desiredTickUpper / tickSpacing) * tickSpacing;
 
@@ -263,9 +263,7 @@ contract UniV3LpVaultMintTest is Test {
     function test_uniswapV3MintCallback_NotPool_Reverts() public {
         MintCallbackData memory callbackData = MintCallbackData({
             poolKey: PoolAddress.PoolKey({
-                token0: address(setup.token0),
-                token1: address(setup.token1),
-                fee: TestConstants.POOL_FEE
+                token0: address(setup.token0), token1: address(setup.token1), fee: TestConstants.POOL_FEE
             }),
             payer: address(setup.vault)
         });
@@ -280,9 +278,7 @@ contract UniV3LpVaultMintTest is Test {
     function test_uniswapV3MintCallback_WrongPayer_Reverts() public {
         MintCallbackData memory callbackData = MintCallbackData({
             poolKey: PoolAddress.PoolKey({
-                token0: address(setup.token0),
-                token1: address(setup.token1),
-                fee: TestConstants.POOL_FEE
+                token0: address(setup.token0), token1: address(setup.token1), fee: TestConstants.POOL_FEE
             }),
             payer: makeAddr("wrongPayer")
         });

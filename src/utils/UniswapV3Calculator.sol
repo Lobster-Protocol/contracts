@@ -67,13 +67,13 @@ contract UniswapV3Calculator {
         (uint256 poolFeeGrowthInside0LastX128, uint256 poolFeeGrowthInside1LastX128) =
             _getFeeGrowthInside(pool, tickCurrent, feeParams.tickLower, feeParams.tickUpper);
 
-        fee0 = (poolFeeGrowthInside0LastX128 - feeParams.positionFeeGrowthInside0LastX128).mulDiv(
-            feeParams.liquidity, Q128
-        ) + feeParams.tokensOwed0;
+        fee0 =
+            (poolFeeGrowthInside0LastX128 - feeParams.positionFeeGrowthInside0LastX128)
+                .mulDiv(feeParams.liquidity, Q128) + feeParams.tokensOwed0;
 
-        fee1 = (poolFeeGrowthInside1LastX128 - feeParams.positionFeeGrowthInside1LastX128).mulDiv(
-            feeParams.liquidity, Q128
-        ) + feeParams.tokensOwed1;
+        fee1 =
+            (poolFeeGrowthInside1LastX128 - feeParams.positionFeeGrowthInside1LastX128)
+                .mulDiv(feeParams.liquidity, Q128) + feeParams.tokensOwed1;
     }
 
     /**

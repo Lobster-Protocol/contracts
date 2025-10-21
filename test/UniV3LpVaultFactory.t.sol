@@ -7,7 +7,6 @@ import "../src/vaults/UniV3LpVault.sol";
 import {MockERC20} from "./Mocks/MockERC20.sol";
 import {UniswapV3Infra} from "./Mocks/uniswapV3/UniswapV3Infra.sol";
 import {IUniswapV3FactoryMinimal} from "../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
-import {IWETH} from "../src/interfaces/IWETH.sol";
 import {IUniswapV3PoolMinimal} from "../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 
 uint24 constant FEE = 3000; // 0.3%

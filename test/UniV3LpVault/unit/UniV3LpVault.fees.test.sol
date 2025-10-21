@@ -244,7 +244,10 @@ contract UniV3LpVaultFeesTest is Test {
 
         // Try to trigger collection on empty vault
         helper.depositToVault( // ---
-        bothFeeSetup, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT);
+            bothFeeSetup,
+            TestConstants.SMALL_AMOUNT,
+            TestConstants.SMALL_AMOUNT
+        );
 
         uint256 finalFeeCollectorBalance = bothFeeSetup.token0.balanceOf(bothFeeSetup.feeCollector);
 
@@ -292,10 +295,11 @@ contract UniV3LpVaultFeesTest is Test {
         uint256 collectedFee = finalBalance - initialBalance;
 
         // Should collect approximately 2.5% (half of 5% annual)
-        uint256 expectedHalfYearFee = TestConstants.MEDIUM_AMOUNT.mulDiv(
-            TestConstants.HIGH_TVL_FEE,
-            TestConstants.MAX_SCALED_PERCENTAGE * 2 // Half of annual rate
-        );
+        uint256 expectedHalfYearFee = TestConstants.MEDIUM_AMOUNT
+            .mulDiv(
+                TestConstants.HIGH_TVL_FEE,
+                TestConstants.MAX_SCALED_PERCENTAGE * 2 // Half of annual rate
+            );
 
         helper.assertApproxEqual(
             collectedFee, expectedHalfYearFee, TestConstants.TOLERANCE_MEDIUM, "Half-year fee collection mismatch"
@@ -341,9 +345,13 @@ contract UniV3LpVaultFeesTest is Test {
 
         // make sure vault.lastVaultTvl0() have been updated
         // works since no perf since last deposit & no tvl fee
-        (uint256 final_tvl0, uint256 final_tvl1) = perfFeeSetup.vault.rawAssetsValue();
+        (uint256 finalTvl0, uint256 finalTvl1) = perfFeeSetup.vault.rawAssetsValue();
         // Use a reasonable base amount instead of 1 if there is an overflow
-        uint128 baseAmount = final_tvl1 > type(uint128).max ? uint128(1) : uint128(final_tvl1);
+        uint128 baseAmount = uint128(1);
+        if (finalTvl1 <= type(uint128).max) {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            baseAmount = uint128(finalTvl1);
+        }
 
         uint256 twapResult = UniswapUtils.getTwap(perfFeeSetup.pool, TWAP_SECONDS_AGO, baseAmount, true);
 
@@ -354,7 +362,7 @@ contract UniV3LpVaultFeesTest is Test {
         } else {
             twapValueFrom1To0 = twapResult;
         }
-        assertEq(perfFeeSetup.vault.lastVaultTvl0(), final_tvl0 + twapValueFrom1To0);
+        assertEq(perfFeeSetup.vault.lastVaultTvl0(), finalTvl0 + twapValueFrom1To0);
     }
 
     function test_PerfFees_WithdrawalTriggersCollection() public {
@@ -396,10 +404,14 @@ contract UniV3LpVaultFeesTest is Test {
 
         // make sure vault.lastVaultTvl0() have been updated
         // works since no perf since last deposit & no tvl fee
-        (uint256 final_tvl0, uint256 final_tvl1) = perfFeeSetup.vault.rawAssetsValue();
+        (uint256 finalTvl0, uint256 finalTvl1) = perfFeeSetup.vault.rawAssetsValue();
 
         // Use a reasonable base amount instead of 1 if there is an overflow
-        uint128 baseAmount = final_tvl1 > type(uint128).max ? uint128(1) : uint128(final_tvl1);
+        uint128 baseAmount = uint128(1);
+        if (finalTvl1 <= type(uint128).max) {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            baseAmount = uint128(finalTvl1);
+        }
 
         uint256 twapResult = UniswapUtils.getTwap(perfFeeSetup.pool, TWAP_SECONDS_AGO, baseAmount, true);
 
@@ -411,7 +423,7 @@ contract UniV3LpVaultFeesTest is Test {
             twapValueFrom1To0 = twapResult;
         }
 
-        assertEq(perfFeeSetup.vault.lastVaultTvl0(), final_tvl0 + twapValueFrom1To0);
+        assertEq(perfFeeSetup.vault.lastVaultTvl0(), finalTvl0 + twapValueFrom1To0);
     }
 
     function test_perfFees_MultipleCollectionsWithFullWithdraw() public {
@@ -479,9 +491,13 @@ contract UniV3LpVaultFeesTest is Test {
 
         // make sure vault.lastVaultTvl0() have been updated
         // works since no perf since last deposit & no tvl fee
-        (uint256 final_tvl0, uint256 final_tvl1) = perfFeeSetup.vault.rawAssetsValue();
+        (uint256 finalTvl0, uint256 finalTvl1) = perfFeeSetup.vault.rawAssetsValue();
         // Use a reasonable base amount instead of 1 if there is an overflow
-        uint128 baseAmount = final_tvl1 > type(uint128).max ? uint128(1) : uint128(final_tvl1);
+        uint128 baseAmount = uint128(1);
+        if (finalTvl1 <= type(uint128).max) {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            baseAmount = uint128(finalTvl1);
+        }
 
         uint256 twapResult = UniswapUtils.getTwap(perfFeeSetup.pool, TWAP_SECONDS_AGO, baseAmount, true);
 
@@ -492,7 +508,7 @@ contract UniV3LpVaultFeesTest is Test {
         } else {
             twapValueFrom1To0 = twapResult;
         }
-        assertEq(perfFeeSetup.vault.lastVaultTvl0(), final_tvl0 + twapValueFrom1To0);
+        assertEq(perfFeeSetup.vault.lastVaultTvl0(), finalTvl0 + twapValueFrom1To0);
     }
 
     function test_perfFees_MultipleCollections() public {
@@ -560,10 +576,14 @@ contract UniV3LpVaultFeesTest is Test {
 
         // make sure vault.lastVaultTvl0() have been updated
         // works since no perf since last deposit & no tvl fee
-        (uint256 final_tvl0, uint256 final_tvl1) = perfFeeSetup.vault.rawAssetsValue();
+        (uint256 finalTvl0, uint256 finalTvl1) = perfFeeSetup.vault.rawAssetsValue();
         // Use a reasonable base amount instead of 1 if there is an overflow
-        uint128 baseAmount = final_tvl1 > type(uint128).max ? uint128(1) : uint128(final_tvl1);
-
+        // casting to 'uint128' is safe because of ternary operator
+        uint128 baseAmount = uint128(1);
+        if (finalTvl1 <= type(uint128).max) {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            baseAmount = uint128(finalTvl1);
+        }
         uint256 twapResult = UniswapUtils.getTwap(perfFeeSetup.pool, TWAP_SECONDS_AGO, baseAmount, true);
 
         // Scale the result if we used a smaller base amount
@@ -573,7 +593,7 @@ contract UniV3LpVaultFeesTest is Test {
         } else {
             twapValueFrom1To0 = twapResult;
         }
-        assertEq(perfFeeSetup.vault.lastVaultTvl0(), final_tvl0 + twapValueFrom1To0);
+        assertEq(perfFeeSetup.vault.lastVaultTvl0(), finalTvl0 + twapValueFrom1To0);
     }
 
     function test_perfFees_NoPerf() public {
@@ -606,20 +626,23 @@ contract UniV3LpVaultFeesTest is Test {
 
         // make sure vault.lastVaultTvl0() have been updated
         // works since no perf since last deposit & no tvl fee
-        (uint256 final_tvl0, uint256 final_tvl1) = perfFeeSetup.vault.rawAssetsValue();
+        (uint256 finalTvl0, uint256 finalTvl1) = perfFeeSetup.vault.rawAssetsValue();
         // Use a reasonable base amount instead of 1 if there is an overflow
-        uint128 baseAmount = final_tvl1 > type(uint128).max ? uint128(1) : uint128(final_tvl1);
+        // casting to 'uint128' is safe because of ternary operator
+        uint128 baseAmount = finalTvl1 > type(uint128).max
+            ? uint128(1)  // forge-lint: disable-next-line(unsafe-typecast)
+            : uint128(finalTvl1);
 
         uint256 twapResult = UniswapUtils.getTwap(perfFeeSetup.pool, TWAP_SECONDS_AGO, baseAmount, true);
 
         // Scale the result if we used a smaller base amount
         uint256 twapValueFrom1To0;
-        if (final_tvl1 > type(uint128).max) {
-            twapValueFrom1To0 = twapResult * final_tvl1;
+        if (finalTvl1 > type(uint128).max) {
+            twapValueFrom1To0 = twapResult * finalTvl1;
         } else {
             twapValueFrom1To0 = twapResult;
         }
-        assertEq(perfFeeSetup.vault.lastVaultTvl0(), final_tvl0 + twapValueFrom1To0);
+        assertEq(perfFeeSetup.vault.lastVaultTvl0(), finalTvl0 + twapValueFrom1To0);
     }
 
     function test_perfFees_NegPerf() public {
@@ -691,10 +714,14 @@ contract UniV3LpVaultFeesTest is Test {
 
         // make sure vault.lastVaultTvl0() have been updated
         // works since no perf since last deposit & no tvl fee
-        (uint256 final_tvl0, uint256 final_tvl1) = perfFeeSetup.vault.rawAssetsValue();
+        (uint256 finalTvl0, uint256 finalTvl1) = perfFeeSetup.vault.rawAssetsValue();
 
         // Use a reasonable base amount instead of 1 if there is an overflow
-        uint128 baseAmount = final_tvl1 > type(uint128).max ? uint128(1) : uint128(final_tvl1);
+        uint128 baseAmount = uint128(1);
+        if (finalTvl1 <= type(uint128).max) {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            baseAmount = uint128(finalTvl1);
+        }
 
         uint256 twapResult = UniswapUtils.getTwap(perfFeeSetup.pool, TWAP_SECONDS_AGO, baseAmount, true);
 
@@ -706,7 +733,7 @@ contract UniV3LpVaultFeesTest is Test {
             twapValueFrom1To0 = twapResult;
         }
 
-        assertEq(perfFeeSetup.vault.lastVaultTvl0(), final_tvl0 + twapValueFrom1To0);
+        assertEq(perfFeeSetup.vault.lastVaultTvl0(), finalTvl0 + twapValueFrom1To0);
     }
 
     function test_perfAndFees_CollectionOnWithdraw() public {
@@ -748,10 +775,14 @@ contract UniV3LpVaultFeesTest is Test {
 
         // make sure vault.lastVaultTvl0() have been updated
         // works since no perf since last deposit & no tvl fee
-        (uint256 final_tvl0, uint256 final_tvl1) = perfFeeSetup.vault.rawAssetsValue();
+        (uint256 finalTvl0, uint256 finalTvl1) = perfFeeSetup.vault.rawAssetsValue();
 
         // Use a reasonable base amount instead of 1 if there is an overflow
-        uint128 baseAmount = final_tvl1 > type(uint128).max ? uint128(1) : uint128(final_tvl1);
+        uint128 baseAmount = uint128(1);
+        if (finalTvl1 <= type(uint128).max) {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            baseAmount = uint128(finalTvl1);
+        }
 
         uint256 twapResult = UniswapUtils.getTwap(perfFeeSetup.pool, TWAP_SECONDS_AGO, baseAmount, true);
 
@@ -763,6 +794,6 @@ contract UniV3LpVaultFeesTest is Test {
             twapValueFrom1To0 = twapResult;
         }
 
-        assertEq(perfFeeSetup.vault.lastVaultTvl0(), final_tvl0 + twapValueFrom1To0);
+        assertEq(perfFeeSetup.vault.lastVaultTvl0(), finalTvl0 + twapValueFrom1To0);
     }
 }

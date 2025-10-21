@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import {UniV3LpVault, Position} from "../../../src/vaults/UniV3LpVault.sol";
+import {Position} from "../../../src/vaults/UniV3LpVault.sol";
 import {SingleVault} from "../../../src/vaults/SingleVault.sol";
 import {TestHelper} from "../helpers/TestHelper.sol";
 import {TestConstants} from "../helpers/Constants.sol";
@@ -40,12 +40,14 @@ contract UniV3LpVaultCollectTest is Test {
         uint256 initialVaultBalance1 = setup.token1.balanceOf(address(setup.vault));
 
         vm.prank(setup.allocator);
-        (uint128 amount0, uint128 amount1) = setup.vault.collect(
-            tickLower,
-            tickUpper,
-            type(uint128).max, // Collect all
-            type(uint128).max // Collect all
-        );
+        (uint128 amount0, uint128 amount1) =
+            setup.vault
+                .collect(
+                    tickLower,
+                    tickUpper,
+                    type(uint128).max, // Collect all
+                    type(uint128).max // Collect all
+                );
 
         // Vault balance should increase or stay same (depends on fees accumulated)
         assertTrue(setup.token0.balanceOf(address(setup.vault)) >= initialVaultBalance0);
@@ -103,12 +105,14 @@ contract UniV3LpVaultCollectTest is Test {
         );
 
         vm.prank(setup.allocator);
-        (uint128 collected0, uint128 collected1) = setup.vault.collect(
-            tickLower,
-            tickUpper,
-            0, // Request zero
-            0 // Request zero
-        );
+        (uint128 collected0, uint128 collected1) =
+            setup.vault
+                .collect(
+                    tickLower,
+                    tickUpper,
+                    0, // Request zero
+                    0 // Request zero
+                );
 
         assertEq(collected0, 0);
         assertEq(collected1, 0);

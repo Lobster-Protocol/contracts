@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {UniV3LpVault, Position, MAX_SCALED_PERCENTAGE} from "../../../src/vaults/UniV3LpVault.sol";
+import {Position, MAX_SCALED_PERCENTAGE} from "../../../src/vaults/UniV3LpVault.sol";
 import {TestHelper} from "../helpers/TestHelper.sol";
 import {TestConstants} from "../helpers/Constants.sol";
 
@@ -143,8 +143,8 @@ contract UniV3LpVaultFullCycleTest is Test {
         );
 
         // Should still have 2 positions, but wide position should have more liquidity
-        Position memory pos2_after_addition = setup.vault.getPosition(1);
-        assertTrue(pos2_after_addition.liquidity > pos2.liquidity);
+        Position memory pos2AfterAddition = setup.vault.getPosition(1);
+        assertTrue(pos2AfterAddition.liquidity > pos2.liquidity);
 
         // === PHASE 7: Partial Withdrawal ===
         uint256 feeCollectorBalanceBefore0 = setup.token0.balanceOf(setup.feeCollector);
@@ -182,11 +182,12 @@ contract UniV3LpVaultFullCycleTest is Test {
         uint256 feeCollectorBalanceBeforeFinal0 = setup.token0.balanceOf(setup.feeCollector);
         uint256 feeCollectorBalanceBeforeFinal1 = setup.token1.balanceOf(setup.feeCollector);
 
-        (uint256 finalWithdrawn0, uint256 finalWithdrawn1) = helper.withdrawFromVault(
-            setup,
-            TestConstants.MAX_SCALED_PERCENTAGE, // 100%
-            recipient
-        );
+        (uint256 finalWithdrawn0, uint256 finalWithdrawn1) =
+            helper.withdrawFromVault(
+                setup,
+                TestConstants.MAX_SCALED_PERCENTAGE, // 100%
+                recipient
+            );
 
         // Verify final withdrawal
         assertTrue(finalWithdrawn0 > 0 || finalWithdrawn1 > 0);

@@ -5,7 +5,6 @@ import "forge-std/Test.sol";
 import {UniV3LpVault, MAX_SCALED_PERCENTAGE, TWAP_SECONDS_AGO} from "../../../src/vaults/UniV3LpVault.sol";
 import {SingleVault} from "../../../src/vaults/SingleVault.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {TestHelper} from "../helpers/TestHelper.sol";
 import {TestConstants} from "../helpers/Constants.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
@@ -205,14 +204,17 @@ contract UniV3LpVaultDepositTest is Test {
         );
 
         // make sure lastVaultTvl0 have been updated
-        (uint256 final_tvl0, uint256 final_tvl1) = feeSetup.vault.rawAssetsValue();
-        (uint256 tvl_fee0, uint256 tvl_fee1) = feeSetup.vault.pendingTvlFee();
-        final_tvl0 -= tvl_fee0;
-        final_tvl1 -= tvl_fee1;
+        (uint256 finalTvl0, uint256 finalTvl1) = feeSetup.vault.rawAssetsValue();
+        (uint256 tvlFee0, uint256 tvlFee1) = feeSetup.vault.pendingTvlFee();
+        finalTvl0 -= tvlFee0;
+        finalTvl1 -= tvlFee1;
 
         // Use a reasonable base amount instead of 1 if there is an overflow
-        uint128 baseAmount = final_tvl1 > type(uint128).max ? uint128(1) : uint128(final_tvl1);
-
+        uint128 baseAmount = uint128(1);
+        if (finalTvl1 <= type(uint128).max) {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            baseAmount = uint128(finalTvl1);
+        }
         uint256 twapResult = UniswapUtils.getTwap(feeSetup.pool, TWAP_SECONDS_AGO, baseAmount, true);
 
         // Scale the result if we used a smaller base amount
@@ -223,7 +225,7 @@ contract UniV3LpVaultDepositTest is Test {
             twapValueFrom1To0 = twapResult;
         }
 
-        assertApproxEqAbs(feeSetup.vault.lastVaultTvl0(), final_tvl0 + twapValueFrom1To0, 1);
+        assertApproxEqAbs(feeSetup.vault.lastVaultTvl0(), finalTvl0 + twapValueFrom1To0, 1);
     }
 
     function test_deposit_NetAssetsValue_UpdatesCorrectly() public {

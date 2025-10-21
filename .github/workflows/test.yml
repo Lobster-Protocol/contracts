@@ -32,6 +32,11 @@ jobs:
           forge fmt --check
         id: fmt
 
+      - name: Run Forge lint
+        run: |
+          forge lint --deny warnings
+        id: lint
+
       - name: Run Forge build
         run: |
           forge build --sizes --optimize

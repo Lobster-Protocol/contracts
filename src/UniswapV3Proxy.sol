@@ -5,7 +5,6 @@ import {IUniswapV3MintCallback, MintParams, MintCallbackData} from "./interfaces
 import {IUniswapV3PoolMinimal} from "./interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {TransferHelper} from "./libraries/uniswapV3/TransferHelper.sol";
 import {PoolAddress} from "./libraries/uniswapV3/PoolAddress.sol";
-import {IWETH} from "./interfaces/IWETH.sol";
 import {TickMath} from "./libraries/uniswapV3/TickMath.sol";
 import {LiquidityAmounts} from "./libraries/uniswapV3/LiquidityAmounts.sol";
 import {CallbackValidation} from "./libraries/uniswapV3/CallbackValidation.sol";
@@ -14,7 +13,7 @@ contract UniswapV3Proxy is IUniswapV3MintCallback {
     address public immutable UNI_V3_FACTORY;
 
     modifier checkDeadline(uint256 deadline) {
-        require(block.timestamp <= deadline, "Transaction too old");
+        _checkDeadline(deadline);
         _;
     }
 
@@ -28,8 +27,9 @@ contract UniswapV3Proxy is IUniswapV3MintCallback {
         checkDeadline(params.deadline)
         returns (uint256 amount0, uint256 amount1)
     {
-        PoolAddress.PoolKey memory poolKey =
-            PoolAddress.PoolKey({token0: params.token0, token1: params.token1, fee: params.fee});
+        PoolAddress.PoolKey memory poolKey = PoolAddress.PoolKey({
+            token0: params.token0, token1: params.token1, fee: params.fee
+        });
 
         // Get the pool address
         IUniswapV3PoolMinimal pool = IUniswapV3PoolMinimal(PoolAddress.computeAddress(UNI_V3_FACTORY, poolKey));
@@ -57,7 +57,14 @@ contract UniswapV3Proxy is IUniswapV3MintCallback {
         require(amount0 >= params.amount0Min && amount1 >= params.amount1Min, "Price slippage check");
     }
 
-    function uniswapV3MintCallback(uint256 amount0Owed, uint256 amount1Owed, bytes calldata data) external override {
+    function uniswapV3MintCallback(
+        uint256 amount0Owed,
+        uint256 amount1Owed,
+        bytes calldata data
+    )
+        external
+        override
+    {
         MintCallbackData memory decoded = abi.decode(data, (MintCallbackData));
 
         // Make sure caller is a contract deployed by the Uniswap V3 factory
@@ -69,5 +76,9 @@ contract UniswapV3Proxy is IUniswapV3MintCallback {
         if (amount1Owed > 0) {
             TransferHelper.safeTransferFrom(decoded.poolKey.token1, decoded.payer, msg.sender, amount1Owed);
         }
+    }
+
+    function _checkDeadline(uint256 deadline) internal view {
+        require(block.timestamp <= deadline, "Transaction too old");
     }
 }
