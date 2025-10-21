@@ -78,7 +78,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     // Performance fee
     uint256 public performanceFeeScaled;
     // Vault tvl computed in token0 using pool twap
-    uint256 /*private*/ public lastVaultTvl0;
+    uint256 public lastVaultTvl0;
     address public feeCollector;
 
     // ========== ERRORS ==========
