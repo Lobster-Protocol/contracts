@@ -293,7 +293,9 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     // ======== FEE COLLECTOR FUNCTIONS ========
 
-    function collectPendingFees() external onlyFeeCollector returns (uint256 collected0, uint256 collected1) {}
+    function collectPendingFees() external onlyFeeCollector {
+        _collectFees();
+    }
 
     // ========== CALLBACK FUNCTIONS ==========
 
