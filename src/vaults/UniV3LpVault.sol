@@ -190,50 +190,9 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         external
         onlyOwnerOrAllocator
         whenNotLocked
-        checkDeadline(params.deadline)
         returns (uint256 amount0, uint256 amount1)
     {
-        // compute the liquidity amount
-        uint128 liquidity;
-        {
-            (uint160 sqrtPriceX96,,,,,,) = POOL.slot0();
-            uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(params.tickLower);
-            uint160 sqrtRatioBX96 = TickMath.getSqrtRatioAtTick(params.tickUpper);
-
-            liquidity = LiquidityAmounts.getLiquidityForAmounts(
-                sqrtPriceX96, sqrtRatioAX96, sqrtRatioBX96, params.amount0Desired, params.amount1Desired
-            );
-        }
-
-        PoolAddress.PoolKey memory poolKey =
-            PoolAddress.PoolKey({token0: address(TOKEN0), token1: address(TOKEN1), fee: POOL_FEE});
-
-        (amount0, amount1) = POOL.mint(
-            address(this),
-            params.tickLower,
-            params.tickUpper,
-            liquidity,
-            abi.encode(MintCallbackData({poolKey: poolKey, payer: address(this)}))
-        );
-
-        require(amount0 >= params.amount0Min && amount1 >= params.amount1Min, "Price slippage check");
-
-        Position memory newPosition =
-            Position({upperTick: params.tickUpper, lowerTick: params.tickLower, liquidity: liquidity});
-
-        bool isPositionCreation = true;
-        for (uint256 i = 0; i < positions.length; i++) {
-            Position memory position = positions[i];
-
-            if (haveSameRange(position, newPosition)) {
-                positions[i].liquidity += liquidity;
-                isPositionCreation = false;
-                break;
-            }
-        }
-        if (isPositionCreation) {
-            positions.push(newPosition);
-        }
+        return _mint(params);
     }
 
     /// @notice Burns liquidity to a Uniswap V3 pool
@@ -242,38 +201,12 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         int24 tickUpper,
         uint128 amount
     )
-        public
+        external
         onlyOwnerOrAllocator
         whenNotLocked
         returns (uint256 amount0, uint256 amount1)
     {
-        // Burn the liquidity
-        (amount0, amount1) = POOL.burn(tickLower, tickUpper, amount);
-
-        // Automatically collect the tokens
-        POOL.collect(
-            address(this),
-            tickLower,
-            tickUpper,
-            type(uint128).max, // collect all amount0
-            type(uint128).max // collect all amount1
-        );
-
-        Position memory refPosition = Position({upperTick: tickUpper, lowerTick: tickLower, liquidity: 0});
-
-        // Properly remove from array by swapping with last element
-        for (uint256 i = 0; i < positions.length; i++) {
-            Position memory position = positions[i];
-            if (haveSameRange(position, refPosition)) {
-                if (position.liquidity == amount) {
-                    positions[i] = positions[positions.length - 1];
-                    positions.pop();
-                } else {
-                    positions[i].liquidity -= amount;
-                }
-                break;
-            }
-        }
+        return _burn(tickLower, tickUpper, amount);
     }
 
     /// @notice Collects liquidity to a Uniswap V3 pool
@@ -283,12 +216,12 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         uint128 amount0Requested,
         uint128 amount1Requested
     )
-        public
+        external
         onlyOwnerOrAllocator
         whenNotLocked
         returns (uint128 amount0, uint128 amount1)
     {
-        return POOL.collect(address(this), tickLower, tickUpper, amount0Requested, amount1Requested);
+        return _collect(tickLower, tickUpper, amount0Requested, amount1Requested);
     }
 
     // ======== FEE COLLECTOR FUNCTIONS ========
@@ -380,7 +313,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         for (uint256 i = 0; i < positions.length; i++) {
             Position memory position = positions[i];
 
-            collect(
+            _collect(
                 position.lowerTick,
                 position.upperTick,
                 type(uint128).max, // collect all amount0
@@ -489,11 +422,111 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
                 uint128(uint256(position.liquidity).mulDiv(scaledPercentage, MAX_SCALED_PERCENTAGE));
 
             (uint256 amount0Burnt, uint256 amount1Burnt) =
-                burn(position.lowerTick, position.upperTick, liquidityToWithdraw);
+                _burn(position.lowerTick, position.upperTick, liquidityToWithdraw);
 
             withdrawn0 += amount0Burnt;
             withdrawn1 += amount1Burnt;
         }
+    }
+
+    /// @notice Mints liquidity to a Uniswap V3 pool
+    function _mint(MinimalMintParams memory params)
+        internal
+        checkDeadline(params.deadline)
+        returns (uint256 amount0, uint256 amount1)
+    {
+        // compute the liquidity amount
+        uint128 liquidity;
+        {
+            (uint160 sqrtPriceX96,,,,,,) = POOL.slot0();
+            uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(params.tickLower);
+            uint160 sqrtRatioBX96 = TickMath.getSqrtRatioAtTick(params.tickUpper);
+
+            liquidity = LiquidityAmounts.getLiquidityForAmounts(
+                sqrtPriceX96, sqrtRatioAX96, sqrtRatioBX96, params.amount0Desired, params.amount1Desired
+            );
+        }
+
+        PoolAddress.PoolKey memory poolKey =
+            PoolAddress.PoolKey({token0: address(TOKEN0), token1: address(TOKEN1), fee: POOL_FEE});
+
+        (amount0, amount1) = POOL.mint(
+            address(this),
+            params.tickLower,
+            params.tickUpper,
+            liquidity,
+            abi.encode(MintCallbackData({poolKey: poolKey, payer: address(this)}))
+        );
+
+        require(amount0 >= params.amount0Min && amount1 >= params.amount1Min, "Price slippage check");
+
+        Position memory newPosition =
+            Position({upperTick: params.tickUpper, lowerTick: params.tickLower, liquidity: liquidity});
+
+        bool isPositionCreation = true;
+        for (uint256 i = 0; i < positions.length; i++) {
+            Position memory position = positions[i];
+
+            if (haveSameRange(position, newPosition)) {
+                positions[i].liquidity += liquidity;
+                isPositionCreation = false;
+                break;
+            }
+        }
+        if (isPositionCreation) {
+            positions.push(newPosition);
+        }
+    }
+
+    /// @notice Burns liquidity to a Uniswap V3 pool
+    function _burn(
+        int24 tickLower,
+        int24 tickUpper,
+        uint128 amount
+    )
+        internal
+        returns (uint256 amount0, uint256 amount1)
+    {
+        // Burn the liquidity
+        (amount0, amount1) = POOL.burn(tickLower, tickUpper, amount);
+
+        // Automatically collect the tokens
+        POOL.collect(
+            address(this),
+            tickLower,
+            tickUpper,
+            type(uint128).max, // collect all amount0
+            type(uint128).max // collect all amount1
+        );
+
+        Position memory refPosition = Position({upperTick: tickUpper, lowerTick: tickLower, liquidity: 0});
+
+        // Properly remove from array by swapping with last element
+        for (uint256 i = 0; i < positions.length; i++) {
+            Position memory position = positions[i];
+            if (haveSameRange(position, refPosition)) {
+                if (position.liquidity == amount) {
+                    positions[i] = positions[positions.length - 1];
+                    positions.pop();
+                } else {
+                    positions[i].liquidity -= amount;
+                }
+                break;
+            }
+        }
+    }
+
+    /// @notice Collects liquidity to a Uniswap V3 pool
+    function _collect(
+        int24 tickLower,
+        int24 tickUpper,
+        uint128 amount0Requested,
+        uint128 amount1Requested
+    )
+        internal
+        returns (uint128 amount0, uint128 amount1)
+    {
+        return POOL.collect(address(this), tickLower, tickUpper, amount0Requested, amount1Requested);
     }
 
     // ========== INTERNAL VIEW FUNCTIONS ==========

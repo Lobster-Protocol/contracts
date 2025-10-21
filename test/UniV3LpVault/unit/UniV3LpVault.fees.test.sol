@@ -796,4 +796,66 @@ contract UniV3LpVaultFeesTest is Test {
 
         assertEq(perfFeeSetup.vault.lastVaultTvl0(), finalTvl0 + twapValueFrom1To0);
     }
+
+    function test_perfAndTVLFees_manualCollect() public {
+        // todo: add delay to also have tvl fees collected
+        uint256 deposit0 = TestConstants.LARGE_AMOUNT;
+        uint256 deposit1 = TestConstants.LARGE_AMOUNT;
+
+        helper.depositToVault(bothFeeSetup, deposit0, deposit1);
+        helper.createPositionAroundCurrentTick(
+            bothFeeSetup.vault,
+            bothFeeSetup.allocator,
+            TestConstants.TICK_RANGE_NARROW,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
+
+        // Mint tokens to the vault to simulate +100% performance
+        (uint256 tvl0, uint256 tvl1) = bothFeeSetup.vault.rawAssetsValue();
+        bothFeeSetup.token0.mint(address(bothFeeSetup.vault), tvl0 / 2);
+        bothFeeSetup.token1.mint(address(bothFeeSetup.vault), tvl1 / 2);
+
+        // actual_performance = +50% so perf fee will be vault.performanceFeeScaled() / 2
+        uint256 feeScaledPercent = bothFeeSetup.vault.performanceFeeScaled() / 2;
+
+        uint256 initialFeeCollectorBalance0 = bothFeeSetup.token0.balanceOf(bothFeeSetup.feeCollector);
+        uint256 initialFeeCollectorBalance1 = bothFeeSetup.token0.balanceOf(bothFeeSetup.feeCollector);
+
+        // Withdraw should trigger fee collection
+        vm.prank(bothFeeSetup.feeCollector);
+        bothFeeSetup.vault.collectPendingFees();
+
+        uint256 expectedFee0 = deposit0.mulDiv(feeScaledPercent, MAX_SCALED_PERCENTAGE);
+        uint256 expectedFee1 = deposit1.mulDiv(feeScaledPercent, MAX_SCALED_PERCENTAGE);
+
+        uint256 finalFeeCollectorBalance0 = bothFeeSetup.token0.balanceOf(bothFeeSetup.feeCollector);
+        uint256 finalFeeCollectorBalance1 = bothFeeSetup.token1.balanceOf(bothFeeSetup.feeCollector);
+
+        assertApproxEqAbs(finalFeeCollectorBalance0, initialFeeCollectorBalance0 + expectedFee0, 2);
+        assertApproxEqAbs(finalFeeCollectorBalance1, initialFeeCollectorBalance1 + expectedFee1, 2);
+
+        // make sure vault.lastVaultTvl0() have been updated
+        // works since no perf since last deposit & no tvl fee
+        (uint256 finalTvl0, uint256 finalTvl1) = bothFeeSetup.vault.rawAssetsValue();
+
+        // Use a reasonable base amount instead of 1 if there is an overflow
+        uint128 baseAmount = uint128(1);
+        if (finalTvl1 <= type(uint128).max) {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            baseAmount = uint128(finalTvl1);
+        }
+
+        uint256 twapResult = UniswapUtils.getTwap(bothFeeSetup.pool, TWAP_SECONDS_AGO, baseAmount, true);
+
+        // Scale the result if we used a smaller base amount
+        uint256 twapValueFrom1To0;
+        if (tvl1 > type(uint128).max) {
+            twapValueFrom1To0 = twapResult * tvl1;
+        } else {
+            twapValueFrom1To0 = twapResult;
+        }
+
+        assertEq(bothFeeSetup.vault.lastVaultTvl0(), finalTvl0 + twapValueFrom1To0);
+    }
 }

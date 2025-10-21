@@ -407,3 +407,5 @@ contract UniV3LpVaultFullCycleTest is Test {
         assertTrue(setup.token1.balanceOf(setup.feeCollector) > 0);
     }
 }
+
+// todo: test with collectPendingFees
