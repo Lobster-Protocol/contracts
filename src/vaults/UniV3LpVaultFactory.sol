@@ -5,6 +5,7 @@ import "./UniV3LpVault.sol";
 
 /**
  * @title UniV3LpVaultFactory
+ * @author Elli <nathan@lobster-protocol.com>
  * @notice Factory contract for deploying UniV3LpVault contracts using CREATE2
  * @dev Allows deterministic vault deployment based on salt and parameters
  */

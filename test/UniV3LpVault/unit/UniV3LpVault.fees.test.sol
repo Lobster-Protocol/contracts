@@ -862,6 +862,8 @@ contract UniV3LpVaultFeesTest is Test {
     // ============ updateFees Tests ============
 
     function test_UpdateFees_Success() public {
+        vm.startPrank(setup.vault.feeCollector());
+
         uint80 newTvlFee = 1e18;
         uint80 newPerfFee = 2e18;
 
@@ -882,6 +884,8 @@ contract UniV3LpVaultFeesTest is Test {
     }
 
     function test_UpdateFees_OverwritesPending() public {
+        vm.startPrank(setup.vault.feeCollector());
+
         uint80 firstTvlFee = 1e18;
         uint80 firstPerfFee = 2e18;
         setup.vault.updateFees(firstTvlFee, firstPerfFee);
@@ -898,6 +902,8 @@ contract UniV3LpVaultFeesTest is Test {
     }
 
     function test_UpdateFees_ZeroFees() public {
+        vm.startPrank(setup.vault.feeCollector());
+
         bool success = setup.vault.updateFees(0, 0);
         assertTrue(success, "Should accept zero fees");
 
@@ -908,6 +914,8 @@ contract UniV3LpVaultFeesTest is Test {
     }
 
     function test_UpdateFees_MaxValues() public {
+        vm.startPrank(setup.vault.feeCollector());
+
         uint80 maxFee = uint80(setup.vault.MAX_FEE());
 
         bool success = setup.vault.updateFees(maxFee, maxFee);
@@ -919,6 +927,8 @@ contract UniV3LpVaultFeesTest is Test {
     }
 
     function testFuzz_UpdateFees(uint80 tvlFee, uint80 perfFee) public {
+        vm.startPrank(setup.vault.feeCollector());
+
         if (tvlFee > setup.vault.MAX_FEE() || perfFee > setup.vault.MAX_FEE()) {
             vm.expectRevert(abi.encodePacked("Fees > max"));
             setup.vault.updateFees(tvlFee, perfFee);
@@ -936,6 +946,8 @@ contract UniV3LpVaultFeesTest is Test {
     // ============ enforceFeeUpdate Tests ============
 
     function test_EnforceFeeUpdate_Success() public {
+        vm.startPrank(setup.vault.feeCollector());
+
         uint80 newTvlFee = 1e18;
         uint80 newPerfFee = 2e18;
 
@@ -956,11 +968,15 @@ contract UniV3LpVaultFeesTest is Test {
     }
 
     function test_EnforceFeeUpdate_RevertsIfNoPending() public {
+        vm.startPrank(setup.vault.feeCollector());
+
         vm.expectRevert(abi.encodeWithSignature("NoPendingFeeUpdate()"));
         setup.vault.enforceFeeUpdate();
     }
 
     function test_EnforceFeeUpdate_RevertsIfTooEarly() public {
+        vm.startPrank(setup.vault.feeCollector());
+
         uint80 newTvlFee = 1e18;
         uint80 newPerfFee = 2e18;
 
@@ -972,6 +988,8 @@ contract UniV3LpVaultFeesTest is Test {
     }
 
     function test_EnforceFeeUpdate_ClearsPendingAfterEnforce() public {
+        vm.startPrank(setup.vault.feeCollector());
+
         uint80 newTvlFee = 1e18;
         uint80 newPerfFee = 2e18;
 
@@ -986,6 +1004,8 @@ contract UniV3LpVaultFeesTest is Test {
     }
 
     function test_EnforceFeeUpdate_WithMaxValues() public {
+        vm.startPrank(setup.vault.feeCollector());
+
         uint80 maxFee = uint80(setup.vault.MAX_FEE());
 
         setup.vault.updateFees(maxFee, maxFee);
@@ -1001,7 +1021,9 @@ contract UniV3LpVaultFeesTest is Test {
 
     // ============ pendingFeeUpdate Tests ============
 
-    function test_PendingFeeUpdate_ReturnsZeroWhenNoPending() public view {
+    function test_PendingFeeUpdate_ReturnsZeroWhenNoPending() public {
+        vm.startPrank(setup.vault.feeCollector());
+
         (uint80 tvl, uint80 perf, uint96 timestamp) = setup.vault.pendingFeeUpdate();
         assertEq(tvl, 0, "TVL should be zero");
         assertEq(perf, 0, "Perf should be zero");
@@ -1009,6 +1031,8 @@ contract UniV3LpVaultFeesTest is Test {
     }
 
     function test_PendingFeeUpdate_ReturnsCorrectValues() public {
+        vm.startPrank(setup.vault.feeCollector());
+
         uint80 newTvlFee = 1e18;
         uint80 newPerfFee = 2e18;
 
@@ -1021,6 +1045,8 @@ contract UniV3LpVaultFeesTest is Test {
     }
 
     function test_PendingFeeUpdate_AfterEnforce() public {
+        vm.startPrank(setup.vault.feeCollector());
+
         uint80 newTvlFee = 1e18;
         uint80 newPerfFee = 2e18;
 
@@ -1039,6 +1065,8 @@ contract UniV3LpVaultFeesTest is Test {
     // ============ Integration Tests ============
 
     function test_FullFeeUpdateCycle() public {
+        vm.startPrank(setup.vault.feeCollector());
+
         uint80 initialTvl = uint80(setup.vault.tvlFeeScaled());
         uint80 initialPerf = uint80(setup.vault.performanceFeeScaled());
 
@@ -1067,6 +1095,8 @@ contract UniV3LpVaultFeesTest is Test {
     }
 
     function test_MultipleFeeUpdates() public {
+        vm.startPrank(setup.vault.feeCollector());
+
         // First update
         setup.vault.updateFees(1e18, 2e18);
         vm.warp(block.timestamp + setup.vault.FEE_UPDATE_MIN_DELAY() + 1);
@@ -1082,6 +1112,8 @@ contract UniV3LpVaultFeesTest is Test {
     }
 
     function test_CancelPendingByOverwriting() public {
+        vm.startPrank(setup.vault.feeCollector());
+
         // First update
         setup.vault.updateFees(1e18, 2e18);
 
@@ -1097,4 +1129,5 @@ contract UniV3LpVaultFeesTest is Test {
     }
 
     // todo: test max fees
+    // todo: test fee update from someone else than feeCollector
 }
