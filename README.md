@@ -1,104 +1,96 @@
 # Lobster Vault System
 
-A modular, secure vault system built on ERC4626 with multi-signature operation validation and specialized Uniswap V3 integration capabilities.
+A production-ready Uniswap V3 liquidity management vault with fee collection, role-based access control, and emergency safeguards.
 
-## 🏗️ Architecture Overview
+## Architecture Overview
 
-The Lobster Vault System consists of three main components working together to provide secure, flexible vault operations:
+The Lobster Vault System provides a streamlined architecture for managing Uniswap V3 liquidity positions with built-in fee mechanisms and governance controls:
 
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
-│                              Vault Layer                              │
-├──────────────────────────┬─────────────────────┬──────────────────────┤
-│  ERC4626WithOpValidator  │    LobsterVault     │  UniV3LobsterVault   │
-│  (Basic Operations)      │  (Dual-Token Base)  │  (Uniswap V3)        │
-└──────────────────────────┴─────────────────────┴──────────────────────┘
-                                    │
-┌───────────────────────────────────────────────────────────────────────┐
-│                           Modular Base Layer                          │
+│                           Factory Layer                               │
 ├───────────────────────────────────────────────────────────────────────┤
-│                     Modular (Operation Execution)                     │
+│              UniV3LpVaultFactory (CREATE2 Deployment)                 │
 └───────────────────────────────────────────────────────────────────────┘
                                     │
 ┌───────────────────────────────────────────────────────────────────────┐
-│                           Validation Layer                            │
+│                         Vault Implementation                          │
 ├───────────────────────────────────────────────────────────────────────┤
-│             MuSigOpValidator (Multi-Signature Validation)             │
+│          UniV3LpVault (Uniswap V3 Position Management)                │
+└───────────────────────────────────────────────────────────────────────┘
+                                    │
+┌───────────────────────────────────────────────────────────────────────┐
+│                              Uniswap Pool                             │
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
-**Key Design Principles:**
-- **Security First**: All external operations require multi-signature approval
-- **Modularity**: Components can be mixed and matched for different use cases
-- **Immutable Whitelists**: Operation restrictions cannot be changed after deployment
-- **Flexible Governance**: Signer configuration can evolve via multi-sig approval
+## Core Components
 
-## 📦 Vault Types
-
-### ERC4626WithOpValidator
-**Purpose**: Standard ERC4626 vault with secure operation execution capabilities
+### SingleVault (Base Contract)
+**Purpose**: Provides foundational access control and emergency safety mechanisms
 
 **Features:**
-- Standard deposit/withdraw/mint/redeem functionality
-- Multi-signature validated external operations
-- Custom ERC20 share token naming
-- Clean separation between vault operations and extended functionality
+- **Two-Tier Access Control**:
+  - **Owner**: Full vault control, can update allocator, lock vault, and execute all operations
+  - **Allocator**: Limited operational control for position management (can be blocked by lock)
+- **Emergency Lock**: Owner can freeze allocator operations without affecting owner access
+- **Secure Ownership Transfer**: Uses OpenZeppelin's `Ownable2Step` for safe ownership changes
+- **Reentrancy Protection**: Built-in guards against reentrancy attacks
+- **ETH Rejection**: Prevents accidental ETH deposits
 
-**⚠️ Customization Note**: This is a **base implementation** that should be inherited and customized for specific protocols. You'll need to override `deposit()`, `withdraw()`, `totalAssets()`, and other ERC4626 functions to implement your specific integration logic (e.g., lending protocols, yield strategies, etc.).
-
-### LobsterVault
-**Purpose**: Dual-token vault foundation supporting two separate assets
-
-**Features:**
-- Manages two distinct ERC20 tokens simultaneously
-- Packed uint256 representation for gas efficiency: `(token0Amount << 128) | token1Amount`
-- Proportional share calculations using limiting token approach
-- Built-in operation validation system
-
-**⚠️ Customization Note**: This is a **foundational contract** designed to be extended. To integrate with specific protocols, you must inherit from this contract and implement custom logic in `deposit()`, `withdraw()`, `totalAssets()`, and related functions. The base implementation only handles direct token transfers.
-
-### UniV3LobsterVault
-**Purpose**: Production-ready Uniswap V3 position management vault
+### UniV3LpVault
+**Purpose**: Production-ready Uniswap V3 liquidity position management with fee collection
 
 **Features:**
-- Complete Uniswap V3 NFT position lifecycle management
-- Automated liquidity provision and removal
-- Fee collection with configurable protocol fee cuts
-- Proportional withdrawal based on vault share ownership
-- Gas-optimized batch position processing
+- **Complete Position Lifecycle Management**:
+  - Mint new positions with customizable tick ranges
+  - Burn liquidity from existing positions
+  - Collect trading fees from positions
+  - Automatic position tracking and cleanup
+- **Dual Fee System**:
+  - **TVL Fee**: Annualized management fee on total assets
+  - **Performance Fee**: Fee on vault growth (only charged on positive returns)
+- **Automated Fee Collection**: Fees auto-collect during deposits/withdrawals
+- **TWAP-Based Valuation**: 7-day time-weighted average price for accurate asset valuation
+- **Proportional Withdrawals**: Users withdraw based on their share of vault assets
 
-**Integration Ready**: This vault is **production-ready** and doesn't require customization for Uniswap V3 use cases.
+**Security Features:**
+- Timelocked fee updates (14-day delay)
+- Maximum fee cap (30%)
+- Deadline-based transaction expiry
 
-## 🔐 MuSigOpValidator
+### UniV3LpVaultFactory
+**Purpose**: Factory contract for deterministic vault deployment
 
-**Purpose**: Multi-signature operation validator providing secure, quorum-based approval for vault operations.
+**Features:**
+- **CREATE2 Deployment**: Predictable vault addresses using salt-based generation
+- **Vault Registry**: Tracks all deployed vaults via `isVault` mapping
+- **Address Prediction**: Compute vault address before deployment
+- **Deployment Transparency**: Events emitted for all deployments
 
-### Core Features
+## Access Control Model
 
-**🛡️ Security Model**
-- **Immutable Whitelist**: Operation restrictions set at deployment cannot be changed
-- **Weight-Based Voting**: Flexible signer weights
-- **Replay Protection**: Sequential nonce system prevents transaction replay attacks
-- **Cross-Chain Safety**: Chain ID inclusion prevents cross-chain replay attacks
+### Owner
+- Full vault control
+- Can deposit/withdraw assets
+- Can update allocator address
+- Can lock/unlock vault
+- Can execute all position operations
+- Update fee parameters (with timelock)
 
-**⚙️ Operation Control**
-- **Granular Permissions**: Separate controls for ETH transfers and function calls
-- **Parameter Validation**: Custom validation logic for function parameters
-- **Batch Operations**: Atomic execution of multiple operations
-- **Gas Optimization**: Efficient signature verification and validation
+### Allocator
+- Can mint new positions
+- Can burn existing positions
+- Can collect trading fees
+- **Cannot** deposit/withdraw vault assets
+- **Blocked** when vault is locked
 
-**👥 Governance Flexibility**
-- **Mutable Signers**: Add, remove, or update signer weights via multi-sig
-- **Dynamic Quorum**: Adjust approval thresholds as organization evolves
+### Fee Collector
+- Collects accumulated fees
+- Initiates fee parameter updates
+- Enforces timelocked fee changes
 
-### Signature Requirements
-
-- **Format**: ECDSA signatures _(BLS signatures will be implemented later)_
-- **Ordering**: Signatures can be in any order
-- **Uniqueness**: Each signer can only sign once per operation
-- **Threshold**: Total signature weight must meet or exceed quorum
-
-## 🚀 Development Setup
+## Development Setup
 
 ### Prerequisites
 
@@ -133,11 +125,11 @@ forge test
 forge test -vvv
 
 # Run specific test file
-forge test --match-path test/VaultTest.sol
+forge test --match-path test/UniV3LpVault.t.sol
 
-# Get the coverage report
+# Get coverage report
 forge coverage --report lcov --report-file coverage.lcov --ir-minimum
-genhtml coverage.lcov -o coverage-html --branch-coverage --function-coverage --ignore-errors inconsistent,corrupt
+genhtml coverage.lcov -o coverage-html --branch-coverage --function-coverage
 open coverage-html/index.html
 ```
 
@@ -157,34 +149,124 @@ slither .
 forge doc --build
 ```
 
-## 🔧 Integration Guidelines
+## Deployment Guide
 
-### For Protocol Integrators
+### Using the Factory
 
-1. **Inherit Base Contracts**: Extend `ERC4626WithOpValidator` or `LobsterVault`
-2. **Override Key Functions**: Implement your protocol-specific logic in:
-   - `deposit()` - Custom deposit handling
-   - `withdraw()` - Custom withdrawal logic
-   - `totalAssets()` - Asset valuation for your protocol
-   - `_convertToShares()` / `_convertToAssets()` - Share conversion logic
-   - All the `preview*`and `max*` functions if necessary
+```solidity
+// 1. Deploy the factory
+UniV3LpVaultFactory factory = new UniV3LpVaultFactory();
 
-3. **Configure Validator**: Set up operation whitelist for your protocol's contracts
-4. **Test Thoroughly**: Use fuzz testing for edge cases
+// 2. Compute vault address (optional, for verification)
+bytes32 salt = keccak256(abi.encodePacked("my-vault-v1"));
+address predictedAddress = factory.computeVaultAddress(
+    salt,
+    owner,
+    allocator,
+    token0,
+    token1,
+    pool,
+    feeCollector,
+    tvlFee,     // e.g., 2e18 = 2% annual
+    perfFee     // e.g., 20e18 = 20% of profits
+);
 
-### Security Considerations
+// 3. Deploy vault
+address vault = factory.deployVault(
+    salt,
+    owner,
+    allocator,
+    token0,
+    token1,
+    pool,
+    feeCollector,
+    tvlFee,
+    perfFee
+);
 
-- **Whitelist Carefully**: Only whitelist necessary operations and targets
-- **Validate Parameters**: Implement custom parameter validators for complex operations
-- **Monitor Operations**: Set up monitoring for unusual operation patterns
-- **Regular Audits**: Have custom implementations audited before mainnet deployment
+// 4. Verify deployment
+require(factory.isVault(vault), "Deployment failed");
+require(vault == predictedAddress, "Address mismatch");
+```
 
-## 📄 License
+## 📊 Fee Mechanics
+
+### TVL Management Fee
+- **Type**: Annualized percentage of total assets
+- **Calculation**: Accrues linearly over time based on asset value
+- **Collection**: Automatic during deposits/withdrawals or manual via `collectPendingFees()`
+- **Max Rate**: 30% (configurable via `MAX_FEE`)
+
+### Performance Fee
+- **Type**: Percentage of vault growth
+- **Calculation**: Only charged when vault TVL (in token0) increases
+- **Benchmark**: Tracks `lastVaultTvl0` to measure growth
+- **Collection**: Automatic when vault performs positively
+- **Max Rate**: 30% (configurable via `MAX_FEE`)
+
+**Example**:
+```
+Initial TVL: 100,000 USDC
+After trading: 120,000 USDC
+Growth: 20,000 USDC
+Performance Fee (20%): 4,000 USDC
+```
+
+## Important Considerations
+
+### TWAP Requirements
+The vault uses a 7-day TWAP for accurate price calculations. For proper operation:
+- **Pool must have existed for at least 7 days**
+- **Pool must have swap activity** to populate TWAP observations
+- New pools without sufficient history will revert on certain operations
+
+### Position Management Best Practices
+1. **Limit Active Positions**: Keep 1-3 positions for gas efficiency
+2. **Monitor Liquidity Depth**: Remove positions with very low liquidity
+3. **Regular Rebalancing**: Collect fees and rebalance positions periodically
+4. **Slippage Protection**: Always set appropriate `amount0Min` and `amount1Min`
+
+### Security Checklist
+- [ ] Verify token0 < token1 (address ordering)
+- [ ] Confirm pool matches token pair
+- [ ] Set reasonable initial fees (≤30%)
+- [ ] Use secure allocator address
+- [ ] Test with small amounts first
+- [ ] Monitor fee accrual rates
+- [ ] Set up emergency procedures for lock mechanism
+
+## Known Issues & TODOs
+
+**From Contract Comments:**
+```solidity
+// TODO: In UniV3LpVault._withdrawFromPositions
+// Must empty positions left with low liquidity after withdrawal
+// and burn NFT to avoid accumulating dust positions
+```
+
+**Recommendation**: Implement a minimum liquidity threshold check after withdrawals that automatically closes positions falling below the threshold.
+
+## License
 
 This project is licensed under the GNU AGPL v3.0 License - see the [LICENSE](LICENSE) file for details.
 
-## ⚠️ Disclaimer
+## Disclaimer
 
-This software is provided "as is" without warranty. Use at your own risk. Always conduct thorough testing and auditing before deploying to mainnet with real funds.
+This software is provided "as is" without warranty. Use at your own risk.
 
-**TO FIX: in the UniV3LobsterVault._executePositionWithdrawal function, we must empty the position if afted withdraw, it is left with low liquidity and then, we must burn it to avoid being stuck with an increasing amount of positions after the withdrawals**
+**IMPORTANT**:
+- Always conduct thorough testing before mainnet deployment
+- Have contracts professionally audited before using with real funds
+- Understand the risks of impermanent loss in liquidity provision
+- Monitor positions regularly for optimal performance
+- Be aware of gas costs for position management operations
+
+## Additional Resources
+
+- [Uniswap V3 Documentation](https://docs.uniswap.org/protocol/concepts/V3-overview/concentrated-liquidity)
+- [OpenZeppelin Contracts](https://docs.openzeppelin.com/contracts/)
+- [Foundry Book](https://book.getfoundry.sh/)
+
+---
+
+**Need Help?** Open an issue or reach out to the development team.

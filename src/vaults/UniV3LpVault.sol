@@ -101,16 +101,8 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     using Math for uint256;
 
     // ========== STATE VARIABLES ==========
-
-    /// @notice Maximum allowed fee percentage (scaled by SCALING_FACTOR)
-    uint256 public MAX_FEE = MAX_FEE_SCALED;
-
     /// @notice Minimum delay before fee updates can be enforced (14 days timelock)
     uint96 public constant FEE_UPDATE_MIN_DELAY = 14 days;
-
-    /// @notice Packed storage of pending fee updates with activation timestamp
-    /// @dev Format: [80 bits tvlFee][80 bits perfFee][96 bits timestamp]
-    uint256 private packedPendingFees;
 
     /// @notice First token in the UniswapV3 pair (lower address)
     IERC20 public immutable TOKEN0;
@@ -123,8 +115,9 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     /// @notice Fee tier of the pool (e.g., 500 = 0.05%, 3000 = 0.3%)
     uint24 private immutable POOL_FEE;
-    /// @notice Array of active liquidity positions (typically up to 3 positions)
-    Position[] private positions;
+
+    /// @notice Maximum allowed fee percentage (scaled by SCALING_FACTOR)
+    uint256 public MAX_FEE = MAX_FEE_SCALED;
 
     /// @notice Timestamp of the last TVL fee collection
     uint256 public tvlFeeCollectedAt;
@@ -140,6 +133,13 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     /// @notice Address authorized to collect accumulated fees
     address public feeCollector;
+
+    /// @notice Packed storage of pending fee updates with activation timestamp
+    /// @dev Format: [80 bits tvlFee][80 bits perfFee][96 bits timestamp]
+    uint256 private packedPendingFees;
+
+    /// @notice Array of active liquidity positions (typically up to 3 positions)
+    Position[] private positions;
 
     // ========== ERRORS ==========
 
@@ -1129,6 +1129,4 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
         packedPendingFees = 0;
     }
-
-    // todo: add preview withdraw
 }
