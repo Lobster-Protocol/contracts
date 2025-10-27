@@ -44,9 +44,7 @@ contract UniV3LpVaultFactory {
     {
         // Deploy vault using CREATE2
         vault = address(
-            new UniV3LpVault{
-                salt: salt
-            }(
+            new UniV3LpVault{salt: salt}(
                 initialOwner,
                 initialExecutor,
                 token0,

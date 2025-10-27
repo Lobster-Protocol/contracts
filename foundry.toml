@@ -10,14 +10,6 @@ remappings = [
     "forge-std/=lib/forge-std/src/"
 ]
 
-[profile.prod]
-via_ir = true
-optimizer = true
-remappings = [
-    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
-    "forge-std/=lib/forge-std/src/"
-]
-
 [rpc_endpoints]
 sepolia = "${SEPOLIA_RPC_URL}"
 arb1 = "${ARBITRUM_RPC_URL}"

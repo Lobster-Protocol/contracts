@@ -15,11 +15,9 @@ import {PoolAddress} from "../libraries/uniswapV3/PoolAddress.sol";
 import {UniswapV3Calculator} from "../utils/UniswapV3Calculator.sol";
 import {UniswapUtils} from "../libraries/uniswapV3/UniswapUtils.sol";
 
-// todo: collect fees quand on change l'allocator ??
-// todo: chaque user doit signer les cgu
-
 uint256 constant SCALING_FACTOR = 1e18;
 uint256 constant MAX_SCALED_PERCENTAGE = 100 * SCALING_FACTOR;
+uint256 constant MAX_FEE_SCALED = 30 * SCALING_FACTOR;
 uint32 constant TWAP_SECONDS_AGO = 7 days;
 
 struct Position {
@@ -59,13 +57,16 @@ struct AssetState {
  * @title
  * @author Elli <nathan@lobster-protocol.com>
  * @notice Allows to do lp on a uniswap v3 pool
- * @notice To work fine, especially with the performance fees, we suppose the pool existed at least TWAP_SECONDS_AGO seconds ago and some swaps happended during this delay
+ * @notice To work fine, especially with the performance fees, we suppose the pool existed at least TWAP_SECONDS_AGO seconds ago and some swaps happended during this delay (otherwise observations can be manually made)
  */
 contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     using Math for uint256;
 
     // ========== STATE VARIABLES ==========
-
+    // Maximum fee value for tvl and performance fees
+    uint256 public MAX_FEE = MAX_FEE_SCALED;
+    uint96 public constant FEE_UPDATE_MIN_DELAY = 14 days;
+    uint256 private packedPendingFees;
     IERC20 public immutable TOKEN0;
     IERC20 public immutable TOKEN1;
     IUniswapV3PoolMinimal public immutable POOL;
@@ -86,6 +87,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     error NotPool();
     error WrongPayer();
     error InvalidValue();
+    error NoPendingFeeUpdate();
     error InvalidScalingFactor();
 
     // ========== EVENTS ==========
@@ -94,7 +96,8 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     event Withdraw(uint256 indexed assets0, uint256 indexed assets1, address indexed receiver);
     event TvlFeeCollected(uint256 indexed tvlFeeAssets0, uint256 indexed tvlFeeAssets1, address indexed feeCollector);
     event PerformanceFeeCollected(uint256 indexed assets0, uint256 indexed assets1, address indexed feeCollector);
-
+    event FeeUpdateInitialized(uint80 indexed tvlfee, uint80 indexed performanceFee, uint96 indexed activatableAfter);
+    event FeeUpdateEnforced(uint80 indexed tvlfee, uint80 indexed performanceFee);
     // ========== MODIFIERS ==========
 
     modifier checkDeadline(uint256 deadline) {
@@ -123,6 +126,8 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     {
         require(uint160(token0_) < uint160(token1_), "Wrong token 0 & 1 order");
         require(initialFeeCollector != address(0), ZeroAddress());
+
+        require(initialPerformanceFee <= MAX_FEE && initialtvlFee <= MAX_FEE, "Fees > max");
 
         POOL = IUniswapV3PoolMinimal(pool_);
         require(POOL.token0() == token0_ && POOL.token1() == token1_, "Token mismatch");
@@ -281,8 +286,13 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         return positions.length;
     }
 
+    function pendingFeeUpdate() external view returns (uint80 tvlFee, uint80 perfFee, uint96 activatableAfter) {
+        return _unpackFeesWithTimestamp(packedPendingFees);
+    }
+
     // ========== INTERNAL FUNCTIONS ==========
 
+    // Collect pending tvl and performance fees
     function _collectFees() internal {
         uint256 tvlToCollect = _pendingRelativeTvlFee();
 
@@ -564,10 +574,9 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     }
 
     // Get the price of n amount of token 1 in token 0
-    // todo: might not work if price diff is too important
     function _convertToToken0(uint256 amount1) internal view returns (uint256 amount0) {
         // Use a reasonable base amount instead of 1 if there is an overflow
-        uint128 baseAmount = uint128(1);
+        uint128 baseAmount = uint128(1_000_000_000);
         if (amount1 <= type(uint128).max) {
             // forge-lint: disable-next-line(unsafe-typecast)
             baseAmount = uint128(amount1);
@@ -577,10 +586,10 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
         // Scale the result if we used a smaller base amount
         uint256 twapValueFrom1To0;
-        if (amount1 > type(uint128).max) {
-            twapValueFrom1To0 = twapResult * amount1;
-        } else {
+        if (amount1 <= type(uint128).max) {
             twapValueFrom1To0 = twapResult;
+        } else {
+            twapValueFrom1To0 = twapResult.mulDiv(amount1, 1_000_000_000);
         }
 
         return twapValueFrom1To0;
@@ -707,6 +716,30 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         }
     }
 
+    // Works only if MAX_SCALED_PERCENTAGE < type(uint80).max
+    function _packFeesWithTimestamp(
+        uint80 tvlFee,
+        uint80 perfFee,
+        uint96 timestamp
+    )
+        internal
+        pure
+        returns (uint256 packed)
+    {
+        packed = (uint256(tvlFee) << 176) | (uint256(perfFee) << 96) | uint256(timestamp);
+    }
+
+    function _unpackFeesWithTimestamp(uint256 packed)
+        internal
+        pure
+        returns (uint80 tvlFee, uint80 perfFee, uint96 timestamp)
+    {
+        tvlFee = uint80((packed >> 176) & 0xFFFFFFFFFFFFFFFFFFFF); // Mask to get 80 bits
+        perfFee = uint80((packed >> 96) & 0xFFFFFFFFFFFFFFFFFFFF); // Mask to get 80 bits
+        // forge-lint: disable-next-line(unsafe-typecast)
+        timestamp = uint96(packed & 0xFFFFFFFFFFFFFFFFFFFFFFFF); // Mask to get 96 bits
+    }
+
     function _checkDeadline(uint256 deadline) internal view {
         require(block.timestamp <= deadline, "Transaction too old");
     }
@@ -715,7 +748,40 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         if (msg.sender != feeCollector) revert Unauthorized();
     }
 
+    // ========== FEE UPDATE FUNCTIONS ==========
+
+    // expect fees to be scaled by SCALING_FACTOR
+    function updateFees(uint80 newTvlFee, uint80 newPerformanceFee) external returns (bool) {
+        require(newTvlFee <= MAX_FEE && newPerformanceFee <= MAX_FEE, "Fees > max");
+
+        uint96 timestamp = uint96(block.timestamp) + FEE_UPDATE_MIN_DELAY;
+
+        packedPendingFees = _packFeesWithTimestamp(newTvlFee, newPerformanceFee, timestamp);
+
+        emit FeeUpdateInitialized(newTvlFee, newPerformanceFee, timestamp);
+
+        return true;
+    }
+
+    function enforceFeeUpdate() external returns (uint80 newTvlFee, uint80 newPerformanceFee) {
+        uint256 pendingFees = packedPendingFees;
+        if (pendingFees == 0) revert NoPendingFeeUpdate();
+
+        uint96 timestamp;
+        (newTvlFee, newPerformanceFee, timestamp) = _unpackFeesWithTimestamp(pendingFees);
+
+        if (timestamp > block.timestamp) revert Unauthorized();
+
+        // Collect pending fees
+        _collectFees();
+
+        tvlFeeScaled = newTvlFee;
+        performanceFeeScaled = newPerformanceFee;
+
+        emit FeeUpdateEnforced(newTvlFee, newPerformanceFee);
+
+        packedPendingFees = 0;
+    }
+
     // todo: add preview withdraw
-    // todo: add fee update fct -> le client doit signer un msg pour approuver + préavis de 14 jours appres publication de la sig
-    // todo: collect perf fee & tvl fee through collectFee fct
 }

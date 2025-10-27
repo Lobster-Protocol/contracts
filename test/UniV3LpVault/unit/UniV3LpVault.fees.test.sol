@@ -858,4 +858,243 @@ contract UniV3LpVaultFeesTest is Test {
 
         assertEq(bothFeeSetup.vault.lastVaultTvl0(), finalTvl0 + twapValueFrom1To0);
     }
+
+    // ============ updateFees Tests ============
+
+    function test_UpdateFees_Success() public {
+        uint80 newTvlFee = 1e18;
+        uint80 newPerfFee = 2e18;
+
+        vm.expectEmit(true, true, true, true);
+        emit UniV3LpVault.FeeUpdateInitialized(
+            newTvlFee, newPerfFee, uint96(block.timestamp) + setup.vault.FEE_UPDATE_MIN_DELAY()
+        );
+
+        bool success = setup.vault.updateFees(newTvlFee, newPerfFee);
+        assertTrue(success, "updateFees should return true");
+
+        (uint80 tvl, uint80 perf, uint96 activableAfter) = setup.vault.pendingFeeUpdate();
+        assertEq(tvl, newTvlFee, "Pending TVL fee mismatch");
+        assertEq(perf, newPerfFee, "Pending performance fee mismatch");
+        assertEq(
+            activableAfter, uint96(block.timestamp) + setup.vault.FEE_UPDATE_MIN_DELAY(), "Activation time mismatch"
+        );
+    }
+
+    function test_UpdateFees_OverwritesPending() public {
+        uint80 firstTvlFee = 1e18;
+        uint80 firstPerfFee = 2e18;
+        setup.vault.updateFees(firstTvlFee, firstPerfFee);
+
+        vm.warp(block.timestamp + 1);
+
+        uint80 secondTvlFee = 3e18;
+        uint80 secondPerfFee = 4e18;
+        setup.vault.updateFees(secondTvlFee, secondPerfFee);
+
+        (uint80 tvl, uint80 perf,) = setup.vault.pendingFeeUpdate();
+        assertEq(tvl, secondTvlFee, "Should overwrite with second TVL fee");
+        assertEq(perf, secondPerfFee, "Should overwrite with second performance fee");
+    }
+
+    function test_UpdateFees_ZeroFees() public {
+        bool success = setup.vault.updateFees(0, 0);
+        assertTrue(success, "Should accept zero fees");
+
+        (uint80 tvl, uint80 perf, uint96 activableAfter) = setup.vault.pendingFeeUpdate();
+        assertEq(tvl, 0, "TVL fee should be zero");
+        assertEq(perf, 0, "Performance fee should be zero");
+        assertGt(activableAfter, 0, "Timestamp should be set");
+    }
+
+    function test_UpdateFees_MaxValues() public {
+        uint80 maxFee = uint80(setup.vault.MAX_FEE());
+
+        bool success = setup.vault.updateFees(maxFee, maxFee);
+        assertTrue(success, "Should accept max uint80 values");
+
+        (uint80 tvl, uint80 perf,) = setup.vault.pendingFeeUpdate();
+        assertEq(tvl, maxFee, "Max TVL fee mismatch");
+        assertEq(perf, maxFee, "Max performance fee mismatch");
+    }
+
+    function testFuzz_UpdateFees(uint80 tvlFee, uint80 perfFee) public {
+        if (tvlFee > setup.vault.MAX_FEE() || perfFee > setup.vault.MAX_FEE()) {
+            vm.expectRevert(abi.encodePacked("Fees > max"));
+            setup.vault.updateFees(tvlFee, perfFee);
+            return;
+        }
+
+        setup.vault.updateFees(tvlFee, perfFee);
+
+        (uint80 storedTvl, uint80 storedPerf, uint96 timestamp) = setup.vault.pendingFeeUpdate();
+        assertEq(storedTvl, tvlFee, "Fuzz: TVL fee mismatch");
+        assertEq(storedPerf, perfFee, "Fuzz: Performance fee mismatch");
+        assertEq(timestamp, uint96(block.timestamp) + setup.vault.FEE_UPDATE_MIN_DELAY(), "Fuzz: Timestamp mismatch");
+    }
+
+    // ============ enforceFeeUpdate Tests ============
+
+    function test_EnforceFeeUpdate_Success() public {
+        uint80 newTvlFee = 1e18;
+        uint80 newPerfFee = 2e18;
+
+        setup.vault.updateFees(newTvlFee, newPerfFee);
+
+        // Fast forward past the delay
+        vm.warp(block.timestamp + setup.vault.FEE_UPDATE_MIN_DELAY() + 1);
+
+        vm.expectEmit(true, true, true, true);
+        emit UniV3LpVault.FeeUpdateEnforced(newTvlFee, newPerfFee);
+
+        (uint80 returnedTvl, uint80 returnedPerf) = setup.vault.enforceFeeUpdate();
+
+        assertEq(returnedTvl, newTvlFee, "Returned TVL fee mismatch");
+        assertEq(returnedPerf, newPerfFee, "Returned performance fee mismatch");
+        assertEq(setup.vault.tvlFeeScaled(), newTvlFee, "Vault TVL fee not updated");
+        assertEq(setup.vault.performanceFeeScaled(), newPerfFee, "Vault performance fee not updated");
+    }
+
+    function test_EnforceFeeUpdate_RevertsIfNoPending() public {
+        vm.expectRevert(abi.encodeWithSignature("NoPendingFeeUpdate()"));
+        setup.vault.enforceFeeUpdate();
+    }
+
+    function test_EnforceFeeUpdate_RevertsIfTooEarly() public {
+        uint80 newTvlFee = 1e18;
+        uint80 newPerfFee = 2e18;
+
+        setup.vault.updateFees(newTvlFee, newPerfFee);
+
+        // Try to enforce before delay
+        vm.expectRevert(abi.encodeWithSignature("Unauthorized()"));
+        setup.vault.enforceFeeUpdate();
+    }
+
+    function test_EnforceFeeUpdate_ClearsPendingAfterEnforce() public {
+        uint80 newTvlFee = 1e18;
+        uint80 newPerfFee = 2e18;
+
+        setup.vault.updateFees(newTvlFee, newPerfFee);
+        vm.warp(block.timestamp + setup.vault.FEE_UPDATE_MIN_DELAY() + 1);
+
+        setup.vault.enforceFeeUpdate();
+
+        // Should revert on second enforce since pending should be cleared
+        vm.expectRevert(abi.encodeWithSignature("NoPendingFeeUpdate()"));
+        setup.vault.enforceFeeUpdate();
+    }
+
+    function test_EnforceFeeUpdate_WithMaxValues() public {
+        uint80 maxFee = uint80(setup.vault.MAX_FEE());
+
+        setup.vault.updateFees(maxFee, maxFee);
+        vm.warp(block.timestamp + setup.vault.FEE_UPDATE_MIN_DELAY() + 1);
+
+        (uint80 returnedTvl, uint80 returnedPerf) = setup.vault.enforceFeeUpdate();
+
+        assertEq(returnedTvl, maxFee, "Max TVL fee mismatch");
+        assertEq(returnedPerf, maxFee, "Max performance fee mismatch");
+        assertEq(setup.vault.tvlFeeScaled(), maxFee, "Vault TVL fee not set to max");
+        assertEq(setup.vault.performanceFeeScaled(), maxFee, "Vault performance fee not set to max");
+    }
+
+    // ============ pendingFeeUpdate Tests ============
+
+    function test_PendingFeeUpdate_ReturnsZeroWhenNoPending() public view {
+        (uint80 tvl, uint80 perf, uint96 timestamp) = setup.vault.pendingFeeUpdate();
+        assertEq(tvl, 0, "TVL should be zero");
+        assertEq(perf, 0, "Perf should be zero");
+        assertEq(timestamp, 0, "Timestamp should be zero");
+    }
+
+    function test_PendingFeeUpdate_ReturnsCorrectValues() public {
+        uint80 newTvlFee = 1e18;
+        uint80 newPerfFee = 2e18;
+
+        setup.vault.updateFees(newTvlFee, newPerfFee);
+
+        (uint80 tvl, uint80 perf, uint96 timestamp) = setup.vault.pendingFeeUpdate();
+        assertEq(tvl, newTvlFee, "TVL fee mismatch");
+        assertEq(perf, newPerfFee, "Performance fee mismatch");
+        assertEq(timestamp, uint96(block.timestamp) + setup.vault.FEE_UPDATE_MIN_DELAY(), "Timestamp mismatch");
+    }
+
+    function test_PendingFeeUpdate_AfterEnforce() public {
+        uint80 newTvlFee = 1e18;
+        uint80 newPerfFee = 2e18;
+
+        setup.vault.updateFees(newTvlFee, newPerfFee);
+        vm.warp(block.timestamp + setup.vault.FEE_UPDATE_MIN_DELAY() + 1);
+        setup.vault.enforceFeeUpdate();
+
+        // After enforcement, pending should be cleared
+        (uint80 tvl, uint80 perf, uint96 timestamp) = setup.vault.pendingFeeUpdate();
+
+        assertEq(tvl, 0, "TVL should be zero after enforce");
+        assertEq(perf, 0, "Perf should be zero after enforce");
+        assertEq(timestamp, 0, "Timestamp should be zero after enforce");
+    }
+
+    // ============ Integration Tests ============
+
+    function test_FullFeeUpdateCycle() public {
+        uint80 initialTvl = uint80(setup.vault.tvlFeeScaled());
+        uint80 initialPerf = uint80(setup.vault.performanceFeeScaled());
+
+        uint256 newTvlFee256 = initialTvl + 1e17; // Increase by 0.1
+        uint256 newPerfFee256 = initialPerf + 2e17; // Increase by 0.2
+
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint80 newTvlFee = uint80(newTvlFee256);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint80 newPerfFee = uint80(newPerfFee256);
+
+        // Step 1: Initiate update
+        setup.vault.updateFees(newTvlFee, newPerfFee);
+
+        // Step 2: Verify fees haven't changed yet
+        assertEq(setup.vault.tvlFeeScaled(), initialTvl, "TVL shouldn't change yet");
+        assertEq(setup.vault.performanceFeeScaled(), initialPerf, "Perf shouldn't change yet");
+
+        // Step 3: Fast forward and enforce
+        vm.warp(block.timestamp + setup.vault.FEE_UPDATE_MIN_DELAY() + 1);
+        setup.vault.enforceFeeUpdate();
+
+        // Step 4: Verify fees are updated
+        assertEq(setup.vault.tvlFeeScaled(), newTvlFee, "TVL fee should be updated");
+        assertEq(setup.vault.performanceFeeScaled(), newPerfFee, "Perf fee should be updated");
+    }
+
+    function test_MultipleFeeUpdates() public {
+        // First update
+        setup.vault.updateFees(1e18, 2e18);
+        vm.warp(block.timestamp + setup.vault.FEE_UPDATE_MIN_DELAY() + 1);
+        setup.vault.enforceFeeUpdate();
+
+        // Second update
+        setup.vault.updateFees(3e18, 4e18);
+        vm.warp(block.timestamp + setup.vault.FEE_UPDATE_MIN_DELAY() + 1);
+        setup.vault.enforceFeeUpdate();
+
+        assertEq(setup.vault.tvlFeeScaled(), 3e18, "Second TVL fee should be active");
+        assertEq(setup.vault.performanceFeeScaled(), 4e18, "Second perf fee should be active");
+    }
+
+    function test_CancelPendingByOverwriting() public {
+        // First update
+        setup.vault.updateFees(1e18, 2e18);
+
+        // Overwrite before enforcement
+        setup.vault.updateFees(5e18, 6e18);
+
+        vm.warp(block.timestamp + setup.vault.FEE_UPDATE_MIN_DELAY() + 1);
+        (uint80 tvl, uint80 perf) = setup.vault.enforceFeeUpdate();
+
+        // Should get the second update, not the first
+        assertEq(tvl, 5e18, "Should enforce second TVL fee");
+        assertEq(perf, 6e18, "Should enforce second perf fee");
+    }
+
+    // todo: test max fees
 }

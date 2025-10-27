@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {Position, MAX_SCALED_PERCENTAGE} from "../../../src/vaults/UniV3LpVault.sol";
+import {Position, MAX_SCALED_PERCENTAGE, MAX_FEE_SCALED} from "../../../src/vaults/UniV3LpVault.sol";
 import {TestHelper} from "../helpers/TestHelper.sol";
 import {TestConstants} from "../helpers/Constants.sol";
 
@@ -208,6 +208,11 @@ contract UniV3LpVaultFuzzTest is Test {
         timeElapsed = bound(timeElapsed, 1 days, 2 * TestConstants.ONE_YEAR);
         tvlFeeRate = bound(tvlFeeRate, 0, TestConstants.MAX_SCALED_PERCENTAGE / 10); // Max 10% annual
 
+        if (tvlFeeRate > MAX_FEE_SCALED || perfFee > MAX_FEE_SCALED) {
+            vm.expectRevert(abi.encodePacked("Fees > max"));
+            helper.deployVaultWithPool(tvlFeeRate, perfFee);
+            return;
+        }
         TestHelper.VaultSetup memory fuzzSetup = helper.deployVaultWithPool(tvlFeeRate, perfFee);
 
         uint256 depositAmount0 = TestConstants.MEDIUM_AMOUNT;

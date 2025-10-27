@@ -367,4 +367,5 @@ contract UniV3LpVaultViewsTest is Test {
 
     // todo: test positionsLength()
     // todo: test netAssetsValue with perf and tvl fees (add perf and delay before calling the fct. setup already has fees)
+    // todo: test pendingFeeUpdate()
 }

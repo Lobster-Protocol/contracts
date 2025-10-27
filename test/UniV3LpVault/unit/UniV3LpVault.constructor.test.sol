@@ -136,9 +136,6 @@ contract UniV3LpVaultConstructorTest is Test {
         TestHelper.VaultSetup memory setup =
             helper.deployVaultWithPool(TestConstants.MEDIUM_TVL_FEE, TestConstants.MEDIUM_PERF_FEE);
 
-        // Check that TVL fee collection timestamp is set to current block timestamp
-        // Note: This would require making tvlFeeCollectedAt public or adding a getter
-
         // Check that no positions exist initially
         vm.expectRevert();
         setup.vault.getPosition(0);
@@ -154,18 +151,12 @@ contract UniV3LpVaultConstructorTest is Test {
         assertEq(netAssets1, 0);
     }
 
-    function test_constructor_MaxFee_Success() public {
-        TestHelper.VaultSetup memory setup =
-            helper.deployVaultWithPool(TestConstants.MAX_SCALED_PERCENTAGE, TestConstants.MAX_SCALED_PERCENTAGE);
-
-        // Should not revert - 100% TVL&PERF fee is technically allowed (though impractical)
-        assertTrue(address(setup.vault) != address(0));
-    }
-
     function test_constructor_ZeroFee_Success() public {
         TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(0, 0);
 
         // Zero TVL fee should be allowed
         assertTrue(address(setup.vault) != address(0));
     }
+
+    // todo test update fees > max fees
 }
