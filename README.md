@@ -101,8 +101,6 @@ foundryup
 
 # Verify installation
 forge --version
-cast --version
-anvil --version
 ```
 
 ### Building
@@ -142,54 +140,14 @@ forge fmt
 # Check formatting without changes
 forge fmt --check
 
-# Lint with slither (requires installation)
-slither .
+# Lint
+forge lint
 
 # Generate documentation
 forge doc --build
 ```
 
-## Deployment Guide
-
-### Using the Factory
-
-```solidity
-// 1. Deploy the factory
-UniV3LpVaultFactory factory = new UniV3LpVaultFactory();
-
-// 2. Compute vault address (optional, for verification)
-bytes32 salt = keccak256(abi.encodePacked("my-vault-v1"));
-address predictedAddress = factory.computeVaultAddress(
-    salt,
-    owner,
-    allocator,
-    token0,
-    token1,
-    pool,
-    feeCollector,
-    tvlFee,     // e.g., 2e18 = 2% annual
-    perfFee     // e.g., 20e18 = 20% of profits
-);
-
-// 3. Deploy vault
-address vault = factory.deployVault(
-    salt,
-    owner,
-    allocator,
-    token0,
-    token1,
-    pool,
-    feeCollector,
-    tvlFee,
-    perfFee
-);
-
-// 4. Verify deployment
-require(factory.isVault(vault), "Deployment failed");
-require(vault == predictedAddress, "Address mismatch");
-```
-
-## 📊 Fee Mechanics
+## Fee Mechanics
 
 ### TVL Management Fee
 - **Type**: Annualized percentage of total assets
@@ -220,35 +178,18 @@ The vault uses a 7-day TWAP for accurate price calculations. For proper operatio
 - **Pool must have swap activity** to populate TWAP observations
 - New pools without sufficient history will revert on certain operations
 
+> Note: the vault will work fine if the pool is less that 7 days old and performance fees = 0
+
 ### Position Management Best Practices
-1. **Limit Active Positions**: Keep 1-3 positions for gas efficiency
+1. **Limit Active Positions**: Keep 1-3 simultaneous positions for gas efficiency
 2. **Monitor Liquidity Depth**: Remove positions with very low liquidity
 3. **Regular Rebalancing**: Collect fees and rebalance positions periodically
 4. **Slippage Protection**: Always set appropriate `amount0Min` and `amount1Min`
 
-### Security Checklist
-- [ ] Verify token0 < token1 (address ordering)
-- [ ] Confirm pool matches token pair
-- [ ] Set reasonable initial fees (≤30%)
-- [ ] Use secure allocator address
-- [ ] Test with small amounts first
-- [ ] Monitor fee accrual rates
-- [ ] Set up emergency procedures for lock mechanism
-
-## Known Issues & TODOs
-
-**From Contract Comments:**
-```solidity
-// TODO: In UniV3LpVault._withdrawFromPositions
-// Must empty positions left with low liquidity after withdrawal
-// and burn NFT to avoid accumulating dust positions
-```
-
-**Recommendation**: Implement a minimum liquidity threshold check after withdrawals that automatically closes positions falling below the threshold.
 
 ## License
 
-This project is licensed under the GNU AGPL v3.0 License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GNU AGPL v3.0 License - see the [LICENSE](./LICENSE) file for details.
 
 ## Disclaimer
 
