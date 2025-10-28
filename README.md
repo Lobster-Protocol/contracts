@@ -1,6 +1,6 @@
 # Lobster Vault System
 
-A production-ready Uniswap V3 liquidity management vault with fee collection, role-based access control, and emergency safeguards.
+A production-ready Uniswap V3 liquidity management vault with role-based access control, fee collection mechanisms, and emergency safeguards.
 
 ## Architecture Overview
 
@@ -39,8 +39,6 @@ The Lobster Vault System provides a streamlined architecture for managing Uniswa
 - **ETH Rejection**: Prevents accidental ETH deposits
 
 ### UniV3LpVault
-**Purpose**: Production-ready Uniswap V3 liquidity position management with fee collection
-
 **Features:**
 - **Complete Position Lifecycle Management**:
   - Mint new positions with customizable tick ranges
@@ -49,7 +47,8 @@ The Lobster Vault System provides a streamlined architecture for managing Uniswa
   - Automatic position tracking and cleanup
 - **Dual Fee System**:
   - **TVL Fee**: Annualized management fee on total assets
-  - **Performance Fee**: Fee on vault growth (only charged on positive returns)
+  - **Performance Fee**: Fee on vault growth with delta-weighted price adjustment
+- **Delta-Weighted Performance Calculation**: Adjusts for relative token price changes
 - **Automated Fee Collection**: Fees auto-collect during deposits/withdrawals
 - **TWAP-Based Valuation**: 7-day time-weighted average price for accurate asset valuation
 - **Proportional Withdrawals**: Users withdraw based on their share of vault assets
@@ -63,10 +62,10 @@ The Lobster Vault System provides a streamlined architecture for managing Uniswa
 **Purpose**: Factory contract for deterministic vault deployment
 
 **Features:**
-- **CREATE2 Deployment**: Predictable vault addresses using salt-based generation
 - **Vault Registry**: Tracks all deployed vaults via `isVault` mapping
-- **Address Prediction**: Compute vault address before deployment
+- **Address Prediction**: Compute vault address before deployment with `computeVaultAddress()`
 - **Deployment Transparency**: Events emitted for all deployments
+- **Configurable Delta**: Allows customization of performance fee calculation weight
 
 ## Access Control Model
 
@@ -76,7 +75,6 @@ The Lobster Vault System provides a streamlined architecture for managing Uniswa
 - Can update allocator address
 - Can lock/unlock vault
 - Can execute all position operations
-- Update fee parameters (with timelock)
 
 ### Allocator
 - Can mint new positions
@@ -86,9 +84,9 @@ The Lobster Vault System provides a streamlined architecture for managing Uniswa
 - **Blocked** when vault is locked
 
 ### Fee Collector
-- Collects accumulated fees
-- Initiates fee parameter updates
-- Enforces timelocked fee changes
+- Collects accumulated fees via `collectPendingFees()`
+- Initiates fee parameter updates via `updateFees()`
+- Enforces timelocked fee changes via `enforceFeeUpdate()`
 
 ## Development Setup
 
@@ -140,9 +138,6 @@ forge fmt
 # Check formatting without changes
 forge fmt --check
 
-# Lint
-forge lint
-
 # Generate documentation
 forge doc --build
 ```
@@ -152,44 +147,142 @@ forge doc --build
 ### TVL Management Fee
 - **Type**: Annualized percentage of total assets
 - **Calculation**: Accrues linearly over time based on asset value
+- **Formula**: `fee = tvlFee * timeElapsed / 365 days`
 - **Collection**: Automatic during deposits/withdrawals or manual via `collectPendingFees()`
 - **Max Rate**: 30% (configurable via `MAX_FEE`)
 
 ### Performance Fee
-- **Type**: Percentage of vault growth
-- **Calculation**: Only charged when vault TVL (in token0) increases
-- **Benchmark**: Tracks `lastVaultTvl0` to measure growth
+- **Type**: Percentage of vault growth (adjusted for price changes)
+- **Calculation**: Only charged when vault TVL increases above a delta-weighted baseline
+- **Delta Parameter**: Controls sensitivity to relative token price changes (0 to 1e18)
 - **Collection**: Automatic when vault performs positively
 - **Max Rate**: 30% (configurable via `MAX_FEE`)
 
-**Example**:
+#### Understanding Delta
+
+The `delta` parameter controls how the performance fee accounts for relative token value changes:
+
+**Formula**: `baseTvl0 = lastVaultTvl0 × (delta × (lastQuote / currentQuote)² + (1 - delta))`
+
+**Delta Values**:
+- **delta = 0**: Performance based entirely on token0 accumulation relative to token1
+  - Best for strategies focused on accumulating the base token
+  - Example: ETH/USDC vault aiming to maximize ETH holdings
+
+- **delta = 0.5e18** (50%): Equal weighting of both tokens
+  - Balanced approach for neutral strategies
+  - Fair for portfolios maintaining roughly equal token ratios
+
+- **delta = 1e18** (100%): Performance based entirely on token1 accumulation relative to token0
+  - Best for strategies focused on accumulating the quote token
+  - Example: Stablecoin farming where you want to measure USD value growth
+
+**Example Scenarios**:
+
 ```
-Initial TVL: 100,000 USDC
-After trading: 120,000 USDC
-Growth: 20,000 USDC
-Performance Fee (20%): 4,000 USDC
+Scenario 1: USDC/WETH Vault (δ = 0)
+- Initial: 20,000 USDC + 10 WETH, WETH = $2,000
+         = 20 WETH equivalent
+- Later: 18,000 USDC + 12 WETH, WETH = $2,200
+       = 20.18 WETH equivalent
+- Performance: +0.18 WETH (outperformance)
+- Focus: Maximizing WETH accumulation
+
+Scenario 2: USDC/WETH Vault (δ = 0.5e18)
+- Initial: 20,000 USDC + 10 WETH, WETH = $2,000
+         = 20 WETH equivalent
+- Later: 30,000 USDC + 8 WETH, WETH = $2,200
+       = 21.63 WETH equivalent
+- Performance: +0.63 WETH as normal hold value 50/50
+- Result: Should leave a +10% performance on underlying performance
+- Focus: Balanced 50/50 portfolio approach
+
+Scenario 3: USDC/WETH Vault (δ = 1e18)
+- Initial: 20,000 USDC + 10 WETH, WETH = $2,000
+         = 20 ETH equivalent
+- Later: 25,000 USDC + 11 WETH, WETH = $2,200
+       = 22.36 WETH equivalent
+- Performance: +0.36 WETH as counted on USDC
+- Focus: Token value counted on token WETH (outperformance counted on USDC)
 ```
+
+### Fee Update Process
+
+The vault implements a two-step timelock mechanism for fee changes:
+
+1. **Initiate Update**: Fee collector calls `updateFees(newTvlFee, newPerformanceFee)`
+   - Starts 14-day timelock period
+   - Emits `FeeUpdateInitialized` event
+
+2. **Enforce Update**: After 14 days, call `enforceFeeUpdate()`
+   - Collects all pending fees at old rates
+   - Activates new fee parameters
+   - Emits `FeeUpdateEnforced` event
 
 ## Important Considerations
 
 ### TWAP Requirements
-The vault uses a 7-day TWAP for accurate price calculations. For proper operation:
-- **Pool must have existed for at least 7 days**
-- **Pool must have swap activity** to populate TWAP observations
-- New pools without sufficient history will revert on certain operations
 
-> Note: the vault will work fine if the pool is less that 7 days old and performance fees = 0
+The vault uses a 7-day TWAP for accurate price calculations. For proper operation:
+- **Pool must have swap activity** to populate TWAP observations
+- New pools without sufficient history may revert on operations requiring TWAP
+
+> **Note**: The vault will work fine with pools less than 7 days old if `performanceFeeScaled = 0`
 
 ### Position Management Best Practices
+
 1. **Limit Active Positions**: Keep 1-3 simultaneous positions for gas efficiency
 2. **Monitor Liquidity Depth**: Remove positions with very low liquidity
 3. **Regular Rebalancing**: Collect fees and rebalance positions periodically
 4. **Slippage Protection**: Always set appropriate `amount0Min` and `amount1Min`
+5. **Gas Optimization**: Batch operations when possible to reduce transaction costs
 
+### Choosing the Right Delta
+
+Consider your vault's investment strategy when setting delta:
+
+- **Long Token0 Strategy**: Set delta closer to 0
+- **Long Token1 Strategy**: Set delta closer to 1e18
+- **Market Neutral Strategy**: Set delta around 0.5e18
+- **Stablecoin Pairs**: Set delta to 0.5e18 for balanced measurement
+
+## Deployment Guide
+
+### Factory Deployment
+
+```solidity
+// Deploy the factory
+UniV3LpVaultFactory factory = new UniV3LpVaultFactory();
+```
+
+## Key Functions
+
+### Owner Functions
+- `deposit(uint256 assets0, uint256 assets1)` - Deposit tokens into vault
+- `withdraw(uint256 scaledPercentage, address recipient)` - Withdraw percentage of holdings
+
+### Allocator Functions
+- `mint(MinimalMintParams params)` - Create new liquidity position
+- `burn(int24 tickLower, int24 tickUpper, uint128 amount)` - Remove liquidity
+- `collect(int24 tickLower, int24 tickUpper, uint128 amount0Max, uint128 amount1Max)` - Collect fees
+
+### Fee Collector Functions
+- `collectPendingFees()` - Manually trigger fee collection
+- `updateFees(uint80 newTvlFee, uint80 newPerformanceFee)` - Initiate fee update
+- `enforceFeeUpdate()` - Apply pending fee update after timelock
+
+### View Functions
+- `rawAssetsValue()` - Total vault assets before fees
+- `netAssetsValue()` - Vault assets after deducting pending fees
+- `pendingTvlFee()` - Calculate pending management fees
+- `pendingPerformanceFee()` - Calculate pending performance fees
+- `totalLpValue()` - Value locked in LP positions
+- `getPosition(uint256 index)` - Get position details
+- `positionsLength()` - Number of active positions
 
 ## License
 
-This project is licensed under the GNU AGPL v3.0 License - see the [LICENSE](./LICENSE) file for details.
+This project is licensed under the GPL-3.0-or-later License - see the [LICENSE](./LICENSE) file for details.
 
 ## Disclaimer
 
@@ -201,6 +294,8 @@ This software is provided "as is" without warranty. Use at your own risk.
 - Understand the risks of impermanent loss in liquidity provision
 - Monitor positions regularly for optimal performance
 - Be aware of gas costs for position management operations
+- Carefully choose delta parameter based on your strategy
+- Understand how fee calculations work before deploying
 
 ## Additional Resources
 
