@@ -4,7 +4,8 @@ pragma solidity ^0.8.28;
 import "forge-std/Test.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {
-    UniV3LpVault,
+    UniV3LpVaultVariables,
+    UniV3LpVaultVariables,
     MAX_SCALED_PERCENTAGE,
     TWAP_SECONDS_AGO,
     SCALING_FACTOR
@@ -99,7 +100,7 @@ contract UniV3LpVaultFeesTest is Test {
         uint256 initialFeeCollectorBalance1 = tvlFeeSetup.token1.balanceOf(tvlFeeSetup.feeCollector);
 
         vm.expectEmit(false, false, true, true);
-        emit UniV3LpVault.TvlFeeCollected(0, 0, tvlFeeSetup.feeCollector);
+        emit UniV3LpVaultVariables.TvlFeeCollected(0, 0, tvlFeeSetup.feeCollector);
 
         // Trigger fee collection
         helper.depositToVault(tvlFeeSetup, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT);
@@ -757,7 +758,7 @@ contract UniV3LpVaultFeesTest is Test {
         uint80 newPerfFee = 2e18;
 
         vm.expectEmit(true, true, true, true);
-        emit UniV3LpVault.FeeUpdateInitialized(
+        emit UniV3LpVaultVariables.FeeUpdateInitialized(
             newTvlFee, newPerfFee, uint96(block.timestamp) + setup.vault.FEE_UPDATE_MIN_DELAY()
         );
 
@@ -846,7 +847,7 @@ contract UniV3LpVaultFeesTest is Test {
         vm.warp(block.timestamp + setup.vault.FEE_UPDATE_MIN_DELAY() + 1);
 
         vm.expectEmit(true, true, true, true);
-        emit UniV3LpVault.FeeUpdateEnforced(newTvlFee, newPerfFee);
+        emit UniV3LpVaultVariables.FeeUpdateEnforced(newTvlFee, newPerfFee);
 
         (uint80 returnedTvl, uint80 returnedPerf) = setup.vault.enforceFeeUpdate();
 

@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import "forge-std/Test.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {UniV3LpVault} from "../../../src/vaults/uniV3LpVault/UniV3LpVault.sol";
+import {UniV3LpVaultVariables} from "../../../src/vaults/uniV3LpVault/UniV3LpVaultVariables.sol";
 import {SingleVault} from "../../../src/vaults/SingleVault.sol";
 import {TestHelper} from "../helpers/TestHelper.sol";
 import {TestConstants} from "../helpers/Constants.sol";
@@ -41,7 +41,7 @@ contract UniV3LpVaultWithdrawTest is Test {
         uint256 initialRecipientBalance1 = setup.token1.balanceOf(recipient);
 
         vm.expectEmit(false, false, true, true); // We don't check indexed parameters due to complexity
-        emit UniV3LpVault.Withdraw(0, 0, recipient); // Amounts will be calculated dynamically
+        emit UniV3LpVaultVariables.Withdraw(0, 0, recipient); // Amounts will be calculated dynamically
 
         vm.prank(setup.owner);
         (uint256 withdrawn0, uint256 withdrawn1) = setup.vault.withdraw(withdrawPercentage, recipient);
@@ -99,7 +99,7 @@ contract UniV3LpVaultWithdrawTest is Test {
         uint256 excessivePercentage = TestConstants.MAX_SCALED_PERCENTAGE + 1;
 
         vm.prank(setup.owner);
-        vm.expectRevert(UniV3LpVault.InvalidScalingFactor.selector);
+        vm.expectRevert(UniV3LpVaultVariables.InvalidScalingFactor.selector);
         setup.vault.withdraw(excessivePercentage, recipient);
     }
 
@@ -179,7 +179,7 @@ contract UniV3LpVaultWithdrawTest is Test {
         uint256 initialFeeCollectorBalance1 = feeSetup.token1.balanceOf(feeSetup.feeCollector);
 
         vm.expectEmit(false, false, true, true);
-        emit UniV3LpVault.TvlFeeCollected(0, 0, feeSetup.feeCollector);
+        emit UniV3LpVaultVariables.TvlFeeCollected(0, 0, feeSetup.feeCollector);
 
         vm.prank(feeSetup.owner);
         feeSetup.vault.withdraw(TestConstants.HALF_SCALED_PERCENTAGE, recipient);

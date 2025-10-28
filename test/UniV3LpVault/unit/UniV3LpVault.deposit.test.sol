@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
 import {
-    UniV3LpVault,
+    UniV3LpVaultVariables,
     MAX_SCALED_PERCENTAGE,
     TWAP_SECONDS_AGO,
     SCALING_FACTOR
@@ -36,7 +36,7 @@ contract UniV3LpVaultDepositTest is Test {
         uint256 initialOwnerBalance1 = setup.token1.balanceOf(setup.owner);
 
         vm.expectEmit(true, true, true, true);
-        emit UniV3LpVault.Deposit(amount0, amount1);
+        emit UniV3LpVaultVariables.Deposit(amount0, amount1);
 
         vm.prank(setup.owner);
         setup.vault.deposit(amount0, amount1);
@@ -58,7 +58,7 @@ contract UniV3LpVaultDepositTest is Test {
         uint256 initialVaultBalance1 = setup.token1.balanceOf(address(setup.vault));
 
         vm.expectEmit(true, true, true, true);
-        emit UniV3LpVault.Deposit(amount0, amount1);
+        emit UniV3LpVaultVariables.Deposit(amount0, amount1);
 
         vm.prank(setup.owner);
         setup.vault.deposit(amount0, amount1);
@@ -75,7 +75,7 @@ contract UniV3LpVaultDepositTest is Test {
         uint256 initialVaultBalance1 = setup.token1.balanceOf(address(setup.vault));
 
         vm.expectEmit(true, true, true, true);
-        emit UniV3LpVault.Deposit(amount0, amount1);
+        emit UniV3LpVaultVariables.Deposit(amount0, amount1);
 
         vm.prank(setup.owner);
         setup.vault.deposit(amount0, amount1);
