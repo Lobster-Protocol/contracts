@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import "forge-std/Test.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {UniV3LpVault} from "../../../src/vaults/UniV3LpVault.sol";
+import {UniV3LpVault} from "../../../src/vaults/uniV3LpVault/UniV3LpVault.sol";
 import {SingleVault} from "../../../src/vaults/SingleVault.sol";
 import {TestHelper} from "../helpers/TestHelper.sol";
 import {TestConstants} from "../helpers/Constants.sol";

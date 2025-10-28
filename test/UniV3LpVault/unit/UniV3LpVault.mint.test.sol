@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import {UniV3LpVault, MinimalMintParams, Position} from "../../../src/vaults/UniV3LpVault.sol";
+import {UniV3LpVault, MinimalMintParams, Position} from "../../../src/vaults/uniV3LpVault/UniV3LpVault.sol";
 import {SingleVault} from "../../../src/vaults/SingleVault.sol";
 import {MintCallbackData} from "../../../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
 import {PoolAddress} from "../../../src/libraries/uniswapV3/PoolAddress.sol";

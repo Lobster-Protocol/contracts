@@ -9,7 +9,7 @@ import {
     Position,
     SCALING_FACTOR,
     MAX_SCALED_PERCENTAGE
-} from "../../../src/vaults/UniV3LpVault.sol";
+} from "../../../src/vaults/uniV3LpVault/UniV3LpVault.sol";
 import {MockERC20} from "../../Mocks/MockERC20.sol";
 import {UniswapV3Infra} from "../../Mocks/uniswapV3/UniswapV3Infra.sol";
 import {IUniswapV3FactoryMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";

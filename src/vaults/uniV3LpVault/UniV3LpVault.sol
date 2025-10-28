@@ -3,17 +3,17 @@ pragma solidity ^0.8.28;
 
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
-import {SingleVault} from "./SingleVault.sol";
-import {IUniswapV3PoolMinimal} from "../interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
-import {LiquidityAmounts} from "../libraries/uniswapV3/LiquidityAmounts.sol";
-import {TickMath} from "../libraries/uniswapV3/TickMath.sol";
-import {FeeParams} from "../libraries/uniswapV3/PositionValue.sol";
-import {PositionKey} from "../libraries/uniswapV3/PositionKey.sol";
+import {SingleVault} from "../SingleVault.sol";
+import {IUniswapV3PoolMinimal} from "../../interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
+import {LiquidityAmounts} from "../../libraries/uniswapV3/LiquidityAmounts.sol";
+import {TickMath} from "../../libraries/uniswapV3/TickMath.sol";
+import {FeeParams} from "../../libraries/uniswapV3/PositionValue.sol";
+import {PositionKey} from "../../libraries/uniswapV3/PositionKey.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {MintCallbackData} from "../interfaces/uniswapV3/IUniswapV3MintCallback.sol";
-import {PoolAddress} from "../libraries/uniswapV3/PoolAddress.sol";
-import {UniswapV3Calculator} from "../utils/UniswapV3Calculator.sol";
-import {UniswapUtils} from "../libraries/uniswapV3/UniswapUtils.sol";
+import {MintCallbackData} from "../../interfaces/uniswapV3/IUniswapV3MintCallback.sol";
+import {PoolAddress} from "../../libraries/uniswapV3/PoolAddress.sol";
+import {UniswapV3Calculator} from "../../utils/UniswapV3Calculator.sol";
+import {UniswapUtils} from "../../libraries/uniswapV3/UniswapUtils.sol";
 
 // Constant used to scale values
 uint256 constant SCALING_FACTOR = 1e18;
@@ -246,7 +246,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     {
         require(uint160(token0) < uint160(token1), "Wrong token 0 & 1 order");
         require(initialFeeCollector != address(0), ZeroAddress());
-        require(delta < SCALING_FACTOR, InvalidValue());
+        require(delta <= SCALING_FACTOR, InvalidValue());
         require(initialPerformanceFee <= MAX_FEE && initialtvlFee <= MAX_FEE, "Fees > max");
 
         POOL = IUniswapV3PoolMinimal(pool);

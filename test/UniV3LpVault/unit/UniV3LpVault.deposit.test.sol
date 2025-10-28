@@ -7,7 +7,7 @@ import {
     MAX_SCALED_PERCENTAGE,
     TWAP_SECONDS_AGO,
     SCALING_FACTOR
-} from "../../../src/vaults/UniV3LpVault.sol";
+} from "../../../src/vaults/uniV3LpVault/UniV3LpVault.sol";
 import {SingleVault} from "../../../src/vaults/SingleVault.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {TestHelper} from "../helpers/TestHelper.sol";

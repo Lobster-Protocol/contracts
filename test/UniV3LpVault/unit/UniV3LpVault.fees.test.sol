@@ -8,7 +8,7 @@ import {
     MAX_SCALED_PERCENTAGE,
     TWAP_SECONDS_AGO,
     SCALING_FACTOR
-} from "../../../src/vaults/UniV3LpVault.sol";
+} from "../../../src/vaults/uniV3LpVault/UniV3LpVault.sol";
 import {TestHelper} from "../helpers/TestHelper.sol";
 import {TestConstants} from "../helpers/Constants.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";

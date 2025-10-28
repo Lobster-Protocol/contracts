@@ -2,8 +2,8 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
-import "../src/vaults/UniV3LpVaultFactory.sol";
-import "../src/vaults/UniV3LpVault.sol";
+import "../src/vaults/uniV3LpVault/UniV3LpVaultFactory.sol";
+import "../src/vaults/uniV3LpVault/UniV3LpVault.sol";
 import {MockERC20} from "./Mocks/MockERC20.sol";
 import {UniswapV3Infra} from "./Mocks/uniswapV3/UniswapV3Infra.sol";
 import {IUniswapV3FactoryMinimal} from "../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
