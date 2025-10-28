@@ -15,13 +15,16 @@ import {PoolAddress} from "../../libraries/uniswapV3/PoolAddress.sol";
 import {UniswapV3Calculator} from "../../utils/UniswapV3Calculator.sol";
 import {UniswapUtils} from "../../libraries/uniswapV3/UniswapUtils.sol";
 
-// Constant used to scale values
+// Constant used to scale percentage values (represents 1.0 or 100% in fixed-point arithmetic)
 uint256 constant SCALING_FACTOR = 1e18;
-// Maximum percentage value scaled (100% scaled)
+
+// Maximum percentage value scaled (100% scaled, equals 100 * 1e18)
 uint256 constant MAX_SCALED_PERCENTAGE = 100 * SCALING_FACTOR;
-// Maximum fee that can be charged (scaled by SCALING_FACTOR)
+
+// Maximum fee that can be charged (30% scaled, equals 30 * 1e18)
 uint256 constant MAX_FEE_SCALED = 30 * SCALING_FACTOR;
-// Time window for TWAP (Time-Weighted Average Price) calculations
+
+// Time window for TWAP (Time-Weighted Average Price) calculations - 7 days in seconds
 uint32 constant TWAP_SECONDS_AGO = 7 days;
 
 /**
@@ -68,8 +71,8 @@ struct WithdrawParams {
     uint256 userScaledPercent;
     uint256 tvlFeeScaledPercent;
     uint256 performanceFeeScaledPercent;
-    uint256 newTvlInToken0; // Vault tvl in token 0
-    address recipient; // recipient for the user's withdrawal
+    uint256 newTvlInToken0;
+    address recipient;
 }
 
 /**
@@ -101,10 +104,19 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     using Math for uint256;
 
     // ========== STATE VARIABLES ==========
+
     /// @notice Minimum delay before fee updates can be enforced (14 days timelock)
     uint96 public constant FEE_UPDATE_MIN_DELAY = 14 days;
 
-    // value between 0 and 1, scaled by SCALING_FACTOR
+    /**
+     * @notice Token ratio weight for performance fee calculation (0 to 1e18)
+     * @dev Controls how the performance fee accounts for relative token value changes:
+     *              - delta = 0 -> performance fee based entirely on token0 accumulation relative to token1
+     *              - delta = 1e18 -> performance fee based entirely on token1 accumulation relative to token0
+     *              - delta = 0.5e18 -> equal weighting of both tokens (50% - 50% hold value)
+     *
+     *      Used in formula: baseTvl0 = lastVaultTvl0 * (delta * (lastQuote / currentQuote)^2 + (1 - delta))
+     */
     uint256 public immutable DELTA;
 
     /// @notice First token in the UniswapV3 pair (lower address)
@@ -134,16 +146,27 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     /// @notice Last recorded vault TVL denominated in token0 (used for performance fee calculation)
     uint256 public lastVaultTvl0;
 
+    /**
+     * @notice Last recorded token1/token0 price quote (scaled by SCALING_FACTOR)
+     * @dev Used in performance fee calculation to adjust for relative price changes between tokens
+     *      Represents how many token0 units equal 1 token1 unit, scaled by SCALING_FACTOR
+     */
     uint256 public lastQuoteScaled;
 
     /// @notice Address authorized to collect accumulated fees
     address public feeCollector;
 
-    /// @notice Packed storage of pending fee updates with activation timestamp
-    /// @dev Format: [80 bits tvlFee][80 bits perfFee][96 bits timestamp]
+    /**
+     * @notice Packed storage of pending fee updates with activation timestamp
+     * @dev Format: [80 bits tvlFee][80 bits perfFee][96 bits timestamp]
+     *      Bit layout (256 bits total):
+     *      - Bits 176-255 (80 bits): TVL fee value
+     *      - Bits 96-175 (80 bits): Performance fee value
+     *      - Bits 0-95 (96 bits): Activation timestamp
+     */
     uint256 private packedPendingFees;
 
-    /// @notice Array of active liquidity positions (typically up to 3 positions)
+    /// @notice Array of active liquidity positions (Not designed to hold more than 3 positions even if it is technically possible)
     Position[] private positions;
 
     // ========== ERRORS ==========
@@ -230,6 +253,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
      * @param initialFeeCollector Address authorized to collect fees
      * @param initialtvlFee Initial annualized TVL management fee (scaled)
      * @param initialPerformanceFee Initial performance fee on profits (scaled)
+     * @param delta Token ratio weight for performance fee calculation (0 to 1e18)
      */
     constructor(
         address initialOwner,
@@ -392,7 +416,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     /**
      * @notice Allows fee collector to trigger collection of pending fees
-     * @dev Collects both TVL management fees and performance fees if applicable
+     * @dev Collects both pending TVL management fees and performance fees if applicable
      */
     function collectPendingFees() external onlyFeeCollector {
         _collectFees();
@@ -548,6 +572,13 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     /**
      * @notice Internal function to execute withdrawals and fee collections
      * @dev Handles burning liquidity, collecting fees, and distributing tokens
+     *      The function follows this sequence:
+     *      1. Collects all uncollected fees from positions
+     *      2. Calculates fee percentages (TVL + performance, capped at 100%)
+     *      3. Adjusts user percentage to account for fees
+     *      4. Burns liquidity proportionally from all positions
+     *      5. Distributes tokens to fee collector and user based on calculated percentages
+     *      6. Updates lastVaultTvl0 if performance fees were collected
      * @param withdrawParams Struct containing all withdrawal parameters
      * @return amount0 Amount of token0 withdrawn for the user
      * @return amount1 Amount of token1 withdrawn for the user
@@ -574,11 +605,13 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         uint256 tvlFeeScaledPercent = withdrawParams.tvlFeeScaledPercent;
         uint256 performanceFeeScaledPercent = withdrawParams.performanceFeeScaledPercent;
 
+        // Cap total fees at 100% to prevent overflow
         if (tvlFeeScaledPercent + performanceFeeScaledPercent > MAX_SCALED_PERCENTAGE) {
             performanceFeeScaledPercent = 0;
             tvlFeeScaledPercent = MAX_SCALED_PERCENTAGE;
         }
 
+        // Calculate user's share after fees: user% * (100% - fees%)
         userScaledPercent = (MAX_SCALED_PERCENTAGE - tvlFeeScaledPercent - performanceFeeScaledPercent)
         .mulDiv(userScaledPercent, MAX_SCALED_PERCENTAGE);
 
@@ -592,6 +625,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         // Extract the fees
         // TVL
         if (tvlFeeScaledPercent > 0) {
+            // Calculate TVL fee from withdrawn amounts
             uint256 tvlFeeFromWithdrawn0 = totalToWithdrawScaledPercent > 0
                 ? withdrawn0.mulDiv(tvlFeeScaledPercent, totalToWithdrawScaledPercent)
                 : 0;
@@ -599,6 +633,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
                 ? withdrawn1.mulDiv(tvlFeeScaledPercent, totalToWithdrawScaledPercent)
                 : 0;
 
+            // Add TVL fee from free balance
             uint256 tvlFeeAssets0 =
                 initialToken0Balance.mulDiv(tvlFeeScaledPercent, MAX_SCALED_PERCENTAGE) + tvlFeeFromWithdrawn0;
             uint256 tvlFeeAssets1 =
@@ -612,6 +647,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         }
         // Performance
         if (performanceFeeScaledPercent > 0) {
+            // Calculate performance fee from withdrawn amounts
             uint256 perfFeeFromWithdrawn0 = totalToWithdrawScaledPercent > 0
                 ? withdrawn0.mulDiv(performanceFeeScaledPercent, totalToWithdrawScaledPercent)
                 : 0;
@@ -619,6 +655,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
                 ? withdrawn1.mulDiv(performanceFeeScaledPercent, totalToWithdrawScaledPercent)
                 : 0;
 
+            // Add performance fee from free balance
             uint256 perfFeeAssets0 =
                 initialToken0Balance.mulDiv(performanceFeeScaledPercent, MAX_SCALED_PERCENTAGE) + perfFeeFromWithdrawn0;
             uint256 perfFeeAssets1 =
@@ -630,11 +667,13 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         }
 
         // User Withdraw
+        // Calculate user's share from withdrawn amounts
         uint256 fromWithdrawn0 =
             totalToWithdrawScaledPercent > 0 ? withdrawn0.mulDiv(userScaledPercent, totalToWithdrawScaledPercent) : 0;
         uint256 fromWithdrawn1 =
             totalToWithdrawScaledPercent > 0 ? withdrawn1.mulDiv(userScaledPercent, totalToWithdrawScaledPercent) : 0;
 
+        // Add user's share from free balance
         uint256 assets0ToWithdrawForUser =
             initialToken0Balance.mulDiv(userScaledPercent, MAX_SCALED_PERCENTAGE) + fromWithdrawn0;
 
@@ -658,7 +697,9 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     /**
      * @notice Burns liquidity from all positions proportionally
-     * @param scaledPercentage Percentage of liquidity to burn from each position
+     * @dev Creates a snapshot of positions array to safely iterate while modifying the actual positions
+     *      Burns the specified percentage from each position and accumulates withdrawn amounts
+     * @param scaledPercentage Percentage of liquidity to burn from each position (scaled by SCALING_FACTOR)
      * @return withdrawn0 Total token0 withdrawn from all positions
      * @return withdrawn1 Total token1 withdrawn from all positions
      */
@@ -687,6 +728,11 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     /**
      * @notice Internal function to mint liquidity to the pool
      * @dev Creates or adds to existing position, includes deadline check
+     *      The function:
+     *      1. Calculates required liquidity based on desired amounts and current price
+     *      2. Calls the Uniswap V3 pool's mint function
+     *      3. Verifies slippage constraints (amount0Min, amount1Min)
+     *      4. Updates or creates position record in the positions array
      * @param params Minting parameters
      * @return amount0 Amount of token0 actually added
      * @return amount1 Amount of token1 actually added
@@ -696,7 +742,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         checkDeadline(params.deadline)
         returns (uint256 amount0, uint256 amount1)
     {
-        // compute the liquidity amount
+        // Compute the liquidity amount
         uint128 liquidity;
         {
             (uint160 sqrtPriceX96,,,,,,) = POOL.slot0();
@@ -724,6 +770,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         Position memory newPosition =
             Position({upperTick: params.tickUpper, lowerTick: params.tickLower, liquidity: liquidity});
 
+        // Check if position already exists, if so add liquidity, otherwise create new position
         bool isPositionCreation = true;
         uint256 posLen = positions.length;
         for (uint256 i = 0; i < posLen; i++) {
@@ -743,6 +790,10 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     /**
      * @notice Internal function to burn liquidity from the pool
      * @dev Automatically collects tokens and updates position records
+     *      The function:
+     *      1. Burns the specified liquidity amount from the pool
+     *      2. Automatically collects the resulting tokens (principal + fees)
+     *      3. Updates the positions array (removes if fully burned, decreases liquidity otherwise)
      * @param tickLower Lower tick boundary
      * @param tickUpper Upper tick boundary
      * @param amount Amount of liquidity to burn
@@ -777,9 +828,11 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
             Position memory position = positions[i];
             if (haveSameRange(position, refPosition)) {
                 if (position.liquidity == amount) {
+                    // Fully burned: swap with last element and pop
                     positions[i] = positions[posLen - 1];
                     positions.pop();
                 } else {
+                    // Partially burned: decrease liquidity
                     positions[i].liquidity -= amount;
                 }
                 break;
@@ -789,6 +842,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     /**
      * @notice Internal function to collect fees from a position
+     * @dev Calls the Uniswap V3 pool's collect function to retrieve accumulated trading fees
      * @param tickLower Lower tick boundary
      * @param tickUpper Upper tick boundary
      * @param amount0Requested Maximum token0 to collect
@@ -812,6 +866,9 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     /**
      * @notice Calculates absolute amounts for pending TVL fees
+     * @dev Applies the pending relative TVL fee percentage to the provided amounts
+     * @param amount0 Total amount of token0 to calculate fee from
+     * @param amount1 Total amount of token1 to calculate fee from
      * @return tvlFee0 TVL fee in token0
      * @return tvlFee1 TVL fee in token1
      */
@@ -834,7 +891,8 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     /**
      * @notice Calculates pending TVL fee as a percentage
      * @dev Fees accrue linearly over time based on annualized rate
-     * @return Pending TVL fee percentage (scaled)
+     *      Formula: fee = tvlFeeScaled * (timeElapsed / 365 days), capped at 100%
+     * @return Pending TVL fee percentage (scaled by SCALING_FACTOR)
      */
     function _pendingRelativeTvlFee() internal view returns (uint256) {
         uint256 deltaT = block.timestamp - tvlFeeCollectedAt;
@@ -845,41 +903,48 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     /**
      * @notice Calculates pending performance fee and updated TVL
      * @dev Only charges fee on positive performance (TVL growth)
-     * @return feePercent Performance fee as percentage of total assets
-     * @return newTvl0 Updated vault TVL in token0
+     *      Performance is calculated using a delta-weighted formula that accounts for relative price changes:
+     *      baseTvl0 = lastVaultTvl0 * (delta * (lastQuote / currentQuote)^2 + (1 - delta))
+     *      If newTvl0 > baseTvl0, performance fee = (newTvl0 - baseTvl0) * performanceFeeScaled / newTvl0
+     * @return feePercent Performance fee as percentage of total assets (scaled)
+     * @return newTvl0 Updated vault TVL in token0 (before deducting performance fee)
      */
     function _pendingRelativePerformanceFeeAndNewTvl() internal view returns (uint256 feePercent, uint256 newTvl0) {
-        if (performanceFeeScaled == 0 || lastVaultTvl0 == 0) return (0, 0); // If performance fee is nul, we don't care about the vault tvl in token0 and new sqrtPrice
+        if (performanceFeeScaled == 0 || lastVaultTvl0 == 0) return (0, 0);
 
         uint256 quoteScaled;
         (newTvl0, quoteScaled) = _getNewVaultTvl0();
 
+        // Calculate squared quotes for delta weighting
         uint256 lastQuoteSquared = lastQuoteScaled ** 2;
         uint256 currentQuoteSquared = quoteScaled ** 2;
 
+        // Calculate delta-weighted component: delta * (lastQuote^2 / currentQuote^2)
         uint256 part1 = DELTA.mulDiv(lastQuoteSquared, currentQuoteSquared);
 
-        uint256 part2 = SCALING_FACTOR - DELTA; // SCALING_FACTOR * (1 - delta) (0 <= delta <= 1)
+        // Calculate (1 - delta) component
+        uint256 part2 = SCALING_FACTOR - DELTA;
 
+        // Calculate baseline TVL adjusted for price changes
         uint256 baseTvl0 = lastVaultTvl0.mulDiv(part1 + part2, SCALING_FACTOR);
 
+        // No performance fee if TVL hasn't grown
         if (newTvl0 <= baseTvl0) {
-            return (0, 0); // If performance is nul or negative, we don't care about the vault tvl in token0 and new sqrtPrice
+            return (0, 0);
         }
 
+        // Calculate performance fee as percentage of current TVL
         uint256 relativePerfScaledPercent = (newTvl0 - baseTvl0).mulDiv(performanceFeeScaled, newTvl0);
 
-        return (
-            Math.min(relativePerfScaledPercent, MAX_SCALED_PERCENTAGE),
-            newTvl0 // to get the actual newTvl0 that will be saved in the contract, we must remve the pending performance fees
-        );
+        return (Math.min(relativePerfScaledPercent, MAX_SCALED_PERCENTAGE), newTvl0);
     }
 
     /**
      * @notice Converts token1 amount to equivalent token0 using TWAP
-     * @dev Uses 7-day TWAP for price stability
+     * @dev Uses 7-day TWAP for price stability to prevent manipulation
      * @param amount1 Amount of token1 to convert
      * @return amount0 Equivalent amount in token0
+     * @return quoteScaled The token1/token0 price quote (scaled by SCALING_FACTOR)
      */
     function _convertToToken0(uint256 amount1) internal view returns (uint256 amount0, uint256 quoteScaled) {
         quoteScaled = UniswapUtils.getTwap(
@@ -896,7 +961,9 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     /**
      * @notice Calculates vault TVL denominated in token0
      * @dev Converts all assets to token0 using TWAP, excludes pending TVL fees
-     * @return newVaultTvl0 Total vault value in token0
+     *      This provides a unified measure of vault value for performance fee calculation
+     * @return newVaultTvl0 Total vault value in token0 (after TVL fees, before performance fees)
+     * @return quoteScaled The token1/token0 price quote used for conversion (scaled by SCALING_FACTOR)
      */
     function _getNewVaultTvl0() internal view returns (uint256 newVaultTvl0, uint256 quoteScaled) {
         (uint256 tvl0, uint256 tvl1) = _rawAssetsValue();
@@ -915,6 +982,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     /**
      * @notice Returns total vault assets without fee deductions
      * @dev Includes LP positions, uncollected fees, and free balances
+     *      This is the gross asset value before any fee calculations
      * @return totalAssets0 Total token0 assets
      * @return totalAssets1 Total token1 assets
      */
@@ -929,7 +997,8 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     /**
      * @notice Calculates total value in LP positions
-     * @param sqrtPriceX96 Current pool price
+     * @dev Aggregates principal amounts and uncollected fees across all positions
+     * @param sqrtPriceX96 Current pool price in sqrt(token1/token0) * 2^96 format
      * @param currentTick Current pool tick
      * @return amount0 Total token0 in positions (principal + fees)
      * @return amount1 Total token1 in positions (principal + fees)
@@ -951,12 +1020,14 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     /**
      * @notice Calculates detailed LP state for all positions
-     * @param sqrtPriceX96 Current pool price
+     * @dev Iterates through all positions and calculates principal and uncollected fees separately
+     *      Uses Uniswap V3 position data and internal calculation functions
+     * @param sqrtPriceX96 Current pool price in sqrt(token1/token0) * 2^96 format
      * @param currentTick Current pool tick
      * @return assets0 Token0 principal across all positions
      * @return assets1 Token1 principal across all positions
-     * @return uncollected0 Uncollected token0
-     * @return uncollected1 Uncollected token1
+     * @return uncollected0 Uncollected token0 fees across all positions
+     * @return uncollected1 Uncollected token1 fees across all positions
      */
     function _totalLpState(
         uint160 sqrtPriceX96,
@@ -980,9 +1051,11 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
                 uint128 tokensOwed1
             ) = POOL.positions(positionKey);
 
+            // Calculate principal amounts in position
             (uint256 positiontAssets0, uint256 positiontAssets1) =
                 _principalPosition(sqrtPriceX96, position.lowerTick, position.upperTick, liquidity);
 
+            // Calculate uncollected fees
             (uint256 uncollectedAssets0, uint256 uncollectedAssets1) = _feePosition(
                 POOL,
                 FeeParams({
@@ -1011,6 +1084,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     }
 
     // ========== UTILITY FUNCTIONS ==========
+
     /**
      * @notice Checks if two positions have the same tick range
      * @param pos1 First position
@@ -1024,6 +1098,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     /**
      * @notice Safely transfers both tokens if amounts are non-zero
+     * @dev Uses SafeERC20 to handle various token implementations safely
      * @param to Recipient address
      * @param amount0 Amount of token0 to transfer
      * @param amount1 Amount of token1 to transfer
@@ -1043,8 +1118,8 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     /**
      * @notice Packs fee values and timestamp into a single uint256
      * @dev Format: [80 bits tvlFee][80 bits perfFee][96 bits timestamp]
-     * @param tvlFee TVL fee percentage
-     * @param perfFee Performance fee percentage
+     * @param tvlFee TVL fee percentage (scaled)
+     * @param perfFee Performance fee percentage (scaled)
      * @param timestamp Activation timestamp
      * @return packed Encoded value
      */
@@ -1062,6 +1137,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     /**
      * @notice Unpacks fee values and timestamp from uint256
+     * @dev Reverses the packing done by _packFeesWithTimestamp
      * @param packed Encoded value
      * @return tvlFee TVL fee percentage
      * @return perfFee Performance fee percentage
@@ -1080,6 +1156,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     /**
      * @notice Validates transaction hasn't exceeded deadline
+     * @dev Reverts if current timestamp is past the deadline
      * @param deadline Maximum timestamp for transaction
      */
     function _checkDeadline(uint256 deadline) internal view {
@@ -1088,6 +1165,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     /**
      * @notice Validates caller is the fee collector
+     * @dev Reverts with Unauthorized error if caller is not the fee collector
      */
     function _onlyFeeCollector() internal view {
         if (msg.sender != feeCollector) revert Unauthorized();
@@ -1098,6 +1176,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     /**
      * @notice Initiates a fee update with a timelock
      * @dev Fees cannot exceed MAX_FEE and require FEE_UPDATE_MIN_DELAY before enforcement
+     *      This two-step process protects users from sudden fee changes
      * @param newTvlFee New TVL management fee (scaled by SCALING_FACTOR)
      * @param newPerformanceFee New performance fee (scaled by SCALING_FACTOR)
      * @return true if update was successfully initiated
@@ -1116,7 +1195,8 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     /**
      * @notice Enforces a pending fee update after timelock expires
-     * @dev Collects all pending fees before applying new rates
+     * @dev Collects all pending fees before applying new rates to ensure clean transition
+     *      Clears the pending fee update after enforcement
      * @return newTvlFee The newly activated TVL fee
      * @return newPerformanceFee The newly activated performance fee
      */
@@ -1129,7 +1209,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
         if (timestamp > block.timestamp) revert Unauthorized();
 
-        // Collect pending fees
+        // Collect pending fees before changing rates
         _collectFees();
 
         tvlFeeScaled = newTvlFee;
