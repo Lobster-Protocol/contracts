@@ -179,32 +179,41 @@ The `delta` parameter controls how the performance fee accounts for relative tok
 
 **Example Scenarios**:
 
-```
-Scenario 1: USDC/WETH Vault (δ = 0)
-- Initial: 20,000 USDC + 10 WETH, WETH = $2,000
-         = 20 WETH equivalent
-- Later: 18,000 USDC + 12 WETH, WETH = $2,200
-       = 20.18 WETH equivalent
-- Performance: +0.18 WETH (outperformance)
-- Focus: Maximizing WETH accumulation
+**Scenario 1: USDC/WETH Vault (δ = 0)**
 
-Scenario 2: USDC/WETH Vault (δ = 0.5e18)
-- Initial: 20,000 USDC + 10 WETH, WETH = $2,000
-         = 20 WETH equivalent
-- Later: 30,000 USDC + 8 WETH, WETH = $2,200
-       = 21.63 WETH equivalent
-- Performance: +0.63 WETH as normal hold value 50/50
-- Result: Should leave a +10% performance on underlying performance
-- Focus: Balanced 50/50 portfolio approach
+| State | USDC | WETH | WETH Price | WETH Equivalent |
+|-------|------|------|------------|-----------------|
+| Initial | 20,000 | 10 | $2,000 | 20 WETH |
+| Later | 18,000 | 12 | $2,200 | 20.18 WETH |
 
-Scenario 3: USDC/WETH Vault (δ = 1e18)
-- Initial: 20,000 USDC + 10 WETH, WETH = $2,000
-         = 20 ETH equivalent
-- Later: 25,000 USDC + 11 WETH, WETH = $2,200
-       = 22.36 WETH equivalent
-- Performance: +0.36 WETH as counted on USDC
-- Focus: Token value counted on token WETH (outperformance counted on USDC)
-```
+**Performance**: +0.18 WETH outperformance
+**Focus**: Maximizing WETH accumulation
+
+---
+
+**Scenario 2: USDC/WETH Vault (δ = 0.5e18)**
+
+| State | USDC | WETH | WETH Price | WETH Equivalent |
+|-------|------|------|------------|-----------------|
+| Initial | 20,000 | 10 | $2,000 | 20 WETH |
+| Later | 30,000 | 8 | $2,200 | 21.63 WETH |
+
+**Performance**: +0.63 WETH (as normal hold value 50/50)
+**Result**: Should leave a +10% performance on underlying
+**Focus**: Balanced 50/50 portfolio approach
+
+---
+
+**Scenario 3: USDC/WETH Vault (δ = 1e18)**
+
+| State | USDC | WETH | WETH Price | WETH Equivalent |
+|-------|------|------|------------|-----------------|
+| Initial | 20,000 | 10 | $2,000 | 20 WETH |
+| Later | 25,000 | 11 | $2,200 | 22.36 WETH |
+
+**Performance**: +0.36 WETH (as counted on USDC)
+**Focus**: Token value counted on WETH (outperformance counted on USDC)
+
 
 ### Fee Update Process
 
