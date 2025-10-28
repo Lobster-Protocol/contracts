@@ -3,7 +3,8 @@ pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {Position, MAX_SCALED_PERCENTAGE, MAX_FEE_SCALED} from "../../../src/vaults/uniV3LpVault/UniV3LpVault.sol";
+import {MAX_SCALED_PERCENTAGE, MAX_FEE_SCALED} from "../../../src/vaults/uniV3LpVault/constants.sol";
+import {Position} from "../../../src/vaults/uniV3LpVault/structs.sol";
 import {TestHelper} from "../helpers/TestHelper.sol";
 import {TestConstants} from "../helpers/Constants.sol";
 
