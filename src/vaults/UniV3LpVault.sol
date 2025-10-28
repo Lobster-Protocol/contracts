@@ -104,6 +104,9 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     /// @notice Minimum delay before fee updates can be enforced (14 days timelock)
     uint96 public constant FEE_UPDATE_MIN_DELAY = 14 days;
 
+    // value between 0 and 1, scaled by SCALING_FACTOR
+    uint256 public immutable DELTA;
+
     /// @notice First token in the UniswapV3 pair (lower address)
     IERC20 public immutable TOKEN0;
 
@@ -117,7 +120,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     uint24 private immutable POOL_FEE;
 
     /// @notice Maximum allowed fee percentage (scaled by SCALING_FACTOR)
-    uint256 public MAX_FEE = MAX_FEE_SCALED;
+    uint256 public immutable MAX_FEE = MAX_FEE_SCALED;
 
     /// @notice Timestamp of the last TVL fee collection
     uint256 public tvlFeeCollectedAt;
@@ -130,6 +133,8 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     /// @notice Last recorded vault TVL denominated in token0 (used for performance fee calculation)
     uint256 public lastVaultTvl0;
+
+    uint256 public lastQuoteScaled;
 
     /// @notice Address authorized to collect accumulated fees
     address public feeCollector;
@@ -219,9 +224,9 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
      * @notice Initializes the UniswapV3 LP vault
      * @param initialOwner Address that will own the vault
      * @param initialAllocator Address that can execute vault strategies
-     * @param token0_ Address of the first token (must be < token1 address)
-     * @param token1_ Address of the second token (must be > token0 address)
-     * @param pool_ Address of the UniswapV3 pool
+     * @param token0 Address of the first token (must be < token1 address)
+     * @param token1 Address of the second token (must be > token0 address)
+     * @param pool Address of the UniswapV3 pool
      * @param initialFeeCollector Address authorized to collect fees
      * @param initialtvlFee Initial annualized TVL management fee (scaled)
      * @param initialPerformanceFee Initial performance fee on profits (scaled)
@@ -229,26 +234,29 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
     constructor(
         address initialOwner,
         address initialAllocator,
-        address token0_,
-        address token1_,
-        address pool_,
+        address token0,
+        address token1,
+        address pool,
         address initialFeeCollector,
         uint256 initialtvlFee,
-        uint256 initialPerformanceFee
+        uint256 initialPerformanceFee,
+        uint256 delta
     )
         SingleVault(initialOwner, initialAllocator)
     {
-        require(uint160(token0_) < uint160(token1_), "Wrong token 0 & 1 order");
+        require(uint160(token0) < uint160(token1), "Wrong token 0 & 1 order");
         require(initialFeeCollector != address(0), ZeroAddress());
-
+        require(delta < SCALING_FACTOR, InvalidValue());
         require(initialPerformanceFee <= MAX_FEE && initialtvlFee <= MAX_FEE, "Fees > max");
 
-        POOL = IUniswapV3PoolMinimal(pool_);
-        require(POOL.token0() == token0_ && POOL.token1() == token1_, "Token mismatch");
+        POOL = IUniswapV3PoolMinimal(pool);
 
-        TOKEN0 = IERC20(token0_);
-        TOKEN1 = IERC20(token1_);
+        require(POOL.token0() == token0 && POOL.token1() == token1, "Token mismatch");
+
+        TOKEN0 = IERC20(token0);
+        TOKEN1 = IERC20(token1);
         POOL_FEE = POOL.fee();
+        DELTA = delta;
         feeCollector = initialFeeCollector;
         tvlFeeScaled = initialtvlFee;
         tvlFeeCollectedAt = block.timestamp;
@@ -279,7 +287,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
         emit Deposit(assets0, assets1);
 
         // Always update vault tvl in token0
-        lastVaultTvl0 = _getNewVaultTvl0();
+        (lastVaultTvl0, lastQuoteScaled) = _getNewVaultTvl0();
     }
 
     /**
@@ -429,7 +437,19 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
      * @return totalAssets1 Net amount of token1 (after fees)
      */
     function netAssetsValue() external view returns (uint256 totalAssets0, uint256 totalAssets1) {
-        return _netAssetsValue();
+        (totalAssets0, totalAssets1) = _rawAssetsValue();
+
+        (uint256 pendingRelativePerfFee,) = _pendingRelativePerformanceFeeAndNewTvl();
+
+        // Apply TVL fee deduction
+        uint256 tokensLeft = _pendingRelativeTvlFee() + pendingRelativePerfFee > MAX_SCALED_PERCENTAGE
+            ? MAX_SCALED_PERCENTAGE
+            : MAX_SCALED_PERCENTAGE - _pendingRelativeTvlFee() - pendingRelativePerfFee;
+
+        totalAssets0 = totalAssets0.mulDiv(tokensLeft, MAX_SCALED_PERCENTAGE);
+        totalAssets1 = totalAssets1.mulDiv(tokensLeft, MAX_SCALED_PERCENTAGE);
+
+        return (totalAssets0, totalAssets1);
     }
 
     /**
@@ -450,7 +470,8 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
      * @return amount1 Pending TVL fee in token1
      */
     function pendingTvlFee() external view returns (uint256 amount0, uint256 amount1) {
-        return _pendingTvlFee();
+        (uint256 nav0, uint256 nav1) = _rawAssetsValue();
+        return _pendingTvlFee(nav0, nav1);
     }
 
     /**
@@ -629,7 +650,7 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
         // If needed, update the lastVaultTvl0
         if (performanceFeeScaledPercent > 0) {
-            lastVaultTvl0 = _getNewVaultTvl0();
+            (lastVaultTvl0, lastQuoteScaled) = _getNewVaultTvl0();
         }
 
         return (assets0ToWithdrawForUser, assets1ToWithdrawForUser);
@@ -791,16 +812,23 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
 
     /**
      * @notice Calculates absolute amounts for pending TVL fees
-     * @return amount0 TVL fee in token0
-     * @return amount1 TVL fee in token1
+     * @return tvlFee0 TVL fee in token0
+     * @return tvlFee1 TVL fee in token1
      */
-    function _pendingTvlFee() internal view returns (uint256 amount0, uint256 amount1) {
+    function _pendingTvlFee(
+        uint256 amount0,
+        uint256 amount1
+    )
+        internal
+        view
+        returns (uint256 tvlFee0, uint256 tvlFee1)
+    {
         uint256 pendingRelativeTvlFee = _pendingRelativeTvlFee();
 
-        (amount0, amount1) = _rawAssetsValue();
-
-        amount0 = amount0.mulDiv(pendingRelativeTvlFee, MAX_SCALED_PERCENTAGE);
-        amount1 = amount1.mulDiv(pendingRelativeTvlFee, MAX_SCALED_PERCENTAGE);
+        return (
+            amount0.mulDiv(pendingRelativeTvlFee, MAX_SCALED_PERCENTAGE),
+            amount1.mulDiv(pendingRelativeTvlFee, MAX_SCALED_PERCENTAGE)
+        );
     }
 
     /**
@@ -821,14 +849,25 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
      * @return newTvl0 Updated vault TVL in token0
      */
     function _pendingRelativePerformanceFeeAndNewTvl() internal view returns (uint256 feePercent, uint256 newTvl0) {
-        if (performanceFeeScaled == 0 || lastVaultTvl0 == 0) return (0, 0); // If performance fee is nul, we don't care about the vault tvl in token0
+        if (performanceFeeScaled == 0 || lastVaultTvl0 == 0) return (0, 0); // If performance fee is nul, we don't care about the vault tvl in token0 and new sqrtPrice
 
-        newTvl0 = _getNewVaultTvl0();
-        if (newTvl0 <= lastVaultTvl0) {
-            return (0, 0); // If performance is nul or negative, we don't care about the vault tvl in token0
+        uint256 quoteScaled;
+        (newTvl0, quoteScaled) = _getNewVaultTvl0();
+
+        uint256 lastQuoteSquared = lastQuoteScaled ** 2;
+        uint256 currentQuoteSquared = quoteScaled ** 2;
+
+        uint256 part1 = DELTA.mulDiv(lastQuoteSquared, currentQuoteSquared);
+
+        uint256 part2 = SCALING_FACTOR - DELTA; // SCALING_FACTOR * (1 - delta) (0 <= delta <= 1)
+
+        uint256 baseTvl0 = lastVaultTvl0.mulDiv(part1 + part2, SCALING_FACTOR);
+
+        if (newTvl0 <= baseTvl0) {
+            return (0, 0); // If performance is nul or negative, we don't care about the vault tvl in token0 and new sqrtPrice
         }
 
-        uint256 relativePerfScaledPercent = (newTvl0 - lastVaultTvl0).mulDiv(performanceFeeScaled, newTvl0);
+        uint256 relativePerfScaledPercent = (newTvl0 - baseTvl0).mulDiv(performanceFeeScaled, newTvl0);
 
         return (
             Math.min(relativePerfScaledPercent, MAX_SCALED_PERCENTAGE),
@@ -842,25 +881,16 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
      * @param amount1 Amount of token1 to convert
      * @return amount0 Equivalent amount in token0
      */
-    function _convertToToken0(uint256 amount1) internal view returns (uint256 amount0) {
-        // Use a reasonable base amount instead of 1 if there is an overflow
-        uint128 baseAmount = uint128(1_000_000_000);
-        if (amount1 <= type(uint128).max) {
+    function _convertToToken0(uint256 amount1) internal view returns (uint256 amount0, uint256 quoteScaled) {
+        quoteScaled = UniswapUtils.getTwap(
+            POOL,
+            TWAP_SECONDS_AGO,
             // forge-lint: disable-next-line(unsafe-typecast)
-            baseAmount = uint128(amount1);
-        }
+            uint128(SCALING_FACTOR),
+            true
+        );
 
-        uint256 twapResult = UniswapUtils.getTwap(POOL, TWAP_SECONDS_AGO, baseAmount, true);
-
-        // Scale the result if we used a smaller base amount
-        uint256 twapValueFrom1To0;
-        if (amount1 <= type(uint128).max) {
-            twapValueFrom1To0 = twapResult;
-        } else {
-            twapValueFrom1To0 = twapResult.mulDiv(amount1, 1_000_000_000);
-        }
-
-        return twapValueFrom1To0;
+        amount0 = quoteScaled.mulDiv(amount1, SCALING_FACTOR);
     }
 
     /**
@@ -868,38 +898,18 @@ contract UniV3LpVault is SingleVault, UniswapV3Calculator {
      * @dev Converts all assets to token0 using TWAP, excludes pending TVL fees
      * @return newVaultTvl0 Total vault value in token0
      */
-    function _getNewVaultTvl0() internal view returns (uint256 newVaultTvl0) {
+    function _getNewVaultTvl0() internal view returns (uint256 newVaultTvl0, uint256 quoteScaled) {
         (uint256 tvl0, uint256 tvl1) = _rawAssetsValue();
 
         // remove pending management fee
         if (tvlFeeScaled > 0) {
-            (uint256 tvlFee0, uint256 tvlFee1) = _pendingTvlFee();
+            (uint256 tvlFee0, uint256 tvlFee1) = _pendingTvlFee(tvl0, tvl1);
             tvl0 -= tvlFee0;
             tvl1 -= tvlFee1;
         }
 
-        newVaultTvl0 = tvl0 + _convertToToken0(tvl1);
-    }
-
-    /**
-     * @notice Returns vault assets after deducting all pending fees
-     * @return totalAssets0 Net token0 assets
-     * @return totalAssets1 Net token1 assets
-     */
-    function _netAssetsValue() internal view returns (uint256 totalAssets0, uint256 totalAssets1) {
-        (totalAssets0, totalAssets1) = _rawAssetsValue();
-
-        (uint256 pendingRelativePerfFee,) = _pendingRelativePerformanceFeeAndNewTvl();
-
-        // Apply TVL fee deduction
-        uint256 tokensLeft = _pendingRelativeTvlFee() + pendingRelativePerfFee > MAX_SCALED_PERCENTAGE
-            ? MAX_SCALED_PERCENTAGE
-            : MAX_SCALED_PERCENTAGE - _pendingRelativeTvlFee() - pendingRelativePerfFee;
-
-        totalAssets0 = totalAssets0.mulDiv(tokensLeft, MAX_SCALED_PERCENTAGE);
-        totalAssets1 = totalAssets1.mulDiv(tokensLeft, MAX_SCALED_PERCENTAGE);
-
-        return (totalAssets0, totalAssets1);
+        (newVaultTvl0, quoteScaled) = _convertToToken0(tvl1);
+        newVaultTvl0 += tvl0;
     }
 
     /**

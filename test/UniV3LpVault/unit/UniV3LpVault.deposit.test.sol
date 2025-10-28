@@ -2,7 +2,12 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import {UniV3LpVault, MAX_SCALED_PERCENTAGE, TWAP_SECONDS_AGO} from "../../../src/vaults/UniV3LpVault.sol";
+import {
+    UniV3LpVault,
+    MAX_SCALED_PERCENTAGE,
+    TWAP_SECONDS_AGO,
+    SCALING_FACTOR
+} from "../../../src/vaults/UniV3LpVault.sol";
 import {SingleVault} from "../../../src/vaults/SingleVault.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {TestHelper} from "../helpers/TestHelper.sol";
@@ -148,11 +153,8 @@ contract UniV3LpVaultDepositTest is Test {
 
     function test_deposit_WithFeesAccumulated_CollectsFees() public {
         // Create vault with TVL fees
-        TestHelper.VaultSetup memory feeSetup = helper.deployVaultWithPool(
-            0,
-            // TestConstants.HIGH_TVL_FEE,
-            TestConstants.HIGH_PERF_FEE
-        );
+        TestHelper.VaultSetup memory feeSetup =
+            helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE, TestConstants.HIGH_PERF_FEE);
 
         helper.depositToVault(feeSetup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
 
@@ -195,37 +197,25 @@ contract UniV3LpVaultDepositTest is Test {
         assertApproxEqAbs(
             feeSetup.token0.balanceOf(feeSetup.feeCollector),
             initialFeeCollectorBalance0 + expectedTvlFee0 + expectedPerfFee0,
-            1
+            2
         );
         assertApproxEqAbs(
             feeSetup.token1.balanceOf(feeSetup.feeCollector),
             initialFeeCollectorBalance1 + expectedTvlFee1 + expectedPerfFee1,
-            1
+            2
         );
 
-        // make sure lastVaultTvl0 have been updated
+        // works since no perf since last deposit & no tvl fee
         (uint256 finalTvl0, uint256 finalTvl1) = feeSetup.vault.rawAssetsValue();
-        (uint256 tvlFee0, uint256 tvlFee1) = feeSetup.vault.pendingTvlFee();
-        finalTvl0 -= tvlFee0;
-        finalTvl1 -= tvlFee1;
-
-        // Use a reasonable base amount instead of 1 if there is an overflow
-        uint128 baseAmount = uint128(1);
-        if (finalTvl1 <= type(uint128).max) {
+        uint256 twapResult = UniswapUtils.getTwap(
+            feeSetup.pool,
+            TWAP_SECONDS_AGO,
             // forge-lint: disable-next-line(unsafe-typecast)
-            baseAmount = uint128(finalTvl1);
-        }
-        uint256 twapResult = UniswapUtils.getTwap(feeSetup.pool, TWAP_SECONDS_AGO, baseAmount, true);
-
-        // Scale the result if we used a smaller base amount
-        uint256 twapValueFrom1To0;
-        if (tvl1 > type(uint128).max) {
-            twapValueFrom1To0 = twapResult * tvl1;
-        } else {
-            twapValueFrom1To0 = twapResult;
-        }
-
-        assertApproxEqAbs(feeSetup.vault.lastVaultTvl0(), finalTvl0 + twapValueFrom1To0, 1);
+            uint128(SCALING_FACTOR),
+            true
+        );
+        uint256 twapValueFrom1To0 = twapResult.mulDiv(finalTvl1, SCALING_FACTOR);
+        assertEq(feeSetup.vault.lastVaultTvl0(), finalTvl0 + twapValueFrom1To0);
     }
 
     function test_deposit_NetAssetsValue_UpdatesCorrectly() public {

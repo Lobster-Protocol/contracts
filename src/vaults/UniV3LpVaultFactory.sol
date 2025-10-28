@@ -38,7 +38,8 @@ contract UniV3LpVaultFactory {
         address pool,
         address initialFeeCollector,
         uint256 initialtvlFee,
-        uint256 initialPerformanceFee
+        uint256 initialPerformanceFee,
+        uint256 delta
     )
         external
         returns (address vault)
@@ -53,7 +54,8 @@ contract UniV3LpVaultFactory {
                 pool,
                 initialFeeCollector,
                 initialtvlFee,
-                initialPerformanceFee
+                initialPerformanceFee,
+                delta
             )
         );
 
@@ -87,7 +89,8 @@ contract UniV3LpVaultFactory {
         address pool,
         address initialFeeCollector,
         uint256 initialtvlFee,
-        uint256 initialPerformanceFee
+        uint256 initialPerformanceFee,
+        uint256 delta
     )
         external
         view
@@ -103,7 +106,8 @@ contract UniV3LpVaultFactory {
                 pool,
                 initialFeeCollector,
                 initialtvlFee,
-                initialPerformanceFee
+                initialPerformanceFee,
+                delta
             )
         );
 

@@ -3,7 +3,13 @@ pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {UniV3LpVault, MinimalMintParams, Position} from "../../../src/vaults/UniV3LpVault.sol";
+import {
+    UniV3LpVault,
+    MinimalMintParams,
+    Position,
+    SCALING_FACTOR,
+    MAX_SCALED_PERCENTAGE
+} from "../../../src/vaults/UniV3LpVault.sol";
 import {MockERC20} from "../../Mocks/MockERC20.sol";
 import {UniswapV3Infra} from "../../Mocks/uniswapV3/UniswapV3Infra.sol";
 import {IUniswapV3FactoryMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
@@ -130,7 +136,8 @@ contract TestHelper is Test {
             address(setup.pool),
             setup.feeCollector,
             tvlFee,
-            perfFee
+            perfFee,
+            TestConstants.DELTA5050
         );
 
         // Setup approvals
@@ -320,5 +327,32 @@ contract TestHelper is Test {
         // setup.pool.increaseObservationCardinalityNext(500);
         vm.prank(setup.owner);
         return setup.vault.withdraw(scaledPercentage, recipient);
+    }
+
+    function computePerfFeePercent(
+        uint256 newTvl0,
+        uint256 lastTvl0,
+        uint256 newQuote,
+        uint256 lastQuote,
+        uint256 delta,
+        uint256 performanceFeeScaled
+    )
+        public
+        pure
+        returns (uint256)
+    {
+        uint256 lastQuoteSquared = lastQuote ** 2;
+        uint256 newQuoteSquared = newQuote ** 2;
+        uint256 part1 = delta.mulDiv(lastQuoteSquared, newQuoteSquared);
+        uint256 part2 = SCALING_FACTOR - delta; // SCALING_FACTOR * (1 - delta) (0 <= delta <= 1)
+        uint256 baseTvl0 = lastTvl0.mulDiv(part1 + part2, SCALING_FACTOR);
+
+        if (newTvl0 <= baseTvl0) {
+            return 0; // If performance is nul or negative, we don't care about the vault tvl in token0 and new sqrtPrice
+        }
+
+        uint256 relativePerfScaledPercent = (newTvl0 - baseTvl0).mulDiv(performanceFeeScaled, newTvl0);
+
+        return Math.min(relativePerfScaledPercent, MAX_SCALED_PERCENTAGE);
     }
 }

@@ -10,6 +10,7 @@ import {IUniswapV3FactoryMinimal} from "../src/interfaces/uniswapV3/IUniswapV3Fa
 import {IUniswapV3PoolMinimal} from "../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 
 uint24 constant FEE = 3000; // 0.3%
+uint256 constant DELTA5050 = (5 * SCALING_FACTOR) / 10; // 0.5
 
 contract UniV3LpVaultFactoryTest is Test {
     UniV3LpVaultFactory public factory;
@@ -51,7 +52,7 @@ contract UniV3LpVaultFactoryTest is Test {
 
     function test_DeployVault() public {
         address vault = factory.deployVault(
-            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
+            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee, DELTA5050
         );
 
         // Verify vault was deployed
@@ -73,18 +74,20 @@ contract UniV3LpVaultFactoryTest is Test {
         vm.expectEmit(false, true, true, true);
         emit VaultDeployed(address(0), address(pool), address(this), salt);
 
-        factory.deployVault(salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee);
+        factory.deployVault(
+            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee, DELTA5050
+        );
     }
 
     function test_ComputeVaultAddress() public {
         // Compute the expected address
         address predicted = factory.computeVaultAddress(
-            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
+            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee, DELTA5050
         );
 
         // Deploy the vault
         address deployed = factory.deployVault(
-            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
+            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee, DELTA5050
         );
 
         // Verify they match
@@ -101,11 +104,11 @@ contract UniV3LpVaultFactoryTest is Test {
 
         // Compute addresses on both "chains"
         address predicted1 = factory1.computeVaultAddress(
-            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
+            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee, DELTA5050
         );
 
         address predicted2 = factory2.computeVaultAddress(
-            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
+            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee, DELTA5050
         );
 
         // They should be different because factories have different addresses
@@ -117,11 +120,15 @@ contract UniV3LpVaultFactoryTest is Test {
 
     function test_CannotDeployTwiceWithSameSalt() public {
         // Deploy once
-        factory.deployVault(salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee);
+        factory.deployVault(
+            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee, DELTA5050
+        );
 
         // Try to deploy again with same salt - should revert
         vm.expectRevert();
-        factory.deployVault(salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee);
+        factory.deployVault(
+            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee, DELTA5050
+        );
     }
 
     function test_DifferentSaltsDifferentAddresses() public {
@@ -129,11 +136,11 @@ contract UniV3LpVaultFactoryTest is Test {
         bytes32 salt2 = keccak256("salt2");
 
         address vault1 = factory.deployVault(
-            salt1, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
+            salt1, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee, DELTA5050
         );
 
         address vault2 = factory.deployVault(
-            salt2, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
+            salt2, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee, DELTA5050
         );
 
         assertTrue(vault1 != vault2, "Different salts should produce different addresses");
@@ -143,7 +150,7 @@ contract UniV3LpVaultFactoryTest is Test {
 
     function test_DifferentParametersDifferentAddresses() public {
         address vault1 = factory.deployVault(
-            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
+            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee, DELTA5050
         );
 
         // Different salt for second deployment
@@ -159,7 +166,8 @@ contract UniV3LpVaultFactoryTest is Test {
             address(pool),
             feeCollector,
             tvlFee + 1, // Different fee
-            performanceFee
+            performanceFee,
+            DELTA5050
         );
 
         assertTrue(vault1 != vault2, "Different parameters should produce different addresses");
@@ -177,7 +185,16 @@ contract UniV3LpVaultFactoryTest is Test {
         for (uint256 i = 0; i < numVaults; i++) {
             bytes32 uniqueSalt = keccak256(abi.encodePacked("salt", i));
             vaults[i] = factory.deployVault(
-                uniqueSalt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
+                uniqueSalt,
+                owner,
+                allocator,
+                token0,
+                token1,
+                address(pool),
+                feeCollector,
+                tvlFee,
+                performanceFee,
+                DELTA5050
             );
 
             assertTrue(factory.isVault(vaults[i]), "Each vault should be marked as deployed");
@@ -202,7 +219,8 @@ contract UniV3LpVaultFactoryTest is Test {
             address(pool),
             feeCollector,
             tvlFee,
-            performanceFee
+            performanceFee,
+            DELTA5050
         );
 
         vm.assume(!factory.isVault(predicted));
@@ -216,7 +234,8 @@ contract UniV3LpVaultFactoryTest is Test {
             address(pool),
             feeCollector,
             tvlFee,
-            performanceFee
+            performanceFee,
+            DELTA5050
         );
 
         assertEq(predicted, vault, "Predicted and deployed should match");
@@ -225,7 +244,7 @@ contract UniV3LpVaultFactoryTest is Test {
 
     function test_VaultDeployedWithCorrectParameters() public {
         address vault = factory.deployVault(
-            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee
+            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee, DELTA5050
         );
 
         // Verify the vault was deployed

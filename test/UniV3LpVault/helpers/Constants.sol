@@ -48,4 +48,7 @@ library TestConstants {
 
     // Address constants
     address constant ZERO_ADDRESS = address(0);
+
+    // Delta
+    uint256 constant DELTA5050 = (5 * SCALING_FACTOR) / 10;
 }

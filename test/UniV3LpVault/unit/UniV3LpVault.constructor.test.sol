@@ -65,7 +65,8 @@ contract UniV3LpVaultConstructorTest is Test {
             address(pool),
             feeCollector,
             TestConstants.LOW_TVL_FEE,
-            TestConstants.LOW_PERF_FEE
+            TestConstants.LOW_PERF_FEE,
+            TestConstants.DELTA5050
         );
     }
 
@@ -96,7 +97,8 @@ contract UniV3LpVaultConstructorTest is Test {
             address(pool),
             address(0), // Zero address
             TestConstants.LOW_TVL_FEE,
-            TestConstants.LOW_PERF_FEE
+            TestConstants.LOW_PERF_FEE,
+            TestConstants.DELTA5050
         );
     }
 
@@ -128,7 +130,8 @@ contract UniV3LpVaultConstructorTest is Test {
             address(pool),
             feeCollector,
             TestConstants.LOW_TVL_FEE,
-            TestConstants.LOW_PERF_FEE
+            TestConstants.LOW_PERF_FEE,
+            TestConstants.DELTA5050
         );
     }
 
