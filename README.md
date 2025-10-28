@@ -181,7 +181,7 @@ The `delta` parameter controls how the performance fee accounts for relative tok
 
 **Scenario 1: USDC/WETH Vault (δ = 0)**
 
-| State | USDC | WETH | WETH Price | WETH Equivalent |
+|  | USDC | WETH | WETH Price | WETH Equivalent |
 |-------|------|------|------------|-----------------|
 | Initial | 20,000 | 10 | $2,000 | 20 WETH |
 | Later | 18,000 | 12 | $2,200 | 20.18 WETH |
@@ -193,7 +193,7 @@ The `delta` parameter controls how the performance fee accounts for relative tok
 
 **Scenario 2: USDC/WETH Vault (δ = 0.5e18)**
 
-| State | USDC | WETH | WETH Price | WETH Equivalent |
+|  | USDC | WETH | WETH Price | WETH Equivalent |
 |-------|------|------|------------|-----------------|
 | Initial | 20,000 | 10 | $2,000 | 20 WETH |
 | Later | 30,000 | 8 | $2,200 | 21.63 WETH |
@@ -206,7 +206,7 @@ The `delta` parameter controls how the performance fee accounts for relative tok
 
 **Scenario 3: USDC/WETH Vault (δ = 1e18)**
 
-| State | USDC | WETH | WETH Price | WETH Equivalent |
+|  | USDC | WETH | WETH Price | WETH Equivalent |
 |-------|------|------|------------|-----------------|
 | Initial | 20,000 | 10 | $2,000 | 20 WETH |
 | Later | 25,000 | 11 | $2,200 | 22.36 WETH |
