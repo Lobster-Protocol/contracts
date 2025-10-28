@@ -199,7 +199,7 @@ The `delta` parameter controls how the performance fee accounts for relative tok
 | Later | 30,000 | 8 | $2,200 | 21.63 WETH |
 
 **Performance**: +0.63 WETH (as normal hold value 50/50)
-**Result**: Should leave a +10% performance on underlying
+**Result**: Should leave a +5% performance on a +10% performance on underlying
 **Focus**: Balanced 50/50 portfolio approach
 
 ---
