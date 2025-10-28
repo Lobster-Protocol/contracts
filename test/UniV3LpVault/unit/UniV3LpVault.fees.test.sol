@@ -41,18 +41,18 @@ contract UniV3LpVaultFeesTest is Test {
         );
     }
 
-    function makeSureLastVaultTvl0Matches(TestHelper.VaultSetup memory setup) public {
+    function makeSureLastVaultTvl0Matches(TestHelper.VaultSetup memory setup_) public {
         // works since no perf since last deposit & no tvl fee
-        (uint256 finalTvl0, uint256 finalTvl1) = setup.vault.rawAssetsValue();
+        (uint256 finalTvl0, uint256 finalTvl1) = setup_.vault.rawAssetsValue();
         uint256 twapResult = UniswapUtils.getTwap(
-            setup.pool,
+            setup_.pool,
             TWAP_SECONDS_AGO,
             // forge-lint: disable-next-line(unsafe-typecast)
             uint128(SCALING_FACTOR),
             true
         );
         uint256 twapValueFrom1To0 = twapResult.mulDiv(finalTvl1, SCALING_FACTOR);
-        assertEq(setup.vault.lastVaultTvl0(), finalTvl0 + twapValueFrom1To0);
+        assertEq(setup_.vault.lastVaultTvl0(), finalTvl0 + twapValueFrom1To0);
     }
 
     function test_tvlAndPerfFees_NoFeesConfigured_NoCollection() public {
