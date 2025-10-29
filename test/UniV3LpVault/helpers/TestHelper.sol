@@ -128,17 +128,20 @@ contract TestHelper is Test {
         vm.warp(block.timestamp + 14 days);
 
         // Deploy vault
-        setup.vault = new UniV3LpVault(
-            setup.owner,
-            setup.allocator,
-            address(setup.token0),
-            address(setup.token1),
-            address(setup.pool),
-            setup.feeCollector,
-            tvlFee,
-            perfFee,
-            TestConstants.DELTA5050
-        );
+        setup.vault = new UniV3LpVault();
+
+        setup.vault
+            .initialize(
+                setup.owner,
+                setup.allocator,
+                address(setup.token0),
+                address(setup.token1),
+                address(setup.pool),
+                setup.feeCollector,
+                tvlFee,
+                perfFee,
+                TestConstants.DELTA5050
+            );
 
         // Setup approvals
         vm.startPrank(setup.owner);

@@ -13,6 +13,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
  * @dev Provides a two-tier access control system: Owner (full control) and Allocator (limited operational control)
  * @dev Inherits from Ownable2Step for secure ownership transfers and includes reentrancy protection
  * @dev The owner can lock the vault to prevent allocator operations in emergency situations
+ * @dev Designed to work with proxy pattern - ownership initialization handled via _transferOwnership
  */
 contract SingleVault is Ownable2Step, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -89,16 +90,15 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     /**
-     * @notice Initializes the vault with an initial owner and allocator
-     * @param initialOwner The address that will become the vault owner
-     * @param initialAllocator The address that will become the initial allocator
+     * @notice Initializes the vault base contract
+     * @dev For implementation contracts, pass dummy addresses (e.g., address(0xdead))
+     *      For proxy contracts, ownership will be set via _transferOwnership in the initialize function
+     * @param initialOwner The address that will become the vault owner (dummy for implementation)
+     * @param initialAllocator The address that will become the initial allocator (dummy for implementation)
      */
     constructor(address initialOwner, address initialAllocator) Ownable(initialOwner) {
-        // Validate addresses are not zero
-        if (initialOwner == address(0) || initialAllocator == address(0)) {
-            revert ZeroAddress();
-        }
-
+        // For implementation contracts, we use dummy addresses
+        // For proxy contracts, real initialization happens in the initialize() function
         allocator = initialAllocator;
     }
 
@@ -131,26 +131,6 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
         locked = isLocked;
 
         emit VaultLocked(isLocked);
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                        ETH REJECTION
-    //////////////////////////////////////////////////////////////*/
-
-    /**
-     * @notice Rejects all direct ETH transfers to the vault
-     * @dev Prevents accidental ETH deposits that could become stuck
-     */
-    receive() external payable {
-        revert("ETH not accepted");
-    }
-
-    /**
-     * @notice Rejects all undefined function calls and ETH transfers
-     * @dev Provides additional protection against accidental interactions
-     */
-    fallback() external payable {
-        revert("ETH not accepted");
     }
 
     /*//////////////////////////////////////////////////////////////

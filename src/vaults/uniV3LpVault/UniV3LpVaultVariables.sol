@@ -22,22 +22,22 @@ abstract contract UniV3LpVaultVariables is SingleVault {
      *
      *      Used in formula: baseTvl0 = lastVaultTvl0 * (delta * (lastQuote / currentQuote)^2 + (1 - delta))
      */
-    uint256 public immutable DELTA;
+    uint256 public DELTA;
 
     /// @notice First token in the UniswapV3 pair (lower address)
-    IERC20 public immutable TOKEN0;
+    IERC20 public TOKEN0;
 
     /// @notice Second token in the UniswapV3 pair (higher address)
-    IERC20 public immutable TOKEN1;
+    IERC20 public TOKEN1;
 
     /// @notice The UniswapV3 pool where liquidity is provided
-    IUniswapV3PoolMinimal public immutable POOL;
+    IUniswapV3PoolMinimal public POOL;
 
     /// @notice Fee tier of the pool (e.g., 500 = 0.05%, 3000 = 0.3%)
-    uint24 internal immutable POOL_FEE;
+    uint24 internal POOL_FEE;
 
     /// @notice Maximum allowed fee percentage (scaled by SCALING_FACTOR)
-    uint256 public immutable MAX_FEE = MAX_FEE_SCALED;
+    uint256 public constant MAX_FEE = MAX_FEE_SCALED;
 
     /// @notice Timestamp of the last TVL fee collection
     uint256 public tvlFeeCollectedAt;
@@ -90,6 +90,9 @@ abstract contract UniV3LpVaultVariables is SingleVault {
 
     /// @notice Thrown when a scaling factor exceeds maximum allowed percentage
     error InvalidScalingFactor();
+
+    /// @notice Thrown when trying to initialize an already initialized contract
+    error AlreadyInitialized();
 
     // ========== EVENTS ==========
 

@@ -2,18 +2,28 @@
 pragma solidity ^0.8.20;
 
 import "./UniV3LpVault.sol";
+import "@openzeppelin/contracts/proxy/Clones.sol";
 
 /**
  * @title UniV3LpVaultFactory
  * @author Elli <nathan@lobster-protocol.com>
- * @notice Factory contract for deploying UniV3LpVault contracts with deterministic addresses
- * @dev Uses CREATE2 opcode for deterministic vault deployment, enabling address prediction before deployment.
- *      This factory maintains a registry of all deployed vaults and provides address computation utilities.
+ * @notice Factory contract for deploying UniV3LpVault proxies with deterministic addresses
+ * @dev Uses OpenZeppelin's Clones library (EIP-1167 minimal proxies) with CREATE2 for gas-efficient
+ *      deterministic vault deployment. Each vault is a minimal proxy that delegates to a single
+ *      implementation contract, significantly reducing deployment costs.
  */
 contract UniV3LpVaultFactory {
+    using Clones for address;
+
     /**
-     * @notice Emitted when a new vault is successfully deployed
-     * @param vault The address of the newly deployed vault
+     * @notice The implementation contract that all vault proxies delegate to
+     * @dev Set once during factory deployment and immutable thereafter
+     */
+    address public immutable IMPLEMENTATION;
+
+    /**
+     * @notice Emitted when a new vault proxy is successfully deployed
+     * @param vault The address of the newly deployed vault proxy
      * @param pool The Uniswap V3 pool address associated with the vault
      * @param deployer The address that initiated the vault deployment
      * @param salt The unique salt used for CREATE2 deployment
@@ -27,8 +37,20 @@ contract UniV3LpVaultFactory {
     mapping(address => bool) public isVault;
 
     /**
-     * @notice Deploys a new UniV3LpVault contract using CREATE2 for deterministic addressing
+     * @notice Initializes the factory with a vault implementation contract
+     * @dev The implementation should be a fully initialized UniV3LpVault that will never be used directly,
+     *      only delegated to via proxies. Consider deploying the implementation with disabled initializers.
+     * @param _implementation The address of the UniV3LpVault implementation contract
+     */
+    constructor(address _implementation) {
+        require(_implementation != address(0), "Invalid implementation");
+        IMPLEMENTATION = _implementation;
+    }
+
+    /**
+     * @notice Deploys a new UniV3LpVault proxy using CREATE2 for deterministic addressing
      * @dev The vault address can be pre-computed using `computeVaultAddress` with the same parameters.
+     *      Uses OpenZeppelin's cloneDeterministic which creates an EIP-1167 minimal proxy.
      *      Reverts if deployment fails or if a vault already exists at the computed address.
      *
      * @param salt Unique bytes32 salt for deterministic address generation (use different salts for different vaults)
@@ -45,7 +67,7 @@ contract UniV3LpVaultFactory {
      *              - delta = 1e18 -> performance fee based entirely on token1 accumulation relative to token0
      *              - delta = 0.5e18 -> equal weighting of both tokens (50% - 50% hold value)
      *
-     * @return vault The address of the newly deployed vault contract
+     * @return vault The address of the newly deployed vault proxy
      */
     function deployVault(
         bytes32 salt,
@@ -62,9 +84,12 @@ contract UniV3LpVaultFactory {
         external
         returns (address vault)
     {
-        // Deploy vault using CREATE2 for deterministic addressing
-        vault = address(
-            new UniV3LpVault{salt: salt}(
+        // Deploy minimal proxy using CREATE2
+        vault = IMPLEMENTATION.cloneDeterministic(salt);
+
+        // Initialize the proxy with the vault parameters
+        UniV3LpVault(vault)
+            .initialize(
                 initialOwner,
                 initialExecutor,
                 token0,
@@ -74,8 +99,7 @@ contract UniV3LpVaultFactory {
                 initialtvlFee,
                 initialPerformanceFee,
                 delta
-            )
-        );
+            );
 
         isVault[vault] = true;
 
@@ -85,59 +109,16 @@ contract UniV3LpVaultFactory {
     }
 
     /**
-     * @notice Computes the deterministic address where a vault will be deployed
-     * @dev Useful for predicting vault addresses before deployment or verifying deployment parameters.
-     *      The computed address will match the actual deployment address if all parameters are identical.
+     * @notice Computes the deterministic address where a vault proxy will be deployed
+     * @dev Useful for predicting vault addresses before deployment.
+     *      Note: Only the salt matters for address prediction with proxies, as all proxies
+     *      share the same bytecode. The initialization parameters don't affect the address.
      *
      * @param salt Unique bytes32 salt for deterministic address generation (must match deployment salt)
-     * @param initialOwner Owner address for the vault
-     * @param initialExecutor Executor address for the vault
-     * @param token0 First token address in the Uniswap V3 pool
-     * @param token1 Second token address in the Uniswap V3 pool
-     * @param pool Uniswap V3 pool address
-     * @param initialFeeCollector Fee collector address
-     * @param initialtvlFee TVL management fee amount
-     * @param initialPerformanceFee Performance fee amount
-     * @param delta Token ratio weight for performance fee calculation (0 to 1e18)
      *
-     * @return predicted The deterministic address where the vault will be deployed with these parameters
+     * @return predicted The deterministic address where the vault will be deployed with this salt
      */
-    function computeVaultAddress(
-        bytes32 salt,
-        address initialOwner,
-        address initialExecutor,
-        address token0,
-        address token1,
-        address pool,
-        address initialFeeCollector,
-        uint256 initialtvlFee,
-        uint256 initialPerformanceFee,
-        uint256 delta
-    )
-        external
-        view
-        returns (address predicted)
-    {
-        // Construct the complete bytecode including constructor arguments
-        bytes memory bytecode = abi.encodePacked(
-            type(UniV3LpVault).creationCode,
-            abi.encode(
-                initialOwner,
-                initialExecutor,
-                token0,
-                token1,
-                pool,
-                initialFeeCollector,
-                initialtvlFee,
-                initialPerformanceFee,
-                delta
-            )
-        );
-
-        // Compute CREATE2 address: keccak256(0xff ++ factoryAddress ++ salt ++ keccak256(bytecode))
-        bytes32 hash = keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, keccak256(bytecode)));
-
-        // Convert hash to address (take last 20 bytes)
-        return address(uint160(uint256(hash)));
+    function computeVaultAddress(bytes32 salt) external view returns (address predicted) {
+        return IMPLEMENTATION.predictDeterministicAddress(salt, address(this));
     }
 }

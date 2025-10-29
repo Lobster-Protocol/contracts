@@ -264,7 +264,7 @@ Consider your vault's investment strategy when setting delta:
 
 ```solidity
 // Deploy the factory
-UniV3LpVaultFactory factory = new UniV3LpVaultFactory();
+UniV3LpVaultFactory factory = new UniV3LpVaultFactory(implementation);
 ```
 
 ## Key Functions

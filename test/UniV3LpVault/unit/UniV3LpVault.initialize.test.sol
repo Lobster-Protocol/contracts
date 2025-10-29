@@ -11,14 +11,14 @@ import {UniswapV3Infra} from "../../Mocks/uniswapV3/UniswapV3Infra.sol";
 import {IUniswapV3FactoryMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 
-contract UniV3LpVaultConstructorTest is Test {
+contract UniV3LpVaultInitializeTest is Test {
     TestHelper helper;
 
     function setUp() public {
         helper = new TestHelper();
     }
 
-    function test_constructor_ValidParameters_Success() public {
+    function test_initialize_ValidParameters_Success() public {
         TestHelper.VaultSetup memory setup =
             helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE, TestConstants.HIGH_PERF_FEE);
 
@@ -34,7 +34,7 @@ contract UniV3LpVaultConstructorTest is Test {
         assertEq(setup.vault.feeCollector(), setup.feeCollector);
     }
 
-    function test_constructor_WrongTokenOrder_Reverts() public {
+    function test_initialize_WrongTokenOrder_Reverts() public {
         address owner = makeAddr("owner");
         address allocator = makeAddr("allocator");
         address feeCollector = makeAddr("feeCollector");
@@ -55,9 +55,11 @@ contract UniV3LpVaultConstructorTest is Test {
             factory, address(token0), address(token1), TestConstants.POOL_FEE, TestConstants.INITIAL_SQRT_PRICE_X96
         );
 
+        UniV3LpVault vault = new UniV3LpVault();
+
         // Try to create vault with wrong token order
         vm.expectRevert("Wrong token 0 & 1 order");
-        new UniV3LpVault(
+        vault.initialize(
             owner,
             allocator,
             address(token1), // Wrong order
@@ -70,7 +72,7 @@ contract UniV3LpVaultConstructorTest is Test {
         );
     }
 
-    function test_constructor_ZeroFeeCollector_Reverts() public {
+    function test_initialize_ZeroFeeCollector_Reverts() public {
         address owner = makeAddr("owner");
         address allocator = makeAddr("allocator");
 
@@ -88,8 +90,9 @@ contract UniV3LpVaultConstructorTest is Test {
             factory, address(token0), address(token1), TestConstants.POOL_FEE, TestConstants.INITIAL_SQRT_PRICE_X96
         );
 
+        UniV3LpVault vault = new UniV3LpVault();
         vm.expectRevert(SingleVault.ZeroAddress.selector);
-        new UniV3LpVault(
+        vault.initialize(
             owner,
             allocator,
             address(token0),
@@ -102,7 +105,7 @@ contract UniV3LpVaultConstructorTest is Test {
         );
     }
 
-    function test_constructor_TokenMismatch_Reverts() public {
+    function test_initialize_TokenMismatch_Reverts() public {
         address owner = makeAddr("owner");
         address allocator = makeAddr("allocator");
         address feeCollector = makeAddr("feeCollector");
@@ -121,8 +124,9 @@ contract UniV3LpVaultConstructorTest is Test {
             factory, address(token0), address(token1), TestConstants.POOL_FEE, TestConstants.INITIAL_SQRT_PRICE_X96
         );
 
+        UniV3LpVault vault = new UniV3LpVault();
         vm.expectRevert("Token mismatch");
-        new UniV3LpVault(
+        vault.initialize(
             owner,
             allocator,
             address(wrongToken), // Wrong token
@@ -135,7 +139,7 @@ contract UniV3LpVaultConstructorTest is Test {
         );
     }
 
-    function test_constructor_InitialState_Correct() public {
+    function test_initialize_InitialState_Correct() public {
         TestHelper.VaultSetup memory setup =
             helper.deployVaultWithPool(TestConstants.MEDIUM_TVL_FEE, TestConstants.MEDIUM_PERF_FEE);
 
@@ -154,12 +158,13 @@ contract UniV3LpVaultConstructorTest is Test {
         assertEq(netAssets1, 0);
     }
 
-    function test_constructor_ZeroFee_Success() public {
+    function test_initialize_ZeroFee_Success() public {
         TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(0, 0);
 
         // Zero TVL fee should be allowed
         assertTrue(address(setup.vault) != address(0));
     }
 
+    // todo: test cannot initialize twice
     // todo test update fees > max fees
 }
