@@ -42,7 +42,7 @@ contract UniV3LpVaultFeesTest is Test {
         );
     }
 
-    function makeSureLastVaultTvl0Matches(TestHelper.VaultSetup memory setup_) public {
+    function makeSureLastVaultTvl0Matches(TestHelper.VaultSetup memory setup_) public view {
         // works since no perf since last deposit & no tvl fee
         (uint256 finalTvl0, uint256 finalTvl1) = setup_.vault.rawAssetsValue();
         uint256 twapResult = UniswapUtils.getTwap(
@@ -586,10 +586,6 @@ contract UniV3LpVaultFeesTest is Test {
 
         assertEq(finalFeeCollectorBalance0, initialFeeCollectorBalance0);
         assertEq(finalFeeCollectorBalance1, initialFeeCollectorBalance1);
-
-        // make sure vault.lastVaultTvl0() have been updated
-        // works since no perf since last deposit & no tvl fee
-        (uint256 finalTvl0, uint256 finalTvl1) = perfFeeSetup.vault.rawAssetsValue();
 
         // make sure vault.lastVaultTvl0() have been updated
         makeSureLastVaultTvl0Matches(perfFeeSetup);
