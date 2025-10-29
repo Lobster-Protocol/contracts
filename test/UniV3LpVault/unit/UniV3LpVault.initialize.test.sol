@@ -166,5 +166,6 @@ contract UniV3LpVaultInitializeTest is Test {
     }
 
     // todo: test cannot initialize twice
+    // todo: make sure implementation cannot be initialized
     // todo test update fees > max fees
 }
