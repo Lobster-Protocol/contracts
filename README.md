@@ -1,104 +1,94 @@
 # Lobster Vault System
 
-A modular, secure vault system built on ERC4626 with multi-signature operation validation and specialized Uniswap V3 integration capabilities.
+A production-ready Uniswap V3 liquidity management vault with role-based access control, fee collection mechanisms, and emergency safeguards.
 
-## 🏗️ Architecture Overview
+## Architecture Overview
 
-The Lobster Vault System consists of three main components working together to provide secure, flexible vault operations:
+The Lobster Vault System provides a streamlined architecture for managing Uniswap V3 liquidity positions with built-in fee mechanisms and governance controls:
 
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
-│                              Vault Layer                              │
-├──────────────────────────┬─────────────────────┬──────────────────────┤
-│  ERC4626WithOpValidator  │    LobsterVault     │  UniV3LobsterVault   │
-│  (Basic Operations)      │  (Dual-Token Base)  │  (Uniswap V3)        │
-└──────────────────────────┴─────────────────────┴──────────────────────┘
-                                    │
-┌───────────────────────────────────────────────────────────────────────┐
-│                           Modular Base Layer                          │
+│                           Factory Layer                               │
 ├───────────────────────────────────────────────────────────────────────┤
-│                     Modular (Operation Execution)                     │
+│              UniV3LpVaultFactory (CREATE2 Deployment)                 │
 └───────────────────────────────────────────────────────────────────────┘
                                     │
 ┌───────────────────────────────────────────────────────────────────────┐
-│                           Validation Layer                            │
+│                         Vault Implementation                          │
 ├───────────────────────────────────────────────────────────────────────┤
-│             MuSigOpValidator (Multi-Signature Validation)             │
+│          UniV3LpVault (Uniswap V3 Position Management)                │
+└───────────────────────────────────────────────────────────────────────┘
+                                    │
+┌───────────────────────────────────────────────────────────────────────┐
+│                              Uniswap Pool                             │
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
-**Key Design Principles:**
-- **Security First**: All external operations require multi-signature approval
-- **Modularity**: Components can be mixed and matched for different use cases
-- **Immutable Whitelists**: Operation restrictions cannot be changed after deployment
-- **Flexible Governance**: Signer configuration can evolve via multi-sig approval
+## Core Components
 
-## 📦 Vault Types
-
-### ERC4626WithOpValidator
-**Purpose**: Standard ERC4626 vault with secure operation execution capabilities
+### SingleVault (Base Contract)
+**Purpose**: Provides foundational access control and emergency safety mechanisms
 
 **Features:**
-- Standard deposit/withdraw/mint/redeem functionality
-- Multi-signature validated external operations
-- Custom ERC20 share token naming
-- Clean separation between vault operations and extended functionality
+- **Two-Tier Access Control**:
+  - **Owner**: Full vault control, can update allocator, lock vault, and execute all operations
+  - **Allocator**: Limited operational control for position management (can be blocked by lock)
+- **Emergency Lock**: Owner can freeze allocator operations without affecting owner access
+- **Secure Ownership Transfer**: Uses OpenZeppelin's `Ownable2Step` for safe ownership changes
+- **Reentrancy Protection**: Built-in guards against reentrancy attacks
+- **ETH Rejection**: Prevents accidental ETH deposits
 
-**⚠️ Customization Note**: This is a **base implementation** that should be inherited and customized for specific protocols. You'll need to override `deposit()`, `withdraw()`, `totalAssets()`, and other ERC4626 functions to implement your specific integration logic (e.g., lending protocols, yield strategies, etc.).
+### UniV3LpVault
+**Features:**
+- **Complete Position Lifecycle Management**:
+  - Mint new positions with customizable tick ranges
+  - Burn liquidity from existing positions
+  - Collect trading fees from positions
+  - Automatic position tracking and cleanup
+- **Dual Fee System**:
+  - **TVL Fee**: Annualized management fee on total assets
+  - **Performance Fee**: Fee on vault growth with delta-weighted price adjustment
+- **Delta-Weighted Performance Calculation**: Adjusts for relative token price changes
+- **Automated Fee Collection**: Fees auto-collect during deposits/withdrawals
+- **TWAP-Based Valuation**: 7-day time-weighted average price for accurate asset valuation
+- **Proportional Withdrawals**: Users withdraw based on their share of vault assets
 
-### LobsterVault
-**Purpose**: Dual-token vault foundation supporting two separate assets
+**Security Features:**
+- Timelocked fee updates (14-day delay)
+- Maximum fee cap (30%)
+- Deadline-based transaction expiry
+
+### UniV3LpVaultFactory
+**Purpose**: Factory contract for deterministic vault deployment
 
 **Features:**
-- Manages two distinct ERC20 tokens simultaneously
-- Packed uint256 representation for gas efficiency: `(token0Amount << 128) | token1Amount`
-- Proportional share calculations using limiting token approach
-- Built-in operation validation system
+- **Vault Registry**: Tracks all deployed vaults via `isVault` mapping
+- **Address Prediction**: Compute vault address before deployment with `computeVaultAddress()`
+- **Deployment Transparency**: Events emitted for all deployments
+- **Configurable Delta**: Allows customization of performance fee calculation weight
 
-**⚠️ Customization Note**: This is a **foundational contract** designed to be extended. To integrate with specific protocols, you must inherit from this contract and implement custom logic in `deposit()`, `withdraw()`, `totalAssets()`, and related functions. The base implementation only handles direct token transfers.
+## Access Control Model
 
-### UniV3LobsterVault
-**Purpose**: Production-ready Uniswap V3 position management vault
+### Owner
+- Full vault control
+- Can deposit/withdraw assets
+- Can update allocator address
+- Can lock/unlock vault
+- Can execute all position operations
 
-**Features:**
-- Complete Uniswap V3 NFT position lifecycle management
-- Automated liquidity provision and removal
-- Fee collection with configurable protocol fee cuts
-- Proportional withdrawal based on vault share ownership
-- Gas-optimized batch position processing
+### Allocator
+- Can mint new positions
+- Can burn existing positions
+- Can collect trading fees
+- **Cannot** deposit/withdraw vault assets
+- **Blocked** when vault is locked
 
-**Integration Ready**: This vault is **production-ready** and doesn't require customization for Uniswap V3 use cases.
+### Fee Collector
+- Collects accumulated fees via `collectPendingFees()`
+- Initiates fee parameter updates via `updateFees()`
+- Enforces timelocked fee changes via `enforceFeeUpdate()`
 
-## 🔐 MuSigOpValidator
-
-**Purpose**: Multi-signature operation validator providing secure, quorum-based approval for vault operations.
-
-### Core Features
-
-**🛡️ Security Model**
-- **Immutable Whitelist**: Operation restrictions set at deployment cannot be changed
-- **Weight-Based Voting**: Flexible signer weights
-- **Replay Protection**: Sequential nonce system prevents transaction replay attacks
-- **Cross-Chain Safety**: Chain ID inclusion prevents cross-chain replay attacks
-
-**⚙️ Operation Control**
-- **Granular Permissions**: Separate controls for ETH transfers and function calls
-- **Parameter Validation**: Custom validation logic for function parameters
-- **Batch Operations**: Atomic execution of multiple operations
-- **Gas Optimization**: Efficient signature verification and validation
-
-**👥 Governance Flexibility**
-- **Mutable Signers**: Add, remove, or update signer weights via multi-sig
-- **Dynamic Quorum**: Adjust approval thresholds as organization evolves
-
-### Signature Requirements
-
-- **Format**: ECDSA signatures _(BLS signatures will be implemented later)_
-- **Ordering**: Signatures can be in any order
-- **Uniqueness**: Each signer can only sign once per operation
-- **Threshold**: Total signature weight must meet or exceed quorum
-
-## 🚀 Development Setup
+## Development Setup
 
 ### Prerequisites
 
@@ -109,8 +99,6 @@ foundryup
 
 # Verify installation
 forge --version
-cast --version
-anvil --version
 ```
 
 ### Building
@@ -133,14 +121,12 @@ forge test
 forge test -vvv
 
 # Run specific test file
-forge test --match-path test/VaultTest.sol
+forge test --match-path test/UniV3LpVault.t.sol
 
-# Get the coverage report
-forge coverage --no-match-coverage "(test|script|lib)" --ir-minimum
-
-# Visualize coverage report
-genhtml --rc derive_function_end_line=0 lcov.info -o coverage-report
-open coverage-report/index.html
+# Get coverage report
+forge coverage --report lcov --report-file coverage.lcov --ir-minimum
+genhtml coverage.lcov -o coverage-html --branch-coverage --function-coverage
+open coverage-html/index.html
 ```
 
 ### Code Quality
@@ -152,41 +138,183 @@ forge fmt
 # Check formatting without changes
 forge fmt --check
 
-# Lint with slither (requires installation)
-slither .
-
 # Generate documentation
 forge doc --build
 ```
 
-## 🔧 Integration Guidelines
+## Fee Mechanics
 
-### For Protocol Integrators
+### TVL Management Fee
+- **Type**: Annualized percentage of total assets
+- **Calculation**: Accrues linearly over time based on asset value
+- **Formula**: `fee = tvlFee * timeElapsed / 365 days`
+- **Collection**: Automatic during deposits/withdrawals or manual via `collectPendingFees()`
+- **Max Rate**: 30% (configurable via `MAX_FEE`)
 
-1. **Inherit Base Contracts**: Extend `ERC4626WithOpValidator` or `LobsterVault`
-2. **Override Key Functions**: Implement your protocol-specific logic in:
-   - `deposit()` - Custom deposit handling
-   - `withdraw()` - Custom withdrawal logic  
-   - `totalAssets()` - Asset valuation for your protocol
-   - `_convertToShares()` / `_convertToAssets()` - Share conversion logic
-   - All the `preview*`and `max*` functions if necessary
+### Performance Fee
+- **Type**: Percentage of vault growth (adjusted for price changes)
+- **Calculation**: Only charged when vault TVL increases above a delta-weighted baseline
+- **Delta Parameter**: Controls sensitivity to relative token price changes (0 to 1e18)
+- **Collection**: Automatic when vault performs positively
+- **Max Rate**: 30% (configurable via `MAX_FEE`)
 
-3. **Configure Validator**: Set up operation whitelist for your protocol's contracts
-4. **Test Thoroughly**: Use fuzz testing for edge cases
+#### Understanding Delta
 
-### Security Considerations
+The `delta` parameter controls how the performance fee accounts for relative token value changes:
 
-- **Whitelist Carefully**: Only whitelist necessary operations and targets
-- **Validate Parameters**: Implement custom parameter validators for complex operations
-- **Monitor Operations**: Set up monitoring for unusual operation patterns
-- **Regular Audits**: Have custom implementations audited before mainnet deployment
+**Formula**: `baseTvl0 = lastVaultTvl0 × (delta × (lastQuote / currentQuote)² + (1 - delta))`
 
-## 📄 License
+**Delta Values**:
+- **delta = 0**: Performance based entirely on token0 accumulation relative to token1
+  - Best for strategies focused on accumulating the base token
+  - Example: ETH/USDC vault aiming to maximize ETH holdings
 
-This project is licensed under the GNU AGPL v3.0 License - see the [LICENSE](LICENSE) file for details.
+- **delta = 0.5e18** (50%): Equal weighting of both tokens
+  - Balanced approach for neutral strategies
+  - Fair for portfolios maintaining roughly equal token ratios
 
-## ⚠️ Disclaimer
+- **delta = 1e18** (100%): Performance based entirely on token1 accumulation relative to token0
+  - Best for strategies focused on accumulating the quote token
+  - Example: Stablecoin farming where you want to measure USD value growth
 
-This software is provided "as is" without warranty. Use at your own risk. Always conduct thorough testing and auditing before deploying to mainnet with real funds.
+**Example Scenarios**:
 
-**TO FIX: in the UniV3LobsterVault._executePositionWithdrawal function, we must empty the position if afted withdraw, it is left with low liquidity and then, we must burn it to avoid being stuck with an increasing amount of positions after the withdrawals**
+**Scenario 1: USDC/WETH Vault (δ = 0)**
+
+|  | USDC | WETH | WETH Price | WETH Equivalent |
+|-------|------|------|------------|-----------------|
+| Initial | 20,000 | 10 | $2,000 | 20 WETH |
+| Later | 18,000 | 12 | $2,200 | 20.18 WETH |
+
+**Performance**: +0.18 WETH outperformance
+
+**Focus**: Maximizing WETH accumulation
+
+---
+
+**Scenario 2: USDC/WETH Vault (δ = 0.5e18)**
+
+|  | USDC | WETH | WETH Price | WETH Equivalent |
+|-------|------|------|------------|-----------------|
+| Initial | 20,000 | 10 | $2,000 | 20 WETH |
+| Later | 30,000 | 8 | $2,200 | 21.63 WETH |
+
+**Performance**: +0.63 WETH (as normal hold value 50/50)
+
+**Result**: Should leave a +5% performance on a +10% performance on underlying
+
+**Focus**: Balanced 50/50 portfolio approach
+
+---
+
+**Scenario 3: USDC/WETH Vault (δ = 1e18)**
+
+|  | USDC | WETH | WETH Price | WETH Equivalent |
+|-------|------|------|------------|-----------------|
+| Initial | 20,000 | 10 | $2,000 | 20 WETH |
+| Later | 25,000 | 11 | $2,200 | 22.36 WETH |
+
+**Performance**: +0.36 WETH (as counted on USDC)
+**Focus**: Token value counted on WETH (outperformance counted on USDC)
+
+
+### Fee Update Process
+
+The vault implements a two-step timelock mechanism for fee changes:
+
+1. **Initiate Update**: Fee collector calls `updateFees(newTvlFee, newPerformanceFee)`
+   - Starts 14-day timelock period
+   - Emits `FeeUpdateInitialized` event
+
+2. **Enforce Update**: After 14 days, call `enforceFeeUpdate()`
+   - Collects all pending fees at old rates
+   - Activates new fee parameters
+   - Emits `FeeUpdateEnforced` event
+
+## Important Considerations
+
+### TWAP Requirements
+
+The vault uses a 7-day TWAP for accurate price calculations. For proper operation:
+- **Pool must have swap activity** to populate TWAP observations
+- New pools without sufficient history may revert on operations requiring TWAP
+
+> **Note**: The vault will work fine with pools less than 7 days old if `performanceFeeScaled = 0`
+
+### Position Management Best Practices
+
+1. **Limit Active Positions**: Keep 1-3 simultaneous positions for gas efficiency
+2. **Monitor Liquidity Depth**: Remove positions with very low liquidity
+3. **Regular Rebalancing**: Collect fees and rebalance positions periodically
+4. **Slippage Protection**: Always set appropriate `amount0Min` and `amount1Min`
+5. **Gas Optimization**: Batch operations when possible to reduce transaction costs
+
+### Choosing the Right Delta
+
+Consider your vault's investment strategy when setting delta:
+
+- **Long Token0 Strategy**: Set delta closer to 0
+- **Long Token1 Strategy**: Set delta closer to 1e18
+- **Market Neutral Strategy**: Set delta around 0.5e18
+- **Stablecoin Pairs**: Set delta to 0.5e18 for balanced measurement
+
+## Deployment Guide
+
+### Factory Deployment
+
+```solidity
+// Deploy the factory
+UniV3LpVaultFactory factory = new UniV3LpVaultFactory();
+```
+
+## Key Functions
+
+### Owner Functions
+- `deposit(uint256 assets0, uint256 assets1)` - Deposit tokens into vault
+- `withdraw(uint256 scaledPercentage, address recipient)` - Withdraw percentage of holdings
+
+### Allocator Functions
+- `mint(MinimalMintParams params)` - Create new liquidity position
+- `burn(int24 tickLower, int24 tickUpper, uint128 amount)` - Remove liquidity
+- `collect(int24 tickLower, int24 tickUpper, uint128 amount0Max, uint128 amount1Max)` - Collect fees
+
+### Fee Collector Functions
+- `collectPendingFees()` - Manually trigger fee collection
+- `updateFees(uint80 newTvlFee, uint80 newPerformanceFee)` - Initiate fee update
+- `enforceFeeUpdate()` - Apply pending fee update after timelock
+
+### View Functions
+- `rawAssetsValue()` - Total vault assets before fees
+- `netAssetsValue()` - Vault assets after deducting pending fees
+- `pendingTvlFee()` - Calculate pending management fees
+- `pendingPerformanceFee()` - Calculate pending performance fees
+- `totalLpValue()` - Value locked in LP positions
+- `getPosition(uint256 index)` - Get position details
+- `positionsLength()` - Number of active positions
+
+## License
+
+This project is licensed under the GPL-3.0-or-later License - see the [LICENSE](./LICENSE) file for details.
+
+## Disclaimer
+
+This software is provided "as is" without warranty. Use at your own risk.
+
+**IMPORTANT**:
+- Always conduct thorough testing before mainnet deployment
+- Have contracts professionally audited before using with real funds
+- Understand the risks of impermanent loss in liquidity provision
+- Monitor positions regularly for optimal performance
+- Be aware of gas costs for position management operations
+- Carefully choose delta parameter based on your strategy
+- Understand how fee calculations work before deploying
+
+## Additional Resources
+
+- [Uniswap V3 Documentation](https://docs.uniswap.org/protocol/concepts/V3-overview/concentrated-liquidity)
+- [OpenZeppelin Contracts](https://docs.openzeppelin.com/contracts/)
+- [Foundry Book](https://book.getfoundry.sh/)
+
+---
+
+**Need Help?** Open an issue or reach out to the development team.

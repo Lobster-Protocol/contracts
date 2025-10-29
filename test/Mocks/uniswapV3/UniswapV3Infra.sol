@@ -33,14 +33,15 @@ contract UniswapV3Infra is Test {
         address deployedFactory;
         assembly {
             // Make sure we're not trying to deploy empty bytecode
-            if iszero(mload(factoryBytecode)) { revert(0, 0) }
+            if iszero(mload(factoryBytecode)) {
+                revert(0, 0)
+            }
 
-            deployedFactory :=
-                create(
-                    0, // No ETH sent
-                    add(factoryBytecode, 0x20), // Skip the first 32 bytes (length prefix)
-                    mload(factoryBytecode) // Length of bytecode
-                )
+            deployedFactory := create(
+                0, // No ETH sent
+                add(factoryBytecode, 0x20), // Skip the first 32 bytes (length prefix)
+                mload(factoryBytecode) // Length of bytecode
+            )
 
             // If deployment failed, revert with a detailed message
             if iszero(deployedFactory) {
@@ -59,14 +60,15 @@ contract UniswapV3Infra is Test {
         address deployedWeth;
         assembly {
             // Make sure we're not trying to deploy empty bytecode
-            if iszero(mload(wethBytecode)) { revert(0, 0) }
+            if iszero(mload(wethBytecode)) {
+                revert(0, 0)
+            }
 
-            deployedWeth :=
-                create(
-                    0, // No ETH sent
-                    add(wethBytecode, 0x20), // Skip the first 32 bytes (length prefix)
-                    mload(wethBytecode) // Length of bytecode
-                )
+            deployedWeth := create(
+                0, // No ETH sent
+                add(wethBytecode, 0x20), // Skip the first 32 bytes (length prefix)
+                mload(wethBytecode) // Length of bytecode
+            )
 
             // If deployment failed, revert with a detailed message
             if iszero(deployedWeth) {
@@ -86,6 +88,7 @@ contract UniswapV3Infra is Test {
         bytes memory tokenPositionDescriptorConstructorArgs = abi.encode(
             // address _WETH9, bytes32 _nativeCurrencyLabelBytes
             address(weth),
+            // forge-lint: disable-next-line(unsafe-typecast)
             bytes32(nativeCurrencyLabelBytes)
         );
 
@@ -96,14 +99,15 @@ contract UniswapV3Infra is Test {
         address deployedTokenPositionDescriptor;
         assembly {
             // Make sure we're not trying to deploy empty bytecode
-            if iszero(mload(tokenPositionDescriptorBytecodeWithArgs)) { revert(0, 0) }
+            if iszero(mload(tokenPositionDescriptorBytecodeWithArgs)) {
+                revert(0, 0)
+            }
 
-            deployedTokenPositionDescriptor :=
-                create(
-                    0, // No ETH sent
-                    add(tokenPositionDescriptorBytecodeWithArgs, 0x20), // Skip the first 32 bytes (length prefix)
-                    mload(tokenPositionDescriptorBytecodeWithArgs) // Length of bytecode
-                )
+            deployedTokenPositionDescriptor := create(
+                0, // No ETH sent
+                add(tokenPositionDescriptorBytecodeWithArgs, 0x20), // Skip the first 32 bytes (length prefix)
+                mload(tokenPositionDescriptorBytecodeWithArgs) // Length of bytecode
+            )
 
             // If deployment failed, revert with a detailed message
             if iszero(deployedTokenPositionDescriptor) {
@@ -132,14 +136,15 @@ contract UniswapV3Infra is Test {
         address deployedPositionManager;
         assembly {
             // Make sure we're not trying to deploy empty bytecode
-            if iszero(mload(positionManagerBytecodeWithArgs)) { revert(0, 0) }
+            if iszero(mload(positionManagerBytecodeWithArgs)) {
+                revert(0, 0)
+            }
 
-            deployedPositionManager :=
-                create(
-                    0, // No ETH sent
-                    add(positionManagerBytecodeWithArgs, 0x20), // Skip the first 32 bytes (length prefix)
-                    mload(positionManagerBytecodeWithArgs) // Length of bytecode
-                )
+            deployedPositionManager := create(
+                0, // No ETH sent
+                add(positionManagerBytecodeWithArgs, 0x20), // Skip the first 32 bytes (length prefix)
+                mload(positionManagerBytecodeWithArgs) // Length of bytecode
+            )
 
             // If deployment failed, revert with a detailed message
             if iszero(deployedPositionManager) {
@@ -165,14 +170,15 @@ contract UniswapV3Infra is Test {
         address deployedRouter;
         assembly {
             // Make sure we're not trying to deploy empty bytecode
-            if iszero(mload(routerBytecodeWithArgs)) { revert(0, 0) }
+            if iszero(mload(routerBytecodeWithArgs)) {
+                revert(0, 0)
+            }
 
-            deployedRouter :=
-                create(
-                    0, // No ETH sent
-                    add(routerBytecodeWithArgs, 0x20), // Skip the first 32 bytes (length prefix)
-                    mload(routerBytecodeWithArgs) // Length of bytecode
-                )
+            deployedRouter := create(
+                0, // No ETH sent
+                add(routerBytecodeWithArgs, 0x20), // Skip the first 32 bytes (length prefix)
+                mload(routerBytecodeWithArgs) // Length of bytecode
+            )
 
             // If deployment failed, revert with a detailed message
             if iszero(deployedRouter) {

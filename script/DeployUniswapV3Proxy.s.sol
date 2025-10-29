@@ -7,7 +7,6 @@ import "../src/UniswapV3Proxy.sol";
 contract DeployUniswapV3Proxy is Script {
     // Network-specific addresses
     struct NetworkConfig {
-        address weth;
         address uniV3Factory;
     }
 
@@ -16,12 +15,11 @@ contract DeployUniswapV3Proxy is Script {
 
         vm.startBroadcast();
 
-        UniswapV3Proxy proxy = new UniswapV3Proxy(config.weth, config.uniV3Factory);
+        UniswapV3Proxy proxy = new UniswapV3Proxy(config.uniV3Factory);
 
         vm.stopBroadcast();
 
         console.log("UniswapV3Proxy deployed at:", address(proxy));
-        console.log("WETH address:", config.weth);
         console.log("Uniswap V3 Factory address:", config.uniV3Factory);
     }
 
@@ -30,10 +28,7 @@ contract DeployUniswapV3Proxy is Script {
 
         if (chainId == 42161) {
             // Arbitrum One
-            return NetworkConfig({
-                weth: 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1,
-                uniV3Factory: 0x1F98431c8aD98523631AE4a59f267346ea31F984
-            });
+            return NetworkConfig({uniV3Factory: 0x1F98431c8aD98523631AE4a59f267346ea31F984});
         } else {
             // Default to mainnet addresses for unknown networks
             revert("Warning: Unknown network, using mainnet addresses");

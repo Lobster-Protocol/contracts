@@ -2,12 +2,8 @@
 pragma solidity ^0.8.28;
 
 import {IUniswapV3PoolMinimal} from "../../interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
-import {INonFungiblePositionManager} from "../../interfaces/uniswapV3/INonFungiblePositionManager.sol";
-import {PoolAddress} from "./PoolAddress.sol";
 import {TickMath} from "./TickMath.sol";
-import {UniswapV3MathLib} from "./UniswapV3MathLib.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {PositionValue} from "./PositionValue.sol";
 
 struct Position {
     address token;
@@ -89,6 +85,7 @@ library UniswapUtils {
 
         int56 tickCumulativesDelta = tickCumulatives[1] - tickCumulatives[0];
 
+        // forge-lint: disable-next-line(unsafe-typecast)
         int56 averageTick = int24(tickCumulativesDelta / int56(uint56(secondsAgo)));
 
         // Always round to negative infinity
@@ -100,6 +97,7 @@ library UniswapUtils {
 
         require(averageTick >= MIN_TICK && averageTick <= MAX_TICK, "Tick out of range");
 
+        // forge-lint: disable-next-line(unsafe-typecast)
         twPrice = getQuoteFromSqrtRatioX96(TickMath.getSqrtRatioAtTick(int24(averageTick)), baseAmount, inverse);
     }
 }

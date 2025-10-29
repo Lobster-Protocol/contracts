@@ -1,0 +1,165 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+pragma solidity ^0.8.28;
+
+import "forge-std/Test.sol";
+import {UniV3LpVault} from "../../../src/vaults/uniV3LpVault/UniV3LpVault.sol";
+import {SingleVault} from "../../../src/vaults/SingleVault.sol";
+import {TestHelper} from "../helpers/TestHelper.sol";
+import {TestConstants} from "../helpers/Constants.sol";
+import {MockERC20} from "../../Mocks/MockERC20.sol";
+import {UniswapV3Infra} from "../../Mocks/uniswapV3/UniswapV3Infra.sol";
+import {IUniswapV3FactoryMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
+import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
+
+contract UniV3LpVaultConstructorTest is Test {
+    TestHelper helper;
+
+    function setUp() public {
+        helper = new TestHelper();
+    }
+
+    function test_constructor_ValidParameters_Success() public {
+        TestHelper.VaultSetup memory setup =
+            helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE, TestConstants.HIGH_PERF_FEE);
+
+        // Verify all state variables are set correctly
+        assertEq(setup.vault.owner(), setup.owner);
+        assertEq(setup.vault.allocator(), setup.allocator);
+        assertEq(address(setup.vault.TOKEN0()), address(setup.token0));
+        assertEq(address(setup.vault.TOKEN1()), address(setup.token1));
+        assertEq(address(setup.vault.POOL()), address(setup.pool));
+        assertEq(setup.vault.tvlFeeCollectedAt(), 1209601);
+        assertEq(setup.vault.tvlFeeScaled(), TestConstants.HIGH_TVL_FEE);
+        assertEq(setup.vault.performanceFeeScaled(), TestConstants.HIGH_PERF_FEE);
+        assertEq(setup.vault.feeCollector(), setup.feeCollector);
+    }
+
+    function test_constructor_WrongTokenOrder_Reverts() public {
+        address owner = makeAddr("owner");
+        address allocator = makeAddr("allocator");
+        address feeCollector = makeAddr("feeCollector");
+
+        MockERC20 token0 = new MockERC20();
+        MockERC20 token1 = new MockERC20();
+
+        // Create pool with correct order
+        UniswapV3Infra uniswapV3 = new UniswapV3Infra();
+        (IUniswapV3FactoryMinimal factory,,,) = uniswapV3.deploy();
+
+        // Ensure token0 < token1 for pool creation
+        if (address(token0) > address(token1)) {
+            (token0, token1) = (token1, token0);
+        }
+
+        IUniswapV3PoolMinimal pool = uniswapV3.createPoolAndInitialize(
+            factory, address(token0), address(token1), TestConstants.POOL_FEE, TestConstants.INITIAL_SQRT_PRICE_X96
+        );
+
+        // Try to create vault with wrong token order
+        vm.expectRevert("Wrong token 0 & 1 order");
+        new UniV3LpVault(
+            owner,
+            allocator,
+            address(token1), // Wrong order
+            address(token0), // Wrong order
+            address(pool),
+            feeCollector,
+            TestConstants.LOW_TVL_FEE,
+            TestConstants.LOW_PERF_FEE,
+            TestConstants.DELTA5050
+        );
+    }
+
+    function test_constructor_ZeroFeeCollector_Reverts() public {
+        address owner = makeAddr("owner");
+        address allocator = makeAddr("allocator");
+
+        MockERC20 token0 = new MockERC20();
+        MockERC20 token1 = new MockERC20();
+
+        if (address(token0) > address(token1)) {
+            (token0, token1) = (token1, token0);
+        }
+
+        UniswapV3Infra uniswapV3 = new UniswapV3Infra();
+        (IUniswapV3FactoryMinimal factory,,,) = uniswapV3.deploy();
+
+        IUniswapV3PoolMinimal pool = uniswapV3.createPoolAndInitialize(
+            factory, address(token0), address(token1), TestConstants.POOL_FEE, TestConstants.INITIAL_SQRT_PRICE_X96
+        );
+
+        vm.expectRevert(SingleVault.ZeroAddress.selector);
+        new UniV3LpVault(
+            owner,
+            allocator,
+            address(token0),
+            address(token1),
+            address(pool),
+            address(0), // Zero address
+            TestConstants.LOW_TVL_FEE,
+            TestConstants.LOW_PERF_FEE,
+            TestConstants.DELTA5050
+        );
+    }
+
+    function test_constructor_TokenMismatch_Reverts() public {
+        address owner = makeAddr("owner");
+        address allocator = makeAddr("allocator");
+        address feeCollector = makeAddr("feeCollector");
+        MockERC20 token0 = new MockERC20();
+        MockERC20 token1 = new MockERC20();
+        MockERC20 wrongToken = new MockERC20();
+
+        if (address(token0) > address(token1)) {
+            (token0, token1) = (token1, token0);
+        }
+
+        UniswapV3Infra uniswapV3 = new UniswapV3Infra();
+        (IUniswapV3FactoryMinimal factory,,,) = uniswapV3.deploy();
+
+        IUniswapV3PoolMinimal pool = uniswapV3.createPoolAndInitialize(
+            factory, address(token0), address(token1), TestConstants.POOL_FEE, TestConstants.INITIAL_SQRT_PRICE_X96
+        );
+
+        vm.expectRevert("Token mismatch");
+        new UniV3LpVault(
+            owner,
+            allocator,
+            address(wrongToken), // Wrong token
+            address(token1),
+            address(pool),
+            feeCollector,
+            TestConstants.LOW_TVL_FEE,
+            TestConstants.LOW_PERF_FEE,
+            TestConstants.DELTA5050
+        );
+    }
+
+    function test_constructor_InitialState_Correct() public {
+        TestHelper.VaultSetup memory setup =
+            helper.deployVaultWithPool(TestConstants.MEDIUM_TVL_FEE, TestConstants.MEDIUM_PERF_FEE);
+
+        // Check that no positions exist initially
+        vm.expectRevert();
+        setup.vault.getPosition(0);
+
+        // Check that total LP value is zero
+        (uint256 totalAssets0, uint256 totalAssets1) = setup.vault.totalLpValue();
+        assertEq(totalAssets0, 0);
+        assertEq(totalAssets1, 0);
+
+        // Check net assets value is zero (no deposits yet)
+        (uint256 netAssets0, uint256 netAssets1) = setup.vault.netAssetsValue();
+        assertEq(netAssets0, 0);
+        assertEq(netAssets1, 0);
+    }
+
+    function test_constructor_ZeroFee_Success() public {
+        TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(0, 0);
+
+        // Zero TVL fee should be allowed
+        assertTrue(address(setup.vault) != address(0));
+    }
+
+    // todo test update fees > max fees
+}

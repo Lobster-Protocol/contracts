@@ -1,4 +1,4 @@
 {
-  "filter_paths": "lib/,script/,test/",
+  "filter_paths": "lib/,script/",
   "exclude_informational": true
 }

@@ -15,6 +15,7 @@ library LiquidityAmounts {
     /// @param x The uint258 to be downcasted
     /// @return y The passed value, downcasted to uint128
     function toUint128(uint256 x) private pure returns (uint128 y) {
+        // forge-lint: disable-next-line(unsafe-typecast)
         require((y = uint128(x)) == x);
     }
 
@@ -114,8 +115,9 @@ library LiquidityAmounts {
             (sqrtRatioAX96, sqrtRatioBX96) = (sqrtRatioBX96, sqrtRatioAX96);
         }
 
-        return uint256(sqrtRatioBX96 - sqrtRatioAX96).mulDiv(uint256(liquidity) << RESOLUTION, sqrtRatioBX96)
-            / sqrtRatioAX96;
+        return
+            uint256(sqrtRatioBX96 - sqrtRatioAX96).mulDiv(uint256(liquidity) << RESOLUTION, sqrtRatioBX96)
+                / sqrtRatioAX96;
     }
 
     /// @notice Computes the amount of token1 for a given amount of liquidity and a price range

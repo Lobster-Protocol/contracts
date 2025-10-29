@@ -2,7 +2,6 @@
 pragma solidity ^0.8.0;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {IUniswapV3PoolMinimal} from "../../interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 
 library UniswapV3MathLib {
     // Constants from Uniswap V3 for fixed-point arithmetic

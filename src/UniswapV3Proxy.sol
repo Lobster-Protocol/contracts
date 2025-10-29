@@ -1,45 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.20;
 
-import {IUniswapV3MintCallback} from "./interfaces/uniswapV3/IUniswapV3MintCallback.sol";
+import {IUniswapV3MintCallback, MintParams, MintCallbackData} from "./interfaces/uniswapV3/IUniswapV3MintCallback.sol";
 import {IUniswapV3PoolMinimal} from "./interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {TransferHelper} from "./libraries/uniswapV3/TransferHelper.sol";
 import {PoolAddress} from "./libraries/uniswapV3/PoolAddress.sol";
-import {IWETH} from "./interfaces/IWETH.sol";
 import {TickMath} from "./libraries/uniswapV3/TickMath.sol";
 import {LiquidityAmounts} from "./libraries/uniswapV3/LiquidityAmounts.sol";
 import {CallbackValidation} from "./libraries/uniswapV3/CallbackValidation.sol";
 
-struct MintCallbackData {
-    PoolAddress.PoolKey poolKey;
-    address payer;
-}
-
-struct MintParams {
-    address token0;
-    address token1;
-    uint24 fee;
-    int24 tickLower;
-    int24 tickUpper;
-    uint256 amount0Desired;
-    uint256 amount1Desired;
-    uint256 amount0Min;
-    uint256 amount1Min;
-    address recipient;
-    uint256 deadline;
-}
-
 contract UniswapV3Proxy is IUniswapV3MintCallback {
-    address public immutable WETH;
     address public immutable UNI_V3_FACTORY;
 
     modifier checkDeadline(uint256 deadline) {
-        require(block.timestamp <= deadline, "Transaction too old");
+        _checkDeadline(deadline);
         _;
     }
 
-    constructor(address _weth, address _uniV3Factory) {
-        WETH = _weth;
+    constructor(address _uniV3Factory) {
         UNI_V3_FACTORY = _uniV3Factory;
     }
 
@@ -49,8 +27,9 @@ contract UniswapV3Proxy is IUniswapV3MintCallback {
         checkDeadline(params.deadline)
         returns (uint256 amount0, uint256 amount1)
     {
-        PoolAddress.PoolKey memory poolKey =
-            PoolAddress.PoolKey({token0: params.token0, token1: params.token1, fee: params.fee});
+        PoolAddress.PoolKey memory poolKey = PoolAddress.PoolKey({
+            token0: params.token0, token1: params.token1, fee: params.fee
+        });
 
         // Get the pool address
         IUniswapV3PoolMinimal pool = IUniswapV3PoolMinimal(PoolAddress.computeAddress(UNI_V3_FACTORY, poolKey));
@@ -78,7 +57,14 @@ contract UniswapV3Proxy is IUniswapV3MintCallback {
         require(amount0 >= params.amount0Min && amount1 >= params.amount1Min, "Price slippage check");
     }
 
-    function uniswapV3MintCallback(uint256 amount0Owed, uint256 amount1Owed, bytes calldata data) external override {
+    function uniswapV3MintCallback(
+        uint256 amount0Owed,
+        uint256 amount1Owed,
+        bytes calldata data
+    )
+        external
+        override
+    {
         MintCallbackData memory decoded = abi.decode(data, (MintCallbackData));
 
         // Make sure caller is a contract deployed by the Uniswap V3 factory
@@ -90,5 +76,9 @@ contract UniswapV3Proxy is IUniswapV3MintCallback {
         if (amount1Owed > 0) {
             TransferHelper.safeTransferFrom(decoded.poolKey.token1, decoded.payer, msg.sender, amount1Owed);
         }
+    }
+
+    function _checkDeadline(uint256 deadline) internal view {
+        require(block.timestamp <= deadline, "Transaction too old");
     }
 }
