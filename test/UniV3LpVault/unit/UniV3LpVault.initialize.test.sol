@@ -57,7 +57,7 @@ contract UniV3LpVaultInitializeTest is Test {
         );
 
         address vaultImplementation = address(new UniV3LpVault());
-        UniV3LpVaultFactory vaultFactory = new UniV3LpVaultFactory(vaultImplementation);
+        UniV3LpVaultFactory vaultFactory = new UniV3LpVaultFactory(vaultImplementation, address(1), 0);
 
         // Try to create vault with wrong token order
         vm.expectRevert("Wrong token 0 & 1 order");
@@ -97,7 +97,7 @@ contract UniV3LpVaultInitializeTest is Test {
 
         // Deploy vault
         address vaultImplementation = address(new UniV3LpVault());
-        UniV3LpVaultFactory vaultFactory = new UniV3LpVaultFactory(vaultImplementation);
+        UniV3LpVaultFactory vaultFactory = new UniV3LpVaultFactory(vaultImplementation, address(1), 0);
 
         vm.expectRevert(SingleVault.ZeroAddress.selector);
         UniV3LpVault(
@@ -137,7 +137,7 @@ contract UniV3LpVaultInitializeTest is Test {
 
         // Deploy vault
         address vaultImplementation = address(new UniV3LpVault());
-        UniV3LpVaultFactory vaultFactory = new UniV3LpVaultFactory(vaultImplementation);
+        UniV3LpVaultFactory vaultFactory = new UniV3LpVaultFactory(vaultImplementation, address(1), 0);
 
         vm.expectRevert("Token mismatch");
         UniV3LpVault(

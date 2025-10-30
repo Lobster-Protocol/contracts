@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.28;
 
-import "./UniV3LpVault.sol";
+import {UniV3LpVault, MAX_SCALED_PERCENTAGE} from "./UniV3LpVault.sol";
 import "@openzeppelin/contracts/proxy/Clones.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /**
  * @title UniV3LpVaultFactory
@@ -12,14 +15,18 @@ import "@openzeppelin/contracts/proxy/Clones.sol";
  *      deterministic vault deployment. Each vault is a minimal proxy that delegates to a single
  *      implementation contract, significantly reducing deployment costs.
  */
-contract UniV3LpVaultFactory {
+contract UniV3LpVaultFactory is Ownable2Step {
     using Clones for address;
+    using SafeERC20 for IERC20;
 
     /**
      * @notice The implementation contract that all vault proxies delegate to
      * @dev Set once during factory deployment and immutable thereafter
      */
     address public immutable IMPLEMENTATION;
+
+    /// @notice The protocol fee applied to all deployed vaults (if updated, only the next vault will have the new protocol fee)
+    uint256 public protocolFee;
 
     /**
      * @notice Emitted when a new vault proxy is successfully deployed
@@ -29,6 +36,22 @@ contract UniV3LpVaultFactory {
      * @param salt The unique salt used for CREATE2 deployment
      */
     event VaultDeployed(address indexed vault, address indexed pool, address indexed deployer, bytes32 salt);
+
+    /**
+     * @notice Emitted when ERC20 tokens are withdrawn from the factory
+     * @dev token is address(0) when withdrawing native tokens
+     * @param token The token address
+     * @param to The recipient address
+     * @param amount The amount of tokens withdrawn
+     */
+    event TokenWithdrawn(address indexed token, address indexed to, uint256 amount);
+
+    /**
+     * @notice Emitted when the protocol fee is updated
+     * @param oldFee The previous protocol fee
+     * @param newFee The new protocol fee
+     */
+    event ProtocolFeeUpdated(uint256 oldFee, uint256 newFee);
 
     /**
      * @notice Registry mapping to verify if an address is a vault deployed by this factory
@@ -42,10 +65,16 @@ contract UniV3LpVaultFactory {
      *      only delegated to via proxies. The implementation is automatically locked during its deployment
      *      via the _disableInitializers() call in its constructor.
      * @param _implementation The address of the UniV3LpVault implementation contract
+     * @param initialOwner The initial factory owner
+     * @param initialProtocolFee The initial protocol fee
      */
-    constructor(address _implementation) {
+    constructor(address _implementation, address initialOwner, uint256 initialProtocolFee) Ownable(initialOwner) {
         require(_implementation != address(0), "Invalid implementation");
+
         IMPLEMENTATION = _implementation;
+        protocolFee = initialProtocolFee;
+
+        _updateProtocolFee(initialProtocolFee);
     }
 
     /**
@@ -93,6 +122,8 @@ contract UniV3LpVaultFactory {
                 token1,
                 pool,
                 initialFeeCollector,
+                address(this),
+                protocolFee,
                 initialtvlFee,
                 initialPerformanceFee,
                 delta
@@ -118,6 +149,68 @@ contract UniV3LpVaultFactory {
      */
     function computeVaultAddress(bytes32 salt) external view returns (address predicted) {
         return IMPLEMENTATION.predictDeterministicAddress(salt, address(this));
+    }
+
+    /**
+     * @notice Updates the protocol fee for newly deployed vaults
+     * @dev Only callable by the factory owner. This change only affects vaults deployed after the update.
+     *      Existing vaults retain their original protocol fee.
+     * @param newProtocolFee The new protocol fee (scaled by SCALING_FACTOR, must be <= MAX_SCALED_PERCENTAGE)
+     */
+    function updateProtocolFee(uint256 newProtocolFee) external onlyOwner {
+        _updateProtocolFee(newProtocolFee);
+    }
+
+    /**
+     * @notice Withdraws ETH from the factory to the specified recipient
+     * @dev Only callable by the factory owner
+     * @param to The address to receive the ETH
+     * @param amount The amount of ETH to withdraw
+     */
+    function withdrawETH(address to, uint256 amount) external onlyOwner {
+        require(to != address(0), "Invalid recipient");
+        require(amount <= address(this).balance, "Insufficient balance");
+
+        (bool success,) = to.call{value: amount}("");
+        require(success, "ETH transfer failed");
+
+        emit TokenWithdrawn(address(0), to, amount);
+    }
+
+    /**
+     * @notice Withdraws ERC20 tokens from the factory to the specified recipient
+     * @dev Only callable by the factory owner. Used to collect protocol fees paid in ERC20 tokens.
+     * @param token The ERC20 token address to withdraw
+     * @param to The address to receive the tokens
+     * @param amount The amount of tokens to withdraw
+     */
+    function withdrawToken(address token, address to, uint256 amount) external onlyOwner {
+        require(token != address(0), "Invalid token");
+        require(to != address(0), "Invalid recipient");
+
+        IERC20(token).safeTransfer(to, amount);
+
+        emit TokenWithdrawn(token, to, amount);
+    }
+
+    /**
+     * @notice Allows the factory to receive ETH
+     */
+    receive() external payable {}
+
+    /**
+     * @notice Updates the protocol fee for newly deployed vaults
+     * @dev This change only affects vaults deployed after the update.
+     *      Existing vaults retain their original protocol fee.
+     * @param newProtocolFee The new protocol fee (scaled by SCALING_FACTOR, must be <= MAX_SCALED_PERCENTAGE)
+     */
+    function _updateProtocolFee(uint256 newProtocolFee) internal {
+        require(newProtocolFee <= MAX_SCALED_PERCENTAGE, "Protocol fee too high");
+
+        uint256 oldFee = protocolFee;
+        protocolFee = newProtocolFee;
+
+        emit ProtocolFeeUpdated(oldFee, newProtocolFee);
     }
 }
 

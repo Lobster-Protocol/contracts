@@ -1016,4 +1016,5 @@ contract UniV3LpVaultFeesTest is Test {
 
     // todo: test max fees
     // todo: test fee update from someone else than feeCollector
+    // todo: test protocol fees
 }

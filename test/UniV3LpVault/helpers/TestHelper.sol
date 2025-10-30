@@ -130,7 +130,7 @@ contract TestHelper is Test {
 
         // Deploy vault
         address vaultImplementation = address(new UniV3LpVault());
-        UniV3LpVaultFactory vaultFactory = new UniV3LpVaultFactory(vaultImplementation);
+        UniV3LpVaultFactory vaultFactory = new UniV3LpVaultFactory(vaultImplementation, address(1), 0);
 
         setup.vault = UniV3LpVault(
             vaultFactory.deployVault(
