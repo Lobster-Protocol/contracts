@@ -32,7 +32,7 @@ contract DeployFactory is Script {
 
         // Deploy factory
         console.log("\nDeploying Factory...");
-        factory = address(new UniV3LpVaultFactory(implementation));
+        factory = address(new UniV3LpVaultFactory(implementation, address(1), 0));
         console.log("Factory:", factory);
 
         // Deploy first vault

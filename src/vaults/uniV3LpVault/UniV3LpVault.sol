@@ -51,6 +51,8 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
      * @param token0 Address of the first token (must be < token1 address)
      * @param token1 Address of the second token (must be > token0 address)
      * @param pool Address of the UniswapV3 pool
+     * @param protocolAddress used to collect the protocol fee (can be address(0) if protocolFee = 0)
+     * @param protocolFee represents a cut from the fees sent to the feeCollector (tvl & performance)
      * @param initialFeeCollector Address authorized to collect fees
      * @param initialtvlFee Initial annualized TVL management fee (scaled)
      * @param initialPerformanceFee Initial performance fee on profits (scaled)
@@ -63,6 +65,8 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
         address token1,
         address pool,
         address initialFeeCollector,
+        address protocolAddress,
+        uint256 protocolFee,
         uint256 initialtvlFee,
         uint256 initialPerformanceFee,
         uint256 delta
@@ -75,7 +79,8 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
         require(initialOwner != address(0), ZeroAddress());
         require(initialAllocator != address(0), ZeroAddress());
         require(initialFeeCollector != address(0), ZeroAddress());
-        require(delta <= SCALING_FACTOR, InvalidValue());
+        require(delta <= SCALING_FACTOR && protocolFee <= MAX_SCALED_PERCENTAGE, InvalidValue());
+        require((protocolFee != 0 && protocolAddress != address(0)) || protocolFee == 0, "Invalid protocol fee");
         require(initialPerformanceFee <= MAX_FEE && initialtvlFee <= MAX_FEE, "Fees > max");
 
         // Initialize ownership (from Ownable)
@@ -438,6 +443,9 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
         (uint256 withdrawn0, uint256 withdrawn1) = _withdrawFromPositions(totalToWithdrawScaledPercent);
 
         // Extract the fees
+        uint256 protocolFee0 = 0;
+        uint256 protocolFee1 = 0;
+
         // TVL
         if (tvlFeeScaledPercent > 0) {
             // Calculate TVL fee from withdrawn amounts
@@ -449,10 +457,18 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
                 : 0;
 
             // Add TVL fee from free balance
-            uint256 tvlFeeAssets0 =
+            uint256 fullTvlFeeAssets0 =
                 initialToken0Balance.mulDiv(tvlFeeScaledPercent, MAX_SCALED_PERCENTAGE) + tvlFeeFromWithdrawn0;
-            uint256 tvlFeeAssets1 =
+            uint256 fullTvlFeeAssets1 =
                 initialToken1Balance.mulDiv(tvlFeeScaledPercent, MAX_SCALED_PERCENTAGE) + tvlFeeFromWithdrawn1;
+
+            uint256 tvlFeeAssets0 =
+                fullTvlFeeAssets0.mulDiv(MAX_SCALED_PERCENTAGE - PROTOCOL_FEE, MAX_SCALED_PERCENTAGE);
+            uint256 tvlFeeAssets1 =
+                fullTvlFeeAssets1.mulDiv(MAX_SCALED_PERCENTAGE - PROTOCOL_FEE, MAX_SCALED_PERCENTAGE);
+
+            protocolFee0 += fullTvlFeeAssets0.mulDiv(PROTOCOL_FEE, MAX_SCALED_PERCENTAGE);
+            protocolFee1 += fullTvlFeeAssets1.mulDiv(PROTOCOL_FEE, MAX_SCALED_PERCENTAGE);
 
             _safeTransferBoth(feeCollector, tvlFeeAssets0, tvlFeeAssets1);
 
@@ -471,14 +487,29 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
                 : 0;
 
             // Add performance fee from free balance
-            uint256 perfFeeAssets0 =
+            uint256 fullPerfFeeAssets0 =
                 initialToken0Balance.mulDiv(performanceFeeScaledPercent, MAX_SCALED_PERCENTAGE) + perfFeeFromWithdrawn0;
-            uint256 perfFeeAssets1 =
+            uint256 fullPerfFeeAssets1 =
                 initialToken1Balance.mulDiv(performanceFeeScaledPercent, MAX_SCALED_PERCENTAGE) + perfFeeFromWithdrawn1;
+
+            uint256 perfFeeAssets0 =
+                fullPerfFeeAssets0.mulDiv(MAX_SCALED_PERCENTAGE - PROTOCOL_FEE, MAX_SCALED_PERCENTAGE);
+            uint256 perfFeeAssets1 =
+                fullPerfFeeAssets1.mulDiv(MAX_SCALED_PERCENTAGE - PROTOCOL_FEE, MAX_SCALED_PERCENTAGE);
+
+            protocolFee0 += fullPerfFeeAssets0.mulDiv(PROTOCOL_FEE, MAX_SCALED_PERCENTAGE);
+            protocolFee1 += fullPerfFeeAssets1.mulDiv(PROTOCOL_FEE, MAX_SCALED_PERCENTAGE);
 
             _safeTransferBoth(feeCollector, perfFeeAssets0, perfFeeAssets1);
 
             emit PerformanceFeeCollected(perfFeeAssets0, perfFeeAssets1, feeCollector);
+        }
+
+        // Collect protocol fee
+        if (protocolFee0 > 0 || protocolFee1 > 0) {
+            _safeTransferBoth(PROTOCOL_ADDR, protocolFee0, protocolFee1);
+
+            emit ProtocolFeeCollected(protocolFee0, protocolFee1, PROTOCOL_ADDR);
         }
 
         // User Withdraw

@@ -31,7 +31,7 @@ contract UniV3LpVaultFactoryTest is Test {
 
     function setUp() public {
         implementation = new UniV3LpVault();
-        factory = new UniV3LpVaultFactory(address(implementation));
+        factory = new UniV3LpVaultFactory(address(implementation), address(1), 0);
 
         // Deploy mock contracts
         token0 = address(new MockERC20());
@@ -96,11 +96,11 @@ contract UniV3LpVaultFactoryTest is Test {
 
     function test_DeterministicDeployment() public {
         // Deploy factory on one chain
-        UniV3LpVaultFactory factory1 = new UniV3LpVaultFactory(address(implementation));
+        UniV3LpVaultFactory factory1 = new UniV3LpVaultFactory(address(implementation), address(1), 0);
 
         // Simulate another chain with same factory address
         // (In reality, we'd deploy at the same address using CREATE2)
-        UniV3LpVaultFactory factory2 = new UniV3LpVaultFactory(address(implementation));
+        UniV3LpVaultFactory factory2 = new UniV3LpVaultFactory(address(implementation), address(1), 0);
 
         // Compute addresses on both "chains"
         address predicted1 = factory1.computeVaultAddress(salt);

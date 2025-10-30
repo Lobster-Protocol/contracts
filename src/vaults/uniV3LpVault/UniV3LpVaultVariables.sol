@@ -39,6 +39,12 @@ abstract contract UniV3LpVaultVariables is SingleVault {
     /// @notice Maximum allowed fee percentage (scaled by SCALING_FACTOR)
     uint256 public constant MAX_FEE = MAX_FEE_SCALED;
 
+    /// @notice Protocol address which receives the protocol fees
+    address immutable PROTOCOL_ADDR;
+
+    /// @notice Protocol fee scaled by 1e18. Represent a fixed percentage of the fees collected by the feeCollector
+    uint256 immutable PROTOCOL_FEE;
+
     /// @notice Timestamp of the last TVL fee collection
     uint256 public tvlFeeCollectedAt;
 
@@ -118,6 +124,8 @@ abstract contract UniV3LpVaultVariables is SingleVault {
     /// @param assets1 Amount of token1 collected as performance fee
     /// @param feeCollector Address receiving the fees
     event PerformanceFeeCollected(uint256 indexed assets0, uint256 indexed assets1, address indexed feeCollector);
+
+    event ProtocolFeeCollected(uint256 indexed assets0, uint256 indexed assets1, address indexed collector);
 
     /// @notice Emitted when a fee update is initiated (timelock started)
     /// @param tvlfee New TVL fee percentage

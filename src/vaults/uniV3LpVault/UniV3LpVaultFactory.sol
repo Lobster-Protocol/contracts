@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import "./UniV3LpVault.sol";
 import "@openzeppelin/contracts/proxy/Clones.sol";
+import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /**
  * @title UniV3LpVaultFactory
@@ -12,7 +13,7 @@ import "@openzeppelin/contracts/proxy/Clones.sol";
  *      deterministic vault deployment. Each vault is a minimal proxy that delegates to a single
  *      implementation contract, significantly reducing deployment costs.
  */
-contract UniV3LpVaultFactory {
+contract UniV3LpVaultFactory is Ownable2Step {
     using Clones for address;
 
     /**
@@ -20,6 +21,9 @@ contract UniV3LpVaultFactory {
      * @dev Set once during factory deployment and immutable thereafter
      */
     address public immutable IMPLEMENTATION;
+
+    /// @notice The protocol fee applied to all deployed vaults (if updated, only the next vault will have the new protocol fee)
+    uint256 public protocolFee;
 
     /**
      * @notice Emitted when a new vault proxy is successfully deployed
@@ -42,10 +46,13 @@ contract UniV3LpVaultFactory {
      *      only delegated to via proxies. The implementation is automatically locked during its deployment
      *      via the _disableInitializers() call in its constructor.
      * @param _implementation The address of the UniV3LpVault implementation contract
+     * @param initialOwner The initial factory owner
+     * @param initialProtocolFee The initial protocol fee
      */
-    constructor(address _implementation) {
+    constructor(address _implementation, address initialOwner, uint256 initialProtocolFee) Ownable(initialOwner) {
         require(_implementation != address(0), "Invalid implementation");
         IMPLEMENTATION = _implementation;
+        protocolFee = initialProtocolFee;
     }
 
     /**
@@ -93,6 +100,8 @@ contract UniV3LpVaultFactory {
                 token1,
                 pool,
                 initialFeeCollector,
+                address(0), // protocol fee receiver
+                0, // protocol fee
                 initialtvlFee,
                 initialPerformanceFee,
                 delta
