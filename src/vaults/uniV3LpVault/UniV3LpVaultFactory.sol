@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.28;
 
-import "./UniV3LpVault.sol";
+import {UniV3LpVault, MAX_SCALED_PERCENTAGE} from "./UniV3LpVault.sol";
 import "@openzeppelin/contracts/proxy/Clones.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -47,6 +47,13 @@ contract UniV3LpVaultFactory is Ownable2Step {
     event TokenWithdrawn(address indexed token, address indexed to, uint256 amount);
 
     /**
+     * @notice Emitted when the protocol fee is updated
+     * @param oldFee The previous protocol fee
+     * @param newFee The new protocol fee
+     */
+    event ProtocolFeeUpdated(uint256 oldFee, uint256 newFee);
+
+    /**
      * @notice Registry mapping to verify if an address is a vault deployed by this factory
      * @dev Used for authentication and validation of vault contracts
      */
@@ -63,8 +70,11 @@ contract UniV3LpVaultFactory is Ownable2Step {
      */
     constructor(address _implementation, address initialOwner, uint256 initialProtocolFee) Ownable(initialOwner) {
         require(_implementation != address(0), "Invalid implementation");
+
         IMPLEMENTATION = _implementation;
         protocolFee = initialProtocolFee;
+
+        _updateProtocolFee(initialProtocolFee);
     }
 
     /**
@@ -142,6 +152,16 @@ contract UniV3LpVaultFactory is Ownable2Step {
     }
 
     /**
+     * @notice Updates the protocol fee for newly deployed vaults
+     * @dev Only callable by the factory owner. This change only affects vaults deployed after the update.
+     *      Existing vaults retain their original protocol fee.
+     * @param newProtocolFee The new protocol fee (scaled by SCALING_FACTOR, must be <= MAX_SCALED_PERCENTAGE)
+     */
+    function updateProtocolFee(uint256 newProtocolFee) external onlyOwner {
+        _updateProtocolFee(newProtocolFee);
+    }
+
+    /**
      * @notice Withdraws ETH from the factory to the specified recipient
      * @dev Only callable by the factory owner
      * @param to The address to receive the ETH
@@ -177,6 +197,21 @@ contract UniV3LpVaultFactory is Ownable2Step {
      * @notice Allows the factory to receive ETH
      */
     receive() external payable {}
+
+    /**
+     * @notice Updates the protocol fee for newly deployed vaults
+     * @dev This change only affects vaults deployed after the update.
+     *      Existing vaults retain their original protocol fee.
+     * @param newProtocolFee The new protocol fee (scaled by SCALING_FACTOR, must be <= MAX_SCALED_PERCENTAGE)
+     */
+    function _updateProtocolFee(uint256 newProtocolFee) internal {
+        require(newProtocolFee <= MAX_SCALED_PERCENTAGE, "Protocol fee too high");
+
+        uint256 oldFee = protocolFee;
+        protocolFee = newProtocolFee;
+
+        emit ProtocolFeeUpdated(oldFee, newProtocolFee);
+    }
 }
 
 /**

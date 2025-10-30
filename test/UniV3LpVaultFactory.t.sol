@@ -237,3 +237,5 @@ contract UniV3LpVaultFactoryTest is Test {
         assertTrue(factory.isVault(vault));
     }
 }
+
+// todo: test protocol fee
