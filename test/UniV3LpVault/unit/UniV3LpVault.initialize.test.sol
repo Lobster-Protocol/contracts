@@ -10,15 +10,16 @@ import {MockERC20} from "../../Mocks/MockERC20.sol";
 import {UniswapV3Infra} from "../../Mocks/uniswapV3/UniswapV3Infra.sol";
 import {IUniswapV3FactoryMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
+import {UniV3LpVaultFactory} from "../../../src/vaults/uniV3LpVault/UniV3LpVaultFactory.sol";
 
-contract UniV3LpVaultConstructorTest is Test {
+contract UniV3LpVaultInitializeTest is Test {
     TestHelper helper;
 
     function setUp() public {
         helper = new TestHelper();
     }
 
-    function test_constructor_ValidParameters_Success() public {
+    function test_initialize_ValidParameters_Success() public {
         TestHelper.VaultSetup memory setup =
             helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE, TestConstants.HIGH_PERF_FEE);
 
@@ -34,7 +35,7 @@ contract UniV3LpVaultConstructorTest is Test {
         assertEq(setup.vault.feeCollector(), setup.feeCollector);
     }
 
-    function test_constructor_WrongTokenOrder_Reverts() public {
+    function test_initialize_WrongTokenOrder_Reverts() public {
         address owner = makeAddr("owner");
         address allocator = makeAddr("allocator");
         address feeCollector = makeAddr("feeCollector");
@@ -55,22 +56,28 @@ contract UniV3LpVaultConstructorTest is Test {
             factory, address(token0), address(token1), TestConstants.POOL_FEE, TestConstants.INITIAL_SQRT_PRICE_X96
         );
 
+        address vaultImplementation = address(new UniV3LpVault());
+        UniV3LpVaultFactory vaultFactory = new UniV3LpVaultFactory(vaultImplementation);
+
         // Try to create vault with wrong token order
         vm.expectRevert("Wrong token 0 & 1 order");
-        new UniV3LpVault(
-            owner,
-            allocator,
-            address(token1), // Wrong order
-            address(token0), // Wrong order
-            address(pool),
-            feeCollector,
-            TestConstants.LOW_TVL_FEE,
-            TestConstants.LOW_PERF_FEE,
-            TestConstants.DELTA5050
+        UniV3LpVault(
+            vaultFactory.deployVault(
+                bytes32(0),
+                owner,
+                allocator,
+                address(token1), // Wrong order
+                address(token0), // Wrong order
+                address(pool),
+                feeCollector,
+                TestConstants.LOW_TVL_FEE,
+                TestConstants.LOW_PERF_FEE,
+                TestConstants.DELTA5050
+            )
         );
     }
 
-    function test_constructor_ZeroFeeCollector_Reverts() public {
+    function test_initialize_ZeroFeeCollector_Reverts() public {
         address owner = makeAddr("owner");
         address allocator = makeAddr("allocator");
 
@@ -88,21 +95,28 @@ contract UniV3LpVaultConstructorTest is Test {
             factory, address(token0), address(token1), TestConstants.POOL_FEE, TestConstants.INITIAL_SQRT_PRICE_X96
         );
 
+        // Deploy vault
+        address vaultImplementation = address(new UniV3LpVault());
+        UniV3LpVaultFactory vaultFactory = new UniV3LpVaultFactory(vaultImplementation);
+
         vm.expectRevert(SingleVault.ZeroAddress.selector);
-        new UniV3LpVault(
-            owner,
-            allocator,
-            address(token0),
-            address(token1),
-            address(pool),
-            address(0), // Zero address
-            TestConstants.LOW_TVL_FEE,
-            TestConstants.LOW_PERF_FEE,
-            TestConstants.DELTA5050
+        UniV3LpVault(
+            vaultFactory.deployVault(
+                bytes32(0),
+                owner,
+                allocator,
+                address(token0),
+                address(token1),
+                address(pool),
+                address(0), // Zero address
+                TestConstants.LOW_TVL_FEE,
+                TestConstants.LOW_PERF_FEE,
+                TestConstants.DELTA5050
+            )
         );
     }
 
-    function test_constructor_TokenMismatch_Reverts() public {
+    function test_initialize_TokenMismatch_Reverts() public {
         address owner = makeAddr("owner");
         address allocator = makeAddr("allocator");
         address feeCollector = makeAddr("feeCollector");
@@ -121,21 +135,28 @@ contract UniV3LpVaultConstructorTest is Test {
             factory, address(token0), address(token1), TestConstants.POOL_FEE, TestConstants.INITIAL_SQRT_PRICE_X96
         );
 
+        // Deploy vault
+        address vaultImplementation = address(new UniV3LpVault());
+        UniV3LpVaultFactory vaultFactory = new UniV3LpVaultFactory(vaultImplementation);
+
         vm.expectRevert("Token mismatch");
-        new UniV3LpVault(
-            owner,
-            allocator,
-            address(wrongToken), // Wrong token
-            address(token1),
-            address(pool),
-            feeCollector,
-            TestConstants.LOW_TVL_FEE,
-            TestConstants.LOW_PERF_FEE,
-            TestConstants.DELTA5050
+        UniV3LpVault(
+            vaultFactory.deployVault(
+                bytes32(0),
+                owner,
+                allocator,
+                address(wrongToken), // Wrong token
+                address(token1),
+                address(pool),
+                feeCollector,
+                0,
+                0,
+                TestConstants.DELTA5050
+            )
         );
     }
 
-    function test_constructor_InitialState_Correct() public {
+    function test_initialize_InitialState_Correct() public {
         TestHelper.VaultSetup memory setup =
             helper.deployVaultWithPool(TestConstants.MEDIUM_TVL_FEE, TestConstants.MEDIUM_PERF_FEE);
 
@@ -154,12 +175,14 @@ contract UniV3LpVaultConstructorTest is Test {
         assertEq(netAssets1, 0);
     }
 
-    function test_constructor_ZeroFee_Success() public {
+    function test_initialize_ZeroFee_Success() public {
         TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(0, 0);
 
         // Zero TVL fee should be allowed
         assertTrue(address(setup.vault) != address(0));
     }
 
+    // todo: test cannot initialize twice
+    // todo: make sure implementation cannot be initialized
     // todo test update fees > max fees
 }

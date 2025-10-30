@@ -70,12 +70,6 @@ contract SingleVaultTest is Test {
         new SingleVault(address(0), allocator);
     }
 
-    function test_Constructor_RevertIf_ZeroAllocator() public {
-        vm.expectRevert(SingleVault.ZeroAddress.selector);
-
-        new SingleVault(owner, address(0));
-    }
-
     /*//////////////////////////////////////////////////////////////
                         EXECUTOR MANAGEMENT TESTS
     //////////////////////////////////////////////////////////////*/

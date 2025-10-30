@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
+import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {SingleVault} from "../SingleVault.sol";
 import {IUniswapV3PoolMinimal} from "../../interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {LiquidityAmounts} from "../../libraries/uniswapV3/LiquidityAmounts.sol";
@@ -14,7 +15,7 @@ import {MintCallbackData} from "../../interfaces/uniswapV3/IUniswapV3MintCallbac
 import {PoolAddress} from "../../libraries/uniswapV3/PoolAddress.sol";
 import {UniswapV3Calculator} from "../../utils/UniswapV3Calculator.sol";
 import {UniswapUtils} from "../../libraries/uniswapV3/UniswapUtils.sol";
-import {SCALING_FACTOR, TWAP_SECONDS_AGO, MAX_SCALED_PERCENTAGE, TWAP_SECONDS_AGO} from "./constants.sol";
+import {SCALING_FACTOR, TWAP_SECONDS_AGO, MAX_SCALED_PERCENTAGE, MIN_OBSERVATION_CARDINALITY} from "./constants.sol";
 import {WithdrawParams, MinimalMintParams, Position} from "./structs.sol";
 import {UniV3LpVaultVariables} from "./UniV3LpVaultVariables.sol";
 
@@ -24,14 +25,27 @@ import {UniV3LpVaultVariables} from "./UniV3LpVaultVariables.sol";
  * @notice A vault for managing liquidity provision on Uniswap V3 pools with fee collection
  * @dev Manages multiple liquidity positions, collects trading fees, and charges management/performance fees
  * @dev Requires the pool to have existed for at least TWAP_SECONDS_AGO with swap activity for accurate pricing
+ * @dev This contract is designed to be deployed as a proxy via factory using OpenZeppelin's proxy pattern
  */
-contract UniV3LpVault is UniV3LpVaultVariables, UniswapV3Calculator {
+contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculator {
     using Math for uint256;
 
     // ========== CONSTRUCTOR ==========
 
     /**
-     * @notice Initializes the UniswapV3 LP vault
+     * @notice Constructor for the implementation contract
+     * @dev Disables initializers to prevent the implementation contract from being initialized
+     *      This is the standard OpenZeppelin pattern for upgradeable contracts
+     */
+    constructor() SingleVault(address(0xdead), address(0xdead)) {
+        _disableInitializers();
+    }
+
+    // ========== INITIALIZER ==========
+
+    /**
+     * @notice Initializes the UniswapV3 LP vault proxy
+     * @dev Can only be called once per proxy. Validates all parameters and sets initial state.
      * @param initialOwner Address that will own the vault
      * @param initialAllocator Address that can execute vault strategies
      * @param token0 Address of the first token (must be < token1 address)
@@ -42,7 +56,7 @@ contract UniV3LpVault is UniV3LpVaultVariables, UniswapV3Calculator {
      * @param initialPerformanceFee Initial performance fee on profits (scaled)
      * @param delta Token ratio weight for performance fee calculation (0 to 1e18)
      */
-    constructor(
+    function initialize(
         address initialOwner,
         address initialAllocator,
         address token0,
@@ -53,20 +67,34 @@ contract UniV3LpVault is UniV3LpVaultVariables, UniswapV3Calculator {
         uint256 initialPerformanceFee,
         uint256 delta
     )
-        SingleVault(initialOwner, initialAllocator)
+        external
+        initializer
     {
+        // Validate parameters
         require(uint160(token0) < uint160(token1), "Wrong token 0 & 1 order");
+        require(initialOwner != address(0), ZeroAddress());
+        require(initialAllocator != address(0), ZeroAddress());
         require(initialFeeCollector != address(0), ZeroAddress());
         require(delta <= SCALING_FACTOR, InvalidValue());
         require(initialPerformanceFee <= MAX_FEE && initialtvlFee <= MAX_FEE, "Fees > max");
 
-        POOL = IUniswapV3PoolMinimal(pool);
+        // Initialize ownership (from Ownable)
+        _transferOwnership(initialOwner);
 
+        // Initialize allocator
+        allocator = initialAllocator;
+
+        // Initialize pool and tokens
+        POOL = IUniswapV3PoolMinimal(pool);
         require(POOL.token0() == token0 && POOL.token1() == token1, "Token mismatch");
+        (,,, uint16 observationCardinality,,,) = POOL.slot0();
+        require(MIN_OBSERVATION_CARDINALITY >= observationCardinality, "Not enough cardinality");
 
         TOKEN0 = IERC20(token0);
         TOKEN1 = IERC20(token1);
         POOL_FEE = POOL.fee();
+
+        // Initialize fee parameters
         DELTA = delta;
         feeCollector = initialFeeCollector;
         tvlFeeScaled = initialtvlFee;

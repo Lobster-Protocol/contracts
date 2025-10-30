@@ -14,6 +14,7 @@ uint256 constant DELTA5050 = (5 * SCALING_FACTOR) / 10; // 0.5
 
 contract UniV3LpVaultFactoryTest is Test {
     UniV3LpVaultFactory public factory;
+    UniV3LpVault public implementation;
 
     address public owner = address(0x100);
     address public allocator = address(0x200);
@@ -29,7 +30,8 @@ contract UniV3LpVaultFactoryTest is Test {
     event VaultDeployed(address indexed vault, address indexed pool, address indexed deployer, bytes32 salt);
 
     function setUp() public {
-        factory = new UniV3LpVaultFactory();
+        implementation = new UniV3LpVault();
+        factory = new UniV3LpVaultFactory(address(implementation));
 
         // Deploy mock contracts
         token0 = address(new MockERC20());
@@ -81,9 +83,7 @@ contract UniV3LpVaultFactoryTest is Test {
 
     function test_ComputeVaultAddress() public {
         // Compute the expected address
-        address predicted = factory.computeVaultAddress(
-            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee, DELTA5050
-        );
+        address predicted = factory.computeVaultAddress(salt);
 
         // Deploy the vault
         address deployed = factory.deployVault(
@@ -96,20 +96,16 @@ contract UniV3LpVaultFactoryTest is Test {
 
     function test_DeterministicDeployment() public {
         // Deploy factory on one chain
-        UniV3LpVaultFactory factory1 = new UniV3LpVaultFactory();
+        UniV3LpVaultFactory factory1 = new UniV3LpVaultFactory(address(implementation));
 
         // Simulate another chain with same factory address
         // (In reality, we'd deploy at the same address using CREATE2)
-        UniV3LpVaultFactory factory2 = new UniV3LpVaultFactory();
+        UniV3LpVaultFactory factory2 = new UniV3LpVaultFactory(address(implementation));
 
         // Compute addresses on both "chains"
-        address predicted1 = factory1.computeVaultAddress(
-            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee, DELTA5050
-        );
+        address predicted1 = factory1.computeVaultAddress(salt);
 
-        address predicted2 = factory2.computeVaultAddress(
-            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee, DELTA5050
-        );
+        address predicted2 = factory2.computeVaultAddress(salt);
 
         // They should be different because factories have different addresses
         // But if factories were at same address, predictions would match
@@ -210,18 +206,7 @@ contract UniV3LpVaultFactoryTest is Test {
 
     function testFuzz_DeployVaultWithDifferentSalts(bytes32 _salt) public {
         // Skip if salt would cause collision with already deployed vault
-        address predicted = factory.computeVaultAddress(
-            _salt,
-            owner,
-            allocator,
-            address(token0),
-            address(token1),
-            address(pool),
-            feeCollector,
-            tvlFee,
-            performanceFee,
-            DELTA5050
-        );
+        address predicted = factory.computeVaultAddress(_salt);
 
         vm.assume(!factory.isVault(predicted));
 
