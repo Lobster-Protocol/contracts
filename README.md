@@ -50,7 +50,7 @@ The Lobster Vault System provides a streamlined architecture for managing Uniswa
   - **Performance Fee**: Fee on vault growth with delta-weighted price adjustment
 - **Delta-Weighted Performance Calculation**: Adjusts for relative token price changes
 - **Automated Fee Collection**: Fees auto-collect during deposits/withdrawals
-- **TWAP-Based Valuation**: 7-day time-weighted average price for accurate asset valuation
+- **TWAP-Based Valuation**: time-weighted average price for accurate asset valuation
 - **Proportional Withdrawals**: Users withdraw based on their share of vault assets
 
 **Security Features:**
@@ -235,11 +235,10 @@ The vault implements a two-step timelock mechanism for fee changes:
 
 ### TWAP Requirements
 
-The vault uses a 7-day TWAP for accurate price calculations. For proper operation:
+The vault uses a TWAP for accurate price calculations. For proper operation:
 - **Pool must have swap activity** to populate TWAP observations
-- New pools without sufficient history may revert on operations requiring TWAP
+- New pools without sufficient history may revert on operations requiring TWAP -> solution: add some observations or do some swaps
 
-> **Note**: The vault will work fine with pools less than 7 days old if `performanceFeeScaled = 0`
 
 ### Position Management Best Practices
 

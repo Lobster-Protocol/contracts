@@ -10,5 +10,8 @@ uint256 constant MAX_SCALED_PERCENTAGE = 100 * SCALING_FACTOR;
 // Maximum fee that can be charged (30% scaled, equals 30 * 1e18)
 uint256 constant MAX_FEE_SCALED = 30 * SCALING_FACTOR;
 
-// Time window for TWAP (Time-Weighted Average Price) calculations - 7 days in seconds
-uint32 constant TWAP_SECONDS_AGO = 7 days;
+// Time window for TWAP (Time-Weighted Average Price) calculations - 20 minutes in seconds
+uint32 constant TWAP_SECONDS_AGO = 20 minutes;
+
+// The minimal observationCardinality value in a uniswap pool
+uint16 constant MIN_OBSERVATION_CARDINALITY = 9000;

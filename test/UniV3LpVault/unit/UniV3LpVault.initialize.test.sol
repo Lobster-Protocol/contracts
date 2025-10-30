@@ -10,6 +10,7 @@ import {MockERC20} from "../../Mocks/MockERC20.sol";
 import {UniswapV3Infra} from "../../Mocks/uniswapV3/UniswapV3Infra.sol";
 import {IUniswapV3FactoryMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
+import {UniV3LpVaultFactory} from "../../../src/vaults/uniV3LpVault/UniV3LpVaultFactory.sol";
 
 contract UniV3LpVaultInitializeTest is Test {
     TestHelper helper;
@@ -55,20 +56,24 @@ contract UniV3LpVaultInitializeTest is Test {
             factory, address(token0), address(token1), TestConstants.POOL_FEE, TestConstants.INITIAL_SQRT_PRICE_X96
         );
 
-        UniV3LpVault vault = new UniV3LpVault();
+        address vaultImplementation = address(new UniV3LpVault());
+        UniV3LpVaultFactory vaultFactory = new UniV3LpVaultFactory(vaultImplementation);
 
         // Try to create vault with wrong token order
         vm.expectRevert("Wrong token 0 & 1 order");
-        vault.initialize(
-            owner,
-            allocator,
-            address(token1), // Wrong order
-            address(token0), // Wrong order
-            address(pool),
-            feeCollector,
-            TestConstants.LOW_TVL_FEE,
-            TestConstants.LOW_PERF_FEE,
-            TestConstants.DELTA5050
+        UniV3LpVault(
+            vaultFactory.deployVault(
+                bytes32(0),
+                owner,
+                allocator,
+                address(token1), // Wrong order
+                address(token0), // Wrong order
+                address(pool),
+                feeCollector,
+                TestConstants.LOW_TVL_FEE,
+                TestConstants.LOW_PERF_FEE,
+                TestConstants.DELTA5050
+            )
         );
     }
 
@@ -90,18 +95,24 @@ contract UniV3LpVaultInitializeTest is Test {
             factory, address(token0), address(token1), TestConstants.POOL_FEE, TestConstants.INITIAL_SQRT_PRICE_X96
         );
 
-        UniV3LpVault vault = new UniV3LpVault();
+        // Deploy vault
+        address vaultImplementation = address(new UniV3LpVault());
+        UniV3LpVaultFactory vaultFactory = new UniV3LpVaultFactory(vaultImplementation);
+
         vm.expectRevert(SingleVault.ZeroAddress.selector);
-        vault.initialize(
-            owner,
-            allocator,
-            address(token0),
-            address(token1),
-            address(pool),
-            address(0), // Zero address
-            TestConstants.LOW_TVL_FEE,
-            TestConstants.LOW_PERF_FEE,
-            TestConstants.DELTA5050
+        UniV3LpVault(
+            vaultFactory.deployVault(
+                bytes32(0),
+                owner,
+                allocator,
+                address(token0),
+                address(token1),
+                address(pool),
+                address(0), // Zero address
+                TestConstants.LOW_TVL_FEE,
+                TestConstants.LOW_PERF_FEE,
+                TestConstants.DELTA5050
+            )
         );
     }
 
@@ -124,18 +135,24 @@ contract UniV3LpVaultInitializeTest is Test {
             factory, address(token0), address(token1), TestConstants.POOL_FEE, TestConstants.INITIAL_SQRT_PRICE_X96
         );
 
-        UniV3LpVault vault = new UniV3LpVault();
+        // Deploy vault
+        address vaultImplementation = address(new UniV3LpVault());
+        UniV3LpVaultFactory vaultFactory = new UniV3LpVaultFactory(vaultImplementation);
+
         vm.expectRevert("Token mismatch");
-        vault.initialize(
-            owner,
-            allocator,
-            address(wrongToken), // Wrong token
-            address(token1),
-            address(pool),
-            feeCollector,
-            TestConstants.LOW_TVL_FEE,
-            TestConstants.LOW_PERF_FEE,
-            TestConstants.DELTA5050
+        UniV3LpVault(
+            vaultFactory.deployVault(
+                bytes32(0),
+                owner,
+                allocator,
+                address(wrongToken), // Wrong token
+                address(token1),
+                address(pool),
+                feeCollector,
+                0,
+                0,
+                TestConstants.DELTA5050
+            )
         );
     }
 

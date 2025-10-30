@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+// SPDX-License-Identifier: GPL-3.0-or-later
+pragma solidity ^0.8.28;
 
 import "./UniV3LpVault.sol";
 import "@openzeppelin/contracts/proxy/Clones.sol";
@@ -39,7 +39,8 @@ contract UniV3LpVaultFactory {
     /**
      * @notice Initializes the factory with a vault implementation contract
      * @dev The implementation should be a fully initialized UniV3LpVault that will never be used directly,
-     *      only delegated to via proxies. Consider deploying the implementation with disabled initializers.
+     *      only delegated to via proxies. The implementation is automatically locked during its deployment
+     *      via the _disableInitializers() call in its constructor.
      * @param _implementation The address of the UniV3LpVault implementation contract
      */
     constructor(address _implementation) {
@@ -54,25 +55,21 @@ contract UniV3LpVaultFactory {
      *      Reverts if deployment fails or if a vault already exists at the computed address.
      *
      * @param salt Unique bytes32 salt for deterministic address generation (use different salts for different vaults)
-     * @param initialOwner The address that will own the vault (typically has admin privileges)
-     * @param initialExecutor The address authorized to execute vault operations
-     * @param token0 The first token address in the Uniswap V3 pool pair
-     * @param token1 The second token address in the Uniswap V3 pool pair
+     * @param initialOwner The address that will own the vault (has admin privileges and can deposit/withdraw)
+     * @param initialAllocator The address authorized to execute vault strategies (can mint/burn/collect)
+     * @param token0 The first token address in the Uniswap V3 pool pair (must be < token1)
+     * @param token1 The second token address in the Uniswap V3 pool pair (must be > token0)
      * @param pool The Uniswap V3 pool address where liquidity will be managed
      * @param initialFeeCollector The address that will receive collected fees
-     * @param initialtvlFee The TVL (Total Value Locked) management fee (in basis points, see vault implementation)
-     * @param initialPerformanceFee The performance fee percentage (in basis points, see vault implementation)
-     * @param delta Token ratio weight (0 to 1e18) for performance fee calculation
-     *              - delta = 0 -> performance fee based entirely on token0 accumulation relative to token1
-     *              - delta = 1e18 -> performance fee based entirely on token1 accumulation relative to token0
-     *              - delta = 0.5e18 -> equal weighting of both tokens (50% - 50% hold value)
-     *
+     * @param initialtvlFee The TVL (Total Value Locked) annual management fee (scaled by SCALING_FACTOR, e.g., 2e18 = 2%)
+     * @param initialPerformanceFee The performance fee on profits (scaled by SCALING_FACTOR, e.g., 20e18 = 20%)
+     * @param delta Token ratio weight for performance fee calculation (0 to 1e18, scaled by SCALING_FACTOR)
      * @return vault The address of the newly deployed vault proxy
      */
     function deployVault(
         bytes32 salt,
         address initialOwner,
-        address initialExecutor,
+        address initialAllocator,
         address token0,
         address token1,
         address pool,
@@ -91,7 +88,7 @@ contract UniV3LpVaultFactory {
         UniV3LpVault(vault)
             .initialize(
                 initialOwner,
-                initialExecutor,
+                initialAllocator,
                 token0,
                 token1,
                 pool,
@@ -101,6 +98,7 @@ contract UniV3LpVaultFactory {
                 delta
             );
 
+        // Register the vault in the factory
         isVault[vault] = true;
 
         emit VaultDeployed(vault, pool, msg.sender, salt);
@@ -111,7 +109,7 @@ contract UniV3LpVaultFactory {
     /**
      * @notice Computes the deterministic address where a vault proxy will be deployed
      * @dev Useful for predicting vault addresses before deployment.
-     *      Note: Only the salt matters for address prediction with proxies, as all proxies
+     *      Note: Only the salt matters for address prediction with EIP-1167 proxies, as all proxies
      *      share the same bytecode. The initialization parameters don't affect the address.
      *
      * @param salt Unique bytes32 salt for deterministic address generation (must match deployment salt)
@@ -121,4 +119,20 @@ contract UniV3LpVaultFactory {
     function computeVaultAddress(bytes32 salt) external view returns (address predicted) {
         return IMPLEMENTATION.predictDeterministicAddress(salt, address(this));
     }
+}
+
+/**
+ * @notice Struct containing all initialization parameters for a vault
+ * @dev Used for batch deployment to group parameters efficiently
+ */
+struct VaultParams {
+    address initialOwner;
+    address initialAllocator;
+    address token0;
+    address token1;
+    address pool;
+    address initialFeeCollector;
+    uint256 initialtvlFee;
+    uint256 initialPerformanceFee;
+    uint256 delta;
 }

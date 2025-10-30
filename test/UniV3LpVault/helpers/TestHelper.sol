@@ -10,6 +10,7 @@ import {
     SCALING_FACTOR,
     MAX_SCALED_PERCENTAGE
 } from "../../../src/vaults/uniV3LpVault/UniV3LpVault.sol";
+import {UniV3LpVaultFactory} from "../../../src/vaults/uniV3LpVault/UniV3LpVaultFactory.sol";
 import {MockERC20} from "../../Mocks/MockERC20.sol";
 import {UniswapV3Infra} from "../../Mocks/uniswapV3/UniswapV3Infra.sol";
 import {IUniswapV3FactoryMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
@@ -128,10 +129,12 @@ contract TestHelper is Test {
         vm.warp(block.timestamp + 14 days);
 
         // Deploy vault
-        setup.vault = new UniV3LpVault();
+        address vaultImplementation = address(new UniV3LpVault());
+        UniV3LpVaultFactory vaultFactory = new UniV3LpVaultFactory(vaultImplementation);
 
-        setup.vault
-            .initialize(
+        setup.vault = UniV3LpVault(
+            vaultFactory.deployVault(
+                bytes32(0),
                 setup.owner,
                 setup.allocator,
                 address(setup.token0),
@@ -141,7 +144,8 @@ contract TestHelper is Test {
                 tvlFee,
                 perfFee,
                 TestConstants.DELTA5050
-            );
+            )
+        );
 
         // Setup approvals
         vm.startPrank(setup.owner);
