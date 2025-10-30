@@ -100,6 +100,8 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
         POOL_FEE = POOL.fee();
 
         // Initialize fee parameters
+        PROTOCOL_ADDR = protocolAddress;
+        PROTOCOL_FEE = protocolFee;
         DELTA = delta;
         feeCollector = initialFeeCollector;
         tvlFeeScaled = initialtvlFee;

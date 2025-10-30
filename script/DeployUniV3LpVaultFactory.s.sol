@@ -13,7 +13,7 @@ import "../src/vaults/uniV3LpVault/UniV3LpVaultFactory.sol";
  */
 contract DeployFactory is Script {
     address public implementation;
-    address public factory;
+    address payable public factory;
     address public vault;
 
     function run() external {
@@ -32,7 +32,7 @@ contract DeployFactory is Script {
 
         // Deploy factory
         console.log("\nDeploying Factory...");
-        factory = address(new UniV3LpVaultFactory(implementation, address(1), 0));
+        factory = payable(address(new UniV3LpVaultFactory(implementation, address(1), 0)));
         console.log("Factory:", factory);
 
         // Deploy first vault

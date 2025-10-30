@@ -3,6 +3,8 @@ pragma solidity ^0.8.28;
 
 import "./UniV3LpVault.sol";
 import "@openzeppelin/contracts/proxy/Clones.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /**
@@ -15,6 +17,7 @@ import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step
  */
 contract UniV3LpVaultFactory is Ownable2Step {
     using Clones for address;
+    using SafeERC20 for IERC20;
 
     /**
      * @notice The implementation contract that all vault proxies delegate to
@@ -33,6 +36,15 @@ contract UniV3LpVaultFactory is Ownable2Step {
      * @param salt The unique salt used for CREATE2 deployment
      */
     event VaultDeployed(address indexed vault, address indexed pool, address indexed deployer, bytes32 salt);
+
+    /**
+     * @notice Emitted when ERC20 tokens are withdrawn from the factory
+     * @dev token is address(0) when withdrawing native tokens
+     * @param token The token address
+     * @param to The recipient address
+     * @param amount The amount of tokens withdrawn
+     */
+    event TokenWithdrawn(address indexed token, address indexed to, uint256 amount);
 
     /**
      * @notice Registry mapping to verify if an address is a vault deployed by this factory
@@ -100,8 +112,8 @@ contract UniV3LpVaultFactory is Ownable2Step {
                 token1,
                 pool,
                 initialFeeCollector,
-                address(0), // protocol fee receiver
-                0, // protocol fee
+                address(this),
+                protocolFee,
                 initialtvlFee,
                 initialPerformanceFee,
                 delta
@@ -128,6 +140,43 @@ contract UniV3LpVaultFactory is Ownable2Step {
     function computeVaultAddress(bytes32 salt) external view returns (address predicted) {
         return IMPLEMENTATION.predictDeterministicAddress(salt, address(this));
     }
+
+    /**
+     * @notice Withdraws ETH from the factory to the specified recipient
+     * @dev Only callable by the factory owner
+     * @param to The address to receive the ETH
+     * @param amount The amount of ETH to withdraw
+     */
+    function withdrawETH(address to, uint256 amount) external onlyOwner {
+        require(to != address(0), "Invalid recipient");
+        require(amount <= address(this).balance, "Insufficient balance");
+
+        (bool success,) = to.call{value: amount}("");
+        require(success, "ETH transfer failed");
+
+        emit TokenWithdrawn(address(0), to, amount);
+    }
+
+    /**
+     * @notice Withdraws ERC20 tokens from the factory to the specified recipient
+     * @dev Only callable by the factory owner. Used to collect protocol fees paid in ERC20 tokens.
+     * @param token The ERC20 token address to withdraw
+     * @param to The address to receive the tokens
+     * @param amount The amount of tokens to withdraw
+     */
+    function withdrawToken(address token, address to, uint256 amount) external onlyOwner {
+        require(token != address(0), "Invalid token");
+        require(to != address(0), "Invalid recipient");
+
+        IERC20(token).safeTransfer(to, amount);
+
+        emit TokenWithdrawn(token, to, amount);
+    }
+
+    /**
+     * @notice Allows the factory to receive ETH
+     */
+    receive() external payable {}
 }
 
 /**

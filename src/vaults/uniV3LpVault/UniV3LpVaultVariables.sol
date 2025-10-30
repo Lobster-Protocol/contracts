@@ -40,10 +40,10 @@ abstract contract UniV3LpVaultVariables is SingleVault {
     uint256 public constant MAX_FEE = MAX_FEE_SCALED;
 
     /// @notice Protocol address which receives the protocol fees
-    address immutable PROTOCOL_ADDR;
+    address public PROTOCOL_ADDR;
 
-    /// @notice Protocol fee scaled by 1e18. Represent a fixed percentage of the fees collected by the feeCollector
-    uint256 immutable PROTOCOL_FEE;
+    /// @notice Protocol fee scaled by 1e18. Represents a fixed percentage of the fees collected by the feeCollector
+    uint256 public PROTOCOL_FEE;
 
     /// @notice Timestamp of the last TVL fee collection
     uint256 public tvlFeeCollectedAt;
