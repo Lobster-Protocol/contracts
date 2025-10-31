@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
 import {UniV3LpVault} from "../../../src/vaults/uniV3LpVault/UniV3LpVault.sol";
+import {MAX_FEE_SCALED} from "../../../src/vaults/uniV3LpVault/constants.sol";
 import {SingleVault} from "../../../src/vaults/SingleVault.sol";
 import {TestHelper} from "../helpers/TestHelper.sol";
 import {TestConstants} from "../helpers/Constants.sol";
@@ -223,5 +224,11 @@ contract UniV3LpVaultInitializeTest is Test {
         );
     }
 
-    // todo test update fees > max fees
+    function test_initializeWithFeesTooHigh() public {
+        vm.expectRevert(abi.encodePacked("Fees > max"));
+        helper.deployVaultWithPool(MAX_FEE_SCALED + 1, 0);
+
+        vm.expectRevert(abi.encodePacked("Fees > max"));
+        helper.deployVaultWithPool(0, MAX_FEE_SCALED + 1);
+    }
 }

@@ -1014,6 +1014,8 @@ contract UniV3LpVaultFeesTest is Test {
         assertEq(perf, 6e18, "Should enforce second perf fee");
     }
 
+    // function
+
     // todo: test max fees
     // todo: test fee update from someone else than feeCollector
     // todo: test protocol fees
