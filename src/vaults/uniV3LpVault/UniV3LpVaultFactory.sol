@@ -72,8 +72,6 @@ contract UniV3LpVaultFactory is Ownable2Step {
         require(_implementation != address(0), "Invalid implementation");
 
         IMPLEMENTATION = _implementation;
-        protocolFee = initialProtocolFee;
-
         _updateProtocolFee(initialProtocolFee);
     }
 

@@ -14,6 +14,7 @@ import {TestHelper} from "../helpers/TestHelper.sol";
 import {TestConstants} from "../helpers/Constants.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {UniswapUtils} from "../../../src/libraries/uniswapV3/UniswapUtils.sol";
+import {SingleVault} from "../../../src/vaults/SingleVault.sol";
 
 contract UniV3LpVaultFeesTest is Test {
     using Math for uint256;
@@ -1014,7 +1015,42 @@ contract UniV3LpVaultFeesTest is Test {
         assertEq(perf, 6e18, "Should enforce second perf fee");
     }
 
-    // todo: test max fees
-    // todo: test fee update from someone else than feeCollector
+    function test_updateFeesToTooHigh() public {
+        vm.startPrank(setup.vault.feeCollector());
+
+        uint80 invalidFee = uint80(setup.vault.MAX_FEE() + 1);
+        uint80 validFee = 2e18;
+
+        vm.expectRevert(abi.encodePacked("Fees > max"));
+        setup.vault.updateFees(invalidFee, validFee);
+
+        vm.expectRevert(abi.encodePacked("Fees > max"));
+        setup.vault.updateFees(validFee, invalidFee);
+    }
+
+    function test_updateFeeNotFeeCollector() public {
+        vm.startPrank(makeAddr("not fee collector"));
+
+        vm.expectRevert(SingleVault.Unauthorized.selector);
+        setup.vault.updateFees(1e18, 2e18);
+    }
+
+    function test_enforceFeeNotFeeCollector() public {
+        vm.startPrank(setup.vault.feeCollector());
+
+        // First update
+        setup.vault.updateFees(1e18, 2e18);
+
+        // Overwrite before enforcement
+        setup.vault.updateFees(5e18, 6e18);
+
+        vm.warp(block.timestamp + setup.vault.FEE_UPDATE_MIN_DELAY() + 1);
+
+        vm.startPrank(makeAddr("not fee collector"));
+
+        vm.expectRevert(SingleVault.Unauthorized.selector);
+        setup.vault.enforceFeeUpdate();
+    }
+
     // todo: test protocol fees
 }
