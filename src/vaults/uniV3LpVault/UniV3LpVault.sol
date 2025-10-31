@@ -361,7 +361,7 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
      * and `minAmount1` of token1, after accounting for pending fees.
      *
      * If it is impossible to withdraw the requested minimum amounts
-     * (for example, when both `minAmount0` > tvl0 and `minAmount1` > tv1),
+     * (for example, when both `minAmount0` > tvl0 and `minAmount1` > tvl1),
      * the function returns `0`.
      *
      * @param minAmount0 Minimum desired amount of token0 to withdraw
