@@ -364,6 +364,45 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
         return _unpackFeesWithTimestamp(packedPendingFees);
     }
 
+    /**
+     * @notice Estimates the scaled percentage required to withdraw at least `minAmount0` and `minAmount1`.
+     *
+     * @dev
+     * It computes the portion of the vault’s liquidity (scaled by `SCALING_FACTOR`)
+     * that would need to be withdrawn to receive at least `minAmount0` of token0
+     * and `minAmount1` of token1, after accounting for pending fees.
+     *
+     * If it is impossible to withdraw the requested minimum amounts
+     * (for example, when both `minAmount0` > tvl0 and `minAmount1` > tv1),
+     * the function returns `0`.
+     *
+     * @param minAmount0 Minimum desired amount of token0 to withdraw
+     * @param minAmount1 Minimum desired amount of token1 to withdraw
+     * @return scaledPercent Estimated withdrawal percentage (scaled by `SCALING_FACTOR`);
+     * returns 0 if the requested withdrawal is not feasible.
+     */
+    function previewWithdraw(
+        uint256 minAmount0,
+        uint256 minAmount1
+    )
+        external
+        view
+        returns (uint256 scaledPercent)
+    {
+        if (minAmount0 == 0 || minAmount1 == 0) return 0;
+
+        (uint256 netAssets0, uint256 netAssets1) = _netAssetsValue();
+
+        uint256 ratio0 = netAssets0.mulDiv(SCALING_FACTOR, minAmount0);
+        uint256 ratio1 = netAssets1.mulDiv(SCALING_FACTOR, minAmount1);
+
+        if (ratio1 > ratio0) {
+            return ratio0;
+        } else {
+            return ratio1;
+        }
+    }
+
     // ========== INTERNAL FUNCTIONS ==========
 
     /**
