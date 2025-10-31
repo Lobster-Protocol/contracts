@@ -11,6 +11,7 @@ import {UniswapV3Infra} from "../../Mocks/uniswapV3/UniswapV3Infra.sol";
 import {IUniswapV3FactoryMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {UniV3LpVaultFactory} from "../../../src/vaults/uniV3LpVault/UniV3LpVaultFactory.sol";
+import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 
 contract UniV3LpVaultInitializeTest is Test {
     TestHelper helper;
@@ -182,7 +183,26 @@ contract UniV3LpVaultInitializeTest is Test {
         assertTrue(address(setup.vault) != address(0));
     }
 
-    // todo: test cannot initialize twice
+    function test_initialize_twice() public {
+        TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(0, 0);
+
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        setup.vault
+            .initialize(
+                setup.owner,
+                setup.allocator,
+                address(setup.token0),
+                address(setup.token1),
+                address(setup.pool),
+                setup.feeCollector,
+                address(0),
+                0,
+                0,
+                0,
+                TestConstants.DELTA5050
+            );
+    }
+
     // todo: make sure implementation cannot be initialized
     // todo test update fees > max fees
 }
