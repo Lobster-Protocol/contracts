@@ -365,6 +365,213 @@ contract UniV3LpVaultViewsTest is Test {
         assertEq(expectedFee1, fee1);
     }
 
+    function test_previewWithdraw_ReturnsZero_WhenMinAmount0IsZero() public view {
+        uint256 scaledPercent = setup.vault.previewWithdraw(0, 1000e6);
+        assertEq(scaledPercent, 0, "Should return 0 when minAmount0 is 0");
+    }
+
+    function test_previewWithdraw_ReturnsZero_WhenMinAmount1IsZero() public view {
+        uint256 scaledPercent = setup.vault.previewWithdraw(1000e18, 0);
+        assertEq(scaledPercent, 0, "Should return 0 when minAmount1 is 0");
+    }
+
+    function test_previewWithdraw_ReturnsZero_WhenBothAmountsAreZero() public view {
+        uint256 scaledPercent = setup.vault.previewWithdraw(0, 0);
+        assertEq(scaledPercent, 0, "Should return 0 when both amounts are 0");
+    }
+
+    function test_previewWithdraw_BasicCase_Token0IsConstraint() public {
+        // Deposit liquidity first
+        helper.depositToVault(setup, 10_000e18, 10_000e6);
+
+        uint256 scaledPercent = setup.vault.previewWithdraw(5000e18, 1000e6);
+
+        // The scaled percent should be based on token0's ratio
+        assertGt(scaledPercent, 0, "Should return non-zero value");
+        assertLe(scaledPercent, MAX_SCALED_PERCENTAGE, "Should not exceed 100%");
+    }
+
+    function test_previewWithdraw_BasicCase_Token1IsConstraint() public {
+        // Deposit liquidity first
+        helper.depositToVault(setup, 10_000e18, 10_000e6);
+
+        // Request withdrawal where token1 is the limiting factor
+        // Want 1000 token0 and 5000 token1
+        // If vault has ~10k of each, token0 requires 10% withdrawal
+        // but token1 requires 50% withdrawal
+        // Should return the smaller ratio (token0's 10% = 0.1e18)
+        uint256 scaledPercent = setup.vault.previewWithdraw(1000e18, 5000e6);
+
+        // The scaled percent should be based on token1's ratio
+        assertGt(scaledPercent, 0, "Should return non-zero value");
+        assertLe(scaledPercent, MAX_SCALED_PERCENTAGE, "Should not exceed 100%");
+    }
+
+    function test_previewWithdraw_ExactWithdrawal() public {
+        // Deposit known amounts
+        helper.depositToVault(setup, 10_000e18, 10_000e6);
+
+        (uint256 netAssets0, uint256 netAssets1) = setup.vault.netAssetsValue();
+
+        // Request to withdraw exactly what's available
+        uint256 scaledPercent = setup.vault.previewWithdraw(netAssets0, netAssets1);
+
+        // Should return 100% (MAX_SCALED_PERCENTAGE)
+        assertEq(scaledPercent, MAX_SCALED_PERCENTAGE, "Should return 100% for exact withdrawal");
+    }
+
+    function test_previewWithdraw_ReturnsZero_WhenBothAmountsExceedTVL() public {
+        helper.depositToVault(setup, 10_000e18, 10_000e6);
+
+        (uint256 netAssets0, uint256 netAssets1) = setup.vault.netAssetsValue();
+
+        // Request more than available for both tokens
+        uint256 scaledPercent = setup.vault.previewWithdraw(netAssets0 + 1000e18, netAssets1 + 1000e6);
+
+        // When both exceed, ratio calculation will underflow or return 0
+        assertEq(scaledPercent, 0, "Should return 0 when both amounts exceed TVL");
+    }
+
+    function test_previewWithdraw_Token0ExceedsTVL() public {
+        helper.depositToVault(setup, 10_000e18, 10_000e6);
+
+        (uint256 netAssets0, uint256 netAssets1) = setup.vault.netAssetsValue();
+
+        // Request more token0 than available, but reasonable token1
+        uint256 scaledPercent = setup.vault.previewWithdraw(netAssets0 + 1000e18, netAssets1 / 2);
+
+        assertEq(scaledPercent, 0, "Should return zero for unfeasible partial withdrawal");
+    }
+
+    function test_previewWithdraw_Token1ExceedsTVL() public {
+        helper.depositToVault(setup, 10_000e18, 10_000e6);
+
+        (uint256 netAssets0, uint256 netAssets1) = setup.vault.netAssetsValue();
+
+        // Request reasonable token0, but more token1 than available
+        uint256 scaledPercent = setup.vault.previewWithdraw(netAssets0 / 2, netAssets1 + 1000e6);
+
+        assertEq(scaledPercent, 0, "Should return zero for unfeasible partial withdrawal");
+    }
+
+    function test_previewWithdraw_50PercentWithdrawal() public {
+        helper.depositToVault(setup, 10_000e18, 10_000e6);
+
+        (uint256 netAssets0, uint256 netAssets1) = setup.vault.netAssetsValue();
+
+        // Request exactly 50% of each
+        uint256 scaledPercent = setup.vault.previewWithdraw(netAssets0 / 2, netAssets1 / 2);
+
+        // Should return approximately 50% (accounting for rounding)
+        assertApproxEqRel(
+            scaledPercent,
+            MAX_SCALED_PERCENTAGE / 2,
+            0.01e18, // 1% tolerance
+            "Should return ~50% for half withdrawal"
+        );
+    }
+
+    function test_previewWithdraw_SmallWithdrawal() public {
+        helper.depositToVault(setup, 10_000e18, 10_000e6);
+
+        (uint256 netAssets0, uint256 netAssets1) = setup.vault.netAssetsValue();
+
+        // Request 1% of each
+        uint256 scaledPercent = setup.vault.previewWithdraw(netAssets0 / 100, netAssets1 / 100);
+
+        // Should return approximately 1%
+        assertApproxEqRel(
+            scaledPercent,
+            MAX_SCALED_PERCENTAGE / 100,
+            0.01e18, // 1% tolerance
+            "Should return ~1% for small withdrawal"
+        );
+    }
+
+    function test_previewWithdraw_AsymmetricRatios() public {
+        helper.depositToVault(setup, 10_000e18, 10_000e6);
+
+        (uint256 netAssets0, uint256 netAssets1) = setup.vault.netAssetsValue();
+
+        // Request 10% of token0 but 90% of token1
+        uint256 scaledPercent = setup.vault.previewWithdraw(netAssets0 / 10, (netAssets1 * 9) / 10);
+
+        assertEq(scaledPercent, (MAX_SCALED_PERCENTAGE * 9) / 10, "Should return the higher ratio");
+    }
+
+    function test_previewWithdraw_InvertedAsymmetricRatios() public {
+        helper.depositToVault(setup, 10_000e18, 10_000e6);
+
+        (uint256 netAssets0, uint256 netAssets1) = setup.vault.netAssetsValue();
+
+        // Request 90% of token0 but 10% of token1
+        uint256 scaledPercent = setup.vault.previewWithdraw((netAssets0 * 9) / 10, netAssets1 / 10);
+
+        assertEq(scaledPercent, (MAX_SCALED_PERCENTAGE * 9) / 10, "Should return the higher ratio");
+    }
+
+    function test_previewWithdraw_WithAccruedFees() public {
+        // Use vault with fees
+        helper.depositToVault(feeSetup, 10_000e18, 10_000e6);
+
+        // Warp time to accrue fees
+        vm.warp(block.timestamp + 365 days);
+
+        (uint256 netAssets0, uint256 netAssets1) = feeSetup.vault.netAssetsValue();
+
+        // Net assets should be less than gross due to fees
+        // Preview withdraw should account for this
+        uint256 scaledPercent = feeSetup.vault.previewWithdraw(netAssets0 / 2, netAssets1 / 2);
+
+        assertGt(scaledPercent, 0, "Should handle fee accrual");
+        assertLe(scaledPercent, MAX_SCALED_PERCENTAGE, "Should not exceed 100%");
+    }
+
+    function test_previewWithdraw_VeryLargeAmounts() public {
+        // Deposit large amounts
+        helper.depositToVault(setup, 1_000_000e18, 1_000_000e6);
+
+        (uint256 netAssets0, uint256 netAssets1) = setup.vault.netAssetsValue();
+
+        uint256 scaledPercent = setup.vault.previewWithdraw(netAssets0 / 2, netAssets1 / 2);
+
+        assertGt(scaledPercent, 0, "Should handle large amounts");
+        assertLe(scaledPercent, MAX_SCALED_PERCENTAGE, "Should not exceed 100%");
+    }
+
+    function testFuzz_previewWithdraw_NeverExceedsScalingFactor(uint256 minAmount0, uint256 minAmount1) public {
+        // Bound inputs to reasonable ranges
+        minAmount0 = bound(minAmount0, 1, 1_000_000e18);
+        minAmount1 = bound(minAmount1, 1, 1_000_000e6);
+
+        // Ensure vault has liquidity
+        helper.depositToVault(setup, 100_000e18, 100_000e6);
+
+        uint256 scaledPercent = setup.vault.previewWithdraw(minAmount0, minAmount1);
+
+        assertLe(scaledPercent, MAX_SCALED_PERCENTAGE, "Should never exceed 100%");
+    }
+
+    function testFuzz_previewWithdraw_ReturnsMaxRatio(uint256 minAmount0, uint256 minAmount1) public {
+        // Bound inputs
+        minAmount0 = bound(minAmount0, 1e18, 10_000e18);
+        minAmount1 = bound(minAmount1, 1e6, 10_000e6);
+
+        helper.depositToVault(setup, 100_000e18, 100_000e6);
+
+        (uint256 netAssets0, uint256 netAssets1) = setup.vault.netAssetsValue();
+
+        // Calculate expected ratios
+        uint256 ratio0 = minAmount0.mulDiv(MAX_SCALED_PERCENTAGE, netAssets0);
+        uint256 ratio1 = minAmount1.mulDiv(MAX_SCALED_PERCENTAGE, netAssets1);
+        uint256 expectedMax = ratio0 > ratio1 ? ratio0 : ratio1;
+
+        uint256 scaledPercent = setup.vault.previewWithdraw(minAmount0, minAmount1);
+
+        assertEq(scaledPercent, expectedMax, "Should return maximum of the two ratios");
+        assertTrue(scaledPercent <= MAX_SCALED_PERCENTAGE);
+    }
+
     // todo: test positionsLength()
     // todo: test netAssetsValue with perf and tvl fees (add perf and delay before calling the fct. setup already has fees)
     // todo: test pendingFeeUpdate()

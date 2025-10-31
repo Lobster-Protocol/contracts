@@ -283,19 +283,7 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
      * @return totalAssets1 Net amount of token1 (after fees)
      */
     function netAssetsValue() external view returns (uint256 totalAssets0, uint256 totalAssets1) {
-        (totalAssets0, totalAssets1) = _rawAssetsValue();
-
-        (uint256 pendingRelativePerfFee,) = _pendingRelativePerformanceFeeAndNewTvl();
-
-        // Apply TVL fee deduction
-        uint256 tokensLeft = _pendingRelativeTvlFee() + pendingRelativePerfFee > MAX_SCALED_PERCENTAGE
-            ? MAX_SCALED_PERCENTAGE
-            : MAX_SCALED_PERCENTAGE - _pendingRelativeTvlFee() - pendingRelativePerfFee;
-
-        totalAssets0 = totalAssets0.mulDiv(tokensLeft, MAX_SCALED_PERCENTAGE);
-        totalAssets1 = totalAssets1.mulDiv(tokensLeft, MAX_SCALED_PERCENTAGE);
-
-        return (totalAssets0, totalAssets1);
+        return _netAssetsValue();
     }
 
     /**
@@ -362,6 +350,56 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
      */
     function pendingFeeUpdate() external view returns (uint80 tvlFee, uint80 perfFee, uint96 activatableAfter) {
         return _unpackFeesWithTimestamp(packedPendingFees);
+    }
+
+    /**
+     * @notice Estimates the scaled percentage required to withdraw at least `minAmount0` and `minAmount1`.
+     *
+     * @dev
+     * It computes the portion of the vault’s liquidity (scaled by `SCALING_FACTOR`)
+     * that would need to be withdrawn to receive at least `minAmount0` of token0
+     * and `minAmount1` of token1, after accounting for pending fees.
+     *
+     * If it is impossible to withdraw the requested minimum amounts
+     * (for example, when both `minAmount0` > tvl0 and `minAmount1` > tvl1),
+     * the function returns `0`.
+     *
+     * @param minAmount0 Minimum desired amount of token0 to withdraw
+     * @param minAmount1 Minimum desired amount of token1 to withdraw
+     * @return scaledPercent Estimated withdrawal percentage (scaled by `SCALING_FACTOR`);
+     * returns 0 if the requested withdrawal is not feasible.
+     */
+    function previewWithdraw(
+        uint256 minAmount0,
+        uint256 minAmount1
+    )
+        external
+        view
+        returns (uint256 scaledPercent)
+    {
+        if (minAmount0 == 0 || minAmount1 == 0) return 0;
+        (uint256 netAssets0, uint256 netAssets1) = _netAssetsValue();
+
+        if (minAmount0 > netAssets0 || minAmount1 > netAssets1) return 0;
+
+        uint256 ratio0 = 0;
+        if (netAssets0 != 0) {
+            ratio0 = minAmount0.mulDiv(MAX_SCALED_PERCENTAGE, netAssets0);
+        }
+
+        uint256 ratio1 = 0;
+        if (netAssets1 != 0) {
+            ratio1 = minAmount1.mulDiv(MAX_SCALED_PERCENTAGE, netAssets1);
+        }
+
+        // Impossible to get the minimum amount for both min amounts
+        if (ratio0 == 0 || ratio1 == 0) return 0;
+
+        if (ratio0 > ratio1) {
+            return ratio0;
+        } else {
+            return ratio1;
+        }
     }
 
     // ========== INTERNAL FUNCTIONS ==========
@@ -841,6 +879,28 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
 
         totalAssets0 += TOKEN0.balanceOf(address(this));
         totalAssets1 += TOKEN1.balanceOf(address(this));
+    }
+
+    /**
+     * @notice Returns net asset value after deducting pending fees
+     * @dev This represents the actual value owned by the vault users
+     * @return totalAssets0 Net amount of token0 (after fees)
+     * @return totalAssets1 Net amount of token1 (after fees)
+     */
+    function _netAssetsValue() internal view returns (uint256 totalAssets0, uint256 totalAssets1) {
+        (totalAssets0, totalAssets1) = _rawAssetsValue();
+
+        (uint256 pendingRelativePerfFee,) = _pendingRelativePerformanceFeeAndNewTvl();
+
+        // Apply TVL fee deduction
+        uint256 tokensLeft = _pendingRelativeTvlFee() + pendingRelativePerfFee > MAX_SCALED_PERCENTAGE
+            ? MAX_SCALED_PERCENTAGE
+            : MAX_SCALED_PERCENTAGE - _pendingRelativeTvlFee() - pendingRelativePerfFee;
+
+        totalAssets0 = totalAssets0.mulDiv(tokensLeft, MAX_SCALED_PERCENTAGE);
+        totalAssets1 = totalAssets1.mulDiv(tokensLeft, MAX_SCALED_PERCENTAGE);
+
+        return (totalAssets0, totalAssets1);
     }
 
     /**
