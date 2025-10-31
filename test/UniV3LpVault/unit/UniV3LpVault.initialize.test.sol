@@ -203,6 +203,25 @@ contract UniV3LpVaultInitializeTest is Test {
             );
     }
 
-    // todo: make sure implementation cannot be initialized
+    function test_initializeImplementation() public {
+        TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(0, 0);
+        UniV3LpVault vault = new UniV3LpVault();
+
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        vault.initialize(
+            address(1),
+            address(1),
+            address(setup.token0),
+            address(setup.token1),
+            address(setup.pool),
+            address(1),
+            address(1),
+            0,
+            0,
+            0,
+            5e17
+        );
+    }
+
     // todo test update fees > max fees
 }
