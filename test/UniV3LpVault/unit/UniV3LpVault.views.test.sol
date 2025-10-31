@@ -494,7 +494,6 @@ contract UniV3LpVaultViewsTest is Test {
         (uint256 netAssets0, uint256 netAssets1) = setup.vault.netAssetsValue();
 
         // Request 10% of token0 but 90% of token1
-        // Should return the minimum (10%)
         uint256 scaledPercent = setup.vault.previewWithdraw(netAssets0 / 10, (netAssets1 * 9) / 10);
 
         assertEq(scaledPercent, (MAX_SCALED_PERCENTAGE * 9) / 10, "Should return the higher ratio");
@@ -506,7 +505,6 @@ contract UniV3LpVaultViewsTest is Test {
         (uint256 netAssets0, uint256 netAssets1) = setup.vault.netAssetsValue();
 
         // Request 90% of token0 but 10% of token1
-        // Should return the minimum (10%)
         uint256 scaledPercent = setup.vault.previewWithdraw((netAssets0 * 9) / 10, netAssets1 / 10);
 
         assertEq(scaledPercent, (MAX_SCALED_PERCENTAGE * 9) / 10, "Should return the higher ratio");
@@ -554,7 +552,7 @@ contract UniV3LpVaultViewsTest is Test {
         assertLe(scaledPercent, MAX_SCALED_PERCENTAGE, "Should never exceed 100%");
     }
 
-    function testFuzz_previewWithdraw_ReturnsMinimumRatio(uint256 minAmount0, uint256 minAmount1) public {
+    function testFuzz_previewWithdraw_ReturnsMaxRatio(uint256 minAmount0, uint256 minAmount1) public {
         // Bound inputs
         minAmount0 = bound(minAmount0, 1e18, 10_000e18);
         minAmount1 = bound(minAmount1, 1e6, 10_000e6);
