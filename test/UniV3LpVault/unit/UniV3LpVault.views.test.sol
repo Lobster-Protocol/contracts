@@ -365,17 +365,17 @@ contract UniV3LpVaultViewsTest is Test {
         assertEq(expectedFee1, fee1);
     }
 
-    function test_previewWithdraw_ReturnsZero_WhenMinAmount0IsZero() public {
+    function test_previewWithdraw_ReturnsZero_WhenMinAmount0IsZero() public view {
         uint256 scaledPercent = setup.vault.previewWithdraw(0, 1000e6);
         assertEq(scaledPercent, 0, "Should return 0 when minAmount0 is 0");
     }
 
-    function test_previewWithdraw_ReturnsZero_WhenMinAmount1IsZero() public {
+    function test_previewWithdraw_ReturnsZero_WhenMinAmount1IsZero() public view {
         uint256 scaledPercent = setup.vault.previewWithdraw(1000e18, 0);
         assertEq(scaledPercent, 0, "Should return 0 when minAmount1 is 0");
     }
 
-    function test_previewWithdraw_ReturnsZero_WhenBothAmountsAreZero() public {
+    function test_previewWithdraw_ReturnsZero_WhenBothAmountsAreZero() public view {
         uint256 scaledPercent = setup.vault.previewWithdraw(0, 0);
         assertEq(scaledPercent, 0, "Should return 0 when both amounts are 0");
     }
