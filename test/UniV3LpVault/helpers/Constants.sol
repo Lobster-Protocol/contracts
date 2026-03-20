@@ -41,6 +41,8 @@ library TestConstants {
     uint256 constant MEDIUM_PERF_FEE = 2 * SCALING_FACTOR; // 2%
     uint256 constant HIGH_PERF_FEE = 5 * SCALING_FACTOR; // 5%
 
+    uint256 constant PROTOCOL_FEE_PERCENT = 10 * SCALING_FACTOR; // 10% protocol fee
+
     // Tolerance for approximate equality checks
     uint256 constant TOLERANCE_LOW = 1e15; // 0.1%
     uint256 constant TOLERANCE_MEDIUM = 1e16; // 1%

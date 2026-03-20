@@ -29,6 +29,10 @@ contract DeployUniswapV3Proxy is Script {
         if (chainId == 42161) {
             // Arbitrum One
             return NetworkConfig({uniV3Factory: 0x1F98431c8aD98523631AE4a59f267346ea31F984});
+        }
+        if (chainId == 1) {
+                // Mainnet
+                return NetworkConfig({uniV3Factory: 0x1F98431c8aD98523631AE4a59f267346ea31F984});
         } else {
             // Default to mainnet addresses for unknown networks
             revert("Warning: Unknown network, using mainnet addresses");

@@ -23,7 +23,7 @@ contract UniV3LpVaultInitializeTest is Test {
 
     function test_initialize_ValidParameters_Success() public {
         TestHelper.VaultSetup memory setup =
-            helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE, TestConstants.HIGH_PERF_FEE);
+            helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE, TestConstants.HIGH_PERF_FEE, 0);
 
         // Verify all state variables are set correctly
         assertEq(setup.vault.owner(), setup.owner);
@@ -160,7 +160,7 @@ contract UniV3LpVaultInitializeTest is Test {
 
     function test_initialize_InitialState_Correct() public {
         TestHelper.VaultSetup memory setup =
-            helper.deployVaultWithPool(TestConstants.MEDIUM_TVL_FEE, TestConstants.MEDIUM_PERF_FEE);
+            helper.deployVaultWithPool(TestConstants.MEDIUM_TVL_FEE, TestConstants.MEDIUM_PERF_FEE, 0);
 
         // Check that no positions exist initially
         vm.expectRevert();
@@ -178,14 +178,14 @@ contract UniV3LpVaultInitializeTest is Test {
     }
 
     function test_initialize_ZeroFee_Success() public {
-        TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(0, 0);
+        TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(0, 0, 0);
 
         // Zero TVL fee should be allowed
         assertTrue(address(setup.vault) != address(0));
     }
 
     function test_initialize_twice() public {
-        TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(0, 0);
+        TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(0, 0, 0);
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         setup.vault
@@ -205,7 +205,7 @@ contract UniV3LpVaultInitializeTest is Test {
     }
 
     function test_initializeImplementation() public {
-        TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(0, 0);
+        TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(0, 0, 0);
         UniV3LpVault vault = new UniV3LpVault();
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
@@ -226,9 +226,9 @@ contract UniV3LpVaultInitializeTest is Test {
 
     function test_initializeWithFeesTooHigh() public {
         vm.expectRevert(abi.encodePacked("Fees > max"));
-        helper.deployVaultWithPool(MAX_FEE_SCALED + 1, 0);
+        helper.deployVaultWithPool(MAX_FEE_SCALED + 1, 0, 0);
 
         vm.expectRevert(abi.encodePacked("Fees > max"));
-        helper.deployVaultWithPool(0, MAX_FEE_SCALED + 1);
+        helper.deployVaultWithPool(0, MAX_FEE_SCALED + 1, 0);
     }
 }

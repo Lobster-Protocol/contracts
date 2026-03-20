@@ -96,7 +96,10 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
      * @param initialOwner The address that will become the vault owner (dummy for implementation)
      * @param initialAllocator The address that will become the initial allocator (dummy for implementation)
      */
-    constructor(address initialOwner, address initialAllocator) Ownable(initialOwner) {
+    constructor(
+        address initialOwner,
+        address initialAllocator
+    ) Ownable(initialOwner) {
         // For implementation contracts, we use dummy addresses
         // For proxy contracts, real initialization happens in the initialize() function
         allocator = initialAllocator;
@@ -109,7 +112,7 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
     /**
      * @notice Updates the allocator address
      * @dev Only callable by the owner; change takes effect immediately
-     * @dev No timelock is enforced for allocator changes
+     * @dev Allocator can be set to address(0) -> disable position allocation
      * @param newAllocator Address of the new allocator
      */
     function setAllocator(address newAllocator) external onlyOwner {
