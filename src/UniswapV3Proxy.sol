@@ -33,9 +33,10 @@ contract UniswapV3Proxy is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         checkDeadline(params.deadline)
         returns (uint256 amount0, uint256 amount1)
     {
-        PoolAddress.PoolKey memory poolKey = PoolAddress.PoolKey({
-            token0: params.token0, token1: params.token1, fee: params.fee
-        });
+        require(params.recipient != address(0));
+
+        PoolAddress.PoolKey memory poolKey =
+            PoolAddress.PoolKey({token0: params.token0, token1: params.token1, fee: params.fee});
 
         // Get the pool address
         IUniswapV3PoolMinimal pool = IUniswapV3PoolMinimal(PoolAddress.computeAddress(UNI_V3_FACTORY, poolKey));
@@ -90,6 +91,8 @@ contract UniswapV3Proxy is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         checkDeadline(params.deadline)
         returns (uint256 amountOut)
     {
+        require(params.recipient != address(0));
+
         bool zeroForOne = params.tokenIn < params.tokenOut;
 
         (int256 amount0, int256 amount1) = _getPool(params.tokenIn, params.tokenOut, params.fee)
@@ -117,6 +120,8 @@ contract UniswapV3Proxy is IUniswapV3MintCallback, IUniswapV3SwapCallback {
         checkDeadline(params.deadline)
         returns (uint256 amountIn)
     {
+        require(params.recipient != address(0));
+
         bool zeroForOne = params.tokenIn < params.tokenOut;
 
         (int256 amount0, int256 amount1) = _getPool(params.tokenIn, params.tokenOut, params.fee)
