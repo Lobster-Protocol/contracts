@@ -1,6 +1,35 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 pragma solidity >=0.8.0;
 
+struct SwapCallbackData {
+    address tokenIn;
+    address tokenOut;
+    uint24 fee;
+    address payer;
+}
+
+struct ExactInputSingleParams {
+    address tokenIn;
+    address tokenOut;
+    uint24 fee;
+    address recipient;
+    uint256 deadline;
+    uint256 amountIn;
+    uint256 amountOutMinimum;
+    uint160 sqrtPriceLimitX96;
+}
+
+struct ExactOutputSingleParams {
+    address tokenIn;
+    address tokenOut;
+    uint24 fee;
+    address recipient;
+    uint256 deadline;
+    uint256 amountOut;
+    uint256 amountInMaximum;
+    uint160 sqrtPriceLimitX96;
+}
+
 /// @title Callback for IUniswapV3PoolActions#swap
 /// @notice Any contract that calls IUniswapV3PoolActions#swap must implement this interface
 interface IUniswapV3SwapCallback {
@@ -13,9 +42,5 @@ interface IUniswapV3SwapCallback {
     /// @param amount1Delta The amount of token1 that was sent (negative) or must be received (positive) by the pool by
     /// the end of the swap. If positive, the callback must send that amount of token1 to the pool.
     /// @param data Any data passed through by the caller via the IUniswapV3PoolActions#swap call
-    function uniswapV3SwapCallback(
-        int256 amount0Delta,
-        int256 amount1Delta,
-        bytes calldata data
-    ) external;
+    function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external;
 }
