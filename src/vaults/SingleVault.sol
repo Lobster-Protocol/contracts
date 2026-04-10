@@ -112,6 +112,7 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
     /**
      * @notice Updates the allocator address
      * @dev Only callable by the owner; change takes effect immediately
+     * @dev No timelock is enforced for allocator changes
      * @dev Allocator can be set to address(0) -> disable position allocation
      * @param newAllocator Address of the new allocator
      */
