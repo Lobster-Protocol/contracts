@@ -160,7 +160,7 @@ contract UniV3LpVaultWithdrawTest is Test {
 
     function test_withdraw_WithTvlFees_CollectsFees() public {
         TestHelper.VaultSetup memory feeSetup =
-            helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE, TestConstants.HIGH_PERF_FEE);
+            helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE, TestConstants.HIGH_PERF_FEE, 0);
 
         helper.depositToVault(feeSetup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
         helper.createPositionAroundCurrentTick(

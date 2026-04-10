@@ -154,7 +154,7 @@ contract UniV3LpVaultDepositTest is Test {
     function test_deposit_WithFeesAccumulated_CollectsFees() public {
         // Create vault with TVL fees
         TestHelper.VaultSetup memory feeSetup =
-            helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE, TestConstants.HIGH_PERF_FEE);
+            helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE, TestConstants.HIGH_PERF_FEE, 0);
 
         helper.depositToVault(feeSetup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
 

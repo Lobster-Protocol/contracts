@@ -27,19 +27,22 @@ contract UniV3LpVaultFeesTest is Test {
 
     function setUp() public {
         helper = new TestHelper();
-        setup = helper.deployVaultWithPool(0, 0); // No fees
+        setup = helper.deployVaultWithPool(0, 0, 0); // No fees
 
         tvlFeeSetup = helper.deployVaultWithPool(
             TestConstants.HIGH_TVL_FEE, // 5% annual
+            0,
             0
         );
         perfFeeSetup = helper.deployVaultWithPool(
             0,
-            TestConstants.HIGH_PERF_FEE // 5%
+            TestConstants.HIGH_PERF_FEE, // 5%,0
+            0
         );
         bothFeeSetup = helper.deployVaultWithPool(
             TestConstants.HIGH_TVL_FEE, // 5% annual
-            TestConstants.HIGH_PERF_FEE // 5%
+            TestConstants.HIGH_PERF_FEE, // 5%
+            0
         );
     }
 
@@ -280,7 +283,7 @@ contract UniV3LpVaultFeesTest is Test {
     function test_tvlFees_HighFeeRate_CollectsCorrectly() public {
         // Test with very high fee rate (20% annual)
         TestHelper.VaultSetup memory highFeeSetup =
-            helper.deployVaultWithPool(20 * TestConstants.SCALING_FACTOR, 20 * TestConstants.SCALING_FACTOR);
+            helper.deployVaultWithPool(20 * TestConstants.SCALING_FACTOR, 20 * TestConstants.SCALING_FACTOR, 0);
 
         helper.depositToVault(highFeeSetup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
 
@@ -1050,6 +1053,320 @@ contract UniV3LpVaultFeesTest is Test {
 
         vm.expectRevert(SingleVault.Unauthorized.selector);
         setup.vault.enforceFeeUpdate();
+    }
+
+    // ============ Protocol Fee Tests ============
+
+    function test_protocolFees_NoProtocolFee_NoCollection() public {
+        // Use setup with 0 protocol fee
+        helper.depositToVault(tvlFeeSetup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
+        helper.createPositionAroundCurrentTick(
+            tvlFeeSetup.vault,
+            tvlFeeSetup.allocator,
+            TestConstants.TICK_RANGE_NARROW,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
+
+        helper.simulateTimePass(TestConstants.ONE_YEAR);
+
+        uint256 initialProtocolBalance0 = tvlFeeSetup.token0.balanceOf(tvlFeeSetup.vault.PROTOCOL_ADDR());
+        uint256 initialProtocolBalance1 = tvlFeeSetup.token1.balanceOf(tvlFeeSetup.vault.PROTOCOL_ADDR());
+
+        // Trigger fee collection
+        helper.depositToVault(tvlFeeSetup, 1, 1);
+
+        uint256 finalProtocolBalance0 = tvlFeeSetup.token0.balanceOf(tvlFeeSetup.vault.PROTOCOL_ADDR());
+        uint256 finalProtocolBalance1 = tvlFeeSetup.token1.balanceOf(tvlFeeSetup.vault.PROTOCOL_ADDR());
+
+        // No protocol fees should be collected since PROTOCOL_FEE = 0
+        assertEq(finalProtocolBalance0, initialProtocolBalance0);
+        assertEq(finalProtocolBalance1, initialProtocolBalance1);
+    }
+
+    function test_protocolFees_WithTvlFee_CollectsCorrectly() public {
+        // Deploy vault with protocol fee
+        address protocolAddr = makeAddr("protocol");
+        TestHelper.VaultSetup memory protocolSetup = helper.deployVaultWithPool(
+            TestConstants.HIGH_TVL_FEE, // 5% TVL fee
+            0, // No perf fee
+            TestConstants.PROTOCOL_FEE_PERCENT // 10% protocol fee
+        );
+
+        uint256 depositAmount0 = TestConstants.LARGE_AMOUNT;
+        uint256 depositAmount1 = TestConstants.LARGE_AMOUNT;
+
+        helper.depositToVault(protocolSetup, depositAmount0, depositAmount1);
+        helper.createPositionAroundCurrentTick(
+            protocolSetup.vault,
+            protocolSetup.allocator,
+            TestConstants.TICK_RANGE_NARROW,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
+
+        uint256 delay = TestConstants.ONE_YEAR;
+        helper.simulateTimePass(delay);
+
+        uint256 initialFeeCollectorBalance0 = protocolSetup.token0.balanceOf(protocolSetup.feeCollector);
+        uint256 initialFeeCollectorBalance1 = protocolSetup.token1.balanceOf(protocolSetup.feeCollector);
+        uint256 initialProtocolBalance0 = protocolSetup.token0.balanceOf(protocolAddr);
+        uint256 initialProtocolBalance1 = protocolSetup.token1.balanceOf(protocolAddr);
+
+        // Trigger fee collection
+        helper.depositToVault(protocolSetup, 1, 1);
+
+        uint256 finalFeeCollectorBalance0 = protocolSetup.token0.balanceOf(protocolSetup.feeCollector);
+        uint256 finalFeeCollectorBalance1 = protocolSetup.token1.balanceOf(protocolSetup.feeCollector);
+        uint256 finalProtocolBalance0 = protocolSetup.token0.balanceOf(protocolAddr);
+        uint256 finalProtocolBalance1 = protocolSetup.token1.balanceOf(protocolAddr);
+
+        // Calculate expected fees
+        uint256 tvlFeePercent = protocolSetup.vault.tvlFeeScaled().mulDiv(delay, 365 days);
+        uint256 totalExpectedFee0 = depositAmount0.mulDiv(tvlFeePercent, MAX_SCALED_PERCENTAGE);
+        uint256 totalExpectedFee1 = depositAmount1.mulDiv(tvlFeePercent, MAX_SCALED_PERCENTAGE);
+
+        uint256 expectedProtocolFee0 =
+            totalExpectedFee0.mulDiv(TestConstants.PROTOCOL_FEE_PERCENT, MAX_SCALED_PERCENTAGE);
+        uint256 expectedProtocolFee1 =
+            totalExpectedFee1.mulDiv(TestConstants.PROTOCOL_FEE_PERCENT, MAX_SCALED_PERCENTAGE);
+
+        uint256 expectedFeeCollectorFee0 = totalExpectedFee0 - expectedProtocolFee0;
+        uint256 expectedFeeCollectorFee1 = totalExpectedFee1 - expectedProtocolFee1;
+
+        // Verify fee collector received correct amount (90% of total)
+        assertApproxEqAbs(
+            finalFeeCollectorBalance0 - initialFeeCollectorBalance0, expectedFeeCollectorFee0, 2, "Fee collector token0"
+        );
+        assertApproxEqAbs(
+            finalFeeCollectorBalance1 - initialFeeCollectorBalance1, expectedFeeCollectorFee1, 2, "Fee collector token1"
+        );
+
+        // Verify protocol received correct amount (10% of total)
+        assertApproxEqAbs(finalProtocolBalance0 - initialProtocolBalance0, expectedProtocolFee0, 2, "Protocol token0");
+        assertApproxEqAbs(finalProtocolBalance1 - initialProtocolBalance1, expectedProtocolFee1, 2, "Protocol token1");
+    }
+
+    function test_protocolFees_WithPerformanceFee_CollectsCorrectly() public {
+        // Deploy vault with protocol fee
+        address protocolAddr = makeAddr("protocol");
+        TestHelper.VaultSetup memory protocolSetup = helper.deployVaultWithPool(
+            0, // No TVL fee
+            TestConstants.HIGH_PERF_FEE, // 5% performance fee
+            TestConstants.PROTOCOL_FEE_PERCENT // 10% protocol fee
+        );
+
+        uint256 deposit0 = TestConstants.LARGE_AMOUNT;
+        uint256 deposit1 = TestConstants.LARGE_AMOUNT;
+
+        helper.depositToVault(protocolSetup, deposit0, deposit1);
+        helper.createPositionAroundCurrentTick(
+            protocolSetup.vault,
+            protocolSetup.allocator,
+            TestConstants.TICK_RANGE_NARROW,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
+
+        // Simulate +50% performance
+        (uint256 tvl0, uint256 tvl1) = protocolSetup.vault.rawAssetsValue();
+        protocolSetup.token0.mint(address(protocolSetup.vault), tvl0 / 2);
+        protocolSetup.token1.mint(address(protocolSetup.vault), tvl1 / 2);
+
+        uint256 initialFeeCollectorBalance0 = protocolSetup.token0.balanceOf(protocolSetup.feeCollector);
+        uint256 initialFeeCollectorBalance1 = protocolSetup.token1.balanceOf(protocolSetup.feeCollector);
+        uint256 initialProtocolBalance0 = protocolSetup.token0.balanceOf(protocolAddr);
+        uint256 initialProtocolBalance1 = protocolSetup.token1.balanceOf(protocolAddr);
+
+        vm.expectEmit(false, false, true, true);
+        emit UniV3LpVaultVariables.ProtocolFeeCollected(0, 0, protocolAddr);
+
+        // Trigger fee collection
+        helper.depositToVault(protocolSetup, 1, 1);
+
+        uint256 finalFeeCollectorBalance0 = protocolSetup.token0.balanceOf(protocolSetup.feeCollector);
+        uint256 finalFeeCollectorBalance1 = protocolSetup.token1.balanceOf(protocolSetup.feeCollector);
+        uint256 finalProtocolBalance0 = protocolSetup.token0.balanceOf(protocolAddr);
+        uint256 finalProtocolBalance1 = protocolSetup.token1.balanceOf(protocolAddr);
+
+        // Calculate expected fees (50% performance = 2.5% fee)
+        uint256 perfFeePercent = protocolSetup.vault.performanceFeeScaled() / 2;
+        uint256 totalExpectedFee0 = deposit0.mulDiv(perfFeePercent, MAX_SCALED_PERCENTAGE);
+        uint256 totalExpectedFee1 = deposit1.mulDiv(perfFeePercent, MAX_SCALED_PERCENTAGE);
+
+        uint256 expectedProtocolFee0 =
+            totalExpectedFee0.mulDiv(TestConstants.PROTOCOL_FEE_PERCENT, MAX_SCALED_PERCENTAGE);
+        uint256 expectedProtocolFee1 =
+            totalExpectedFee1.mulDiv(TestConstants.PROTOCOL_FEE_PERCENT, MAX_SCALED_PERCENTAGE);
+
+        uint256 expectedFeeCollectorFee0 = totalExpectedFee0 - expectedProtocolFee0;
+        uint256 expectedFeeCollectorFee1 = totalExpectedFee1 - expectedProtocolFee1;
+
+        // Verify both collectors received correct amounts
+        assertApproxEqAbs(
+            finalFeeCollectorBalance0 - initialFeeCollectorBalance0, expectedFeeCollectorFee0, 3, "Fee collector token0"
+        );
+        assertApproxEqAbs(
+            finalFeeCollectorBalance1 - initialFeeCollectorBalance1, expectedFeeCollectorFee1, 3, "Fee collector token1"
+        );
+        assertApproxEqAbs(finalProtocolBalance0 - initialProtocolBalance0, expectedProtocolFee0, 3, "Protocol token0");
+        assertApproxEqAbs(finalProtocolBalance1 - initialProtocolBalance1, expectedProtocolFee1, 3, "Protocol token1");
+    }
+
+    function test_protocolFees_WithBothFees_CollectsCorrectly() public {
+        // Deploy vault with protocol fee
+        address protocolAddr = makeAddr("protocol");
+        TestHelper.VaultSetup memory protocolSetup = helper.deployVaultWithPool(
+            TestConstants.HIGH_TVL_FEE, // 5% TVL fee
+            TestConstants.HIGH_PERF_FEE, // 5% performance fee
+            TestConstants.PROTOCOL_FEE_PERCENT // 10% protocol fee
+        );
+
+        uint256 deposit0 = TestConstants.LARGE_AMOUNT;
+        uint256 deposit1 = TestConstants.LARGE_AMOUNT;
+
+        helper.depositToVault(protocolSetup, deposit0, deposit1);
+        helper.createPositionAroundCurrentTick(
+            protocolSetup.vault,
+            protocolSetup.allocator,
+            TestConstants.TICK_RANGE_NARROW,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
+
+        // Simulate time and performance
+        helper.simulateTimePass(TestConstants.ONE_MONTH);
+
+        (uint256 tvl0, uint256 tvl1) = protocolSetup.vault.rawAssetsValue();
+        protocolSetup.token0.mint(address(protocolSetup.vault), tvl0 / 2);
+        protocolSetup.token1.mint(address(protocolSetup.vault), tvl1 / 2);
+
+        uint256 initialFeeCollectorBalance0 = protocolSetup.token0.balanceOf(protocolSetup.feeCollector);
+        uint256 initialFeeCollectorBalance1 = protocolSetup.token1.balanceOf(protocolSetup.feeCollector);
+        uint256 initialProtocolBalance0 = protocolSetup.token0.balanceOf(protocolAddr);
+        uint256 initialProtocolBalance1 = protocolSetup.token1.balanceOf(protocolAddr);
+
+        // Trigger fee collection
+        helper.depositToVault(protocolSetup, 1, 1);
+
+        uint256 finalFeeCollectorBalance0 = protocolSetup.token0.balanceOf(protocolSetup.feeCollector);
+        uint256 finalFeeCollectorBalance1 = protocolSetup.token1.balanceOf(protocolSetup.feeCollector);
+        uint256 finalProtocolBalance0 = protocolSetup.token0.balanceOf(protocolAddr);
+        uint256 finalProtocolBalance1 = protocolSetup.token1.balanceOf(protocolAddr);
+
+        // Both fee types should result in protocol fees
+        assertTrue(finalProtocolBalance0 > initialProtocolBalance0, "Protocol should receive token0");
+        assertTrue(finalProtocolBalance1 > initialProtocolBalance1, "Protocol should receive token1");
+        assertTrue(finalFeeCollectorBalance0 > initialFeeCollectorBalance0, "Fee collector should receive token0");
+        assertTrue(finalFeeCollectorBalance1 > initialFeeCollectorBalance1, "Fee collector should receive token1");
+
+        // Verify protocol receives approximately 10% of total fees
+        uint256 totalFees0 = (finalFeeCollectorBalance0 - initialFeeCollectorBalance0)
+            + (finalProtocolBalance0 - initialProtocolBalance0);
+        uint256 totalFees1 = (finalFeeCollectorBalance1 - initialFeeCollectorBalance1)
+            + (finalProtocolBalance1 - initialProtocolBalance1);
+
+        uint256 protocolShare0 =
+            (finalProtocolBalance0 - initialProtocolBalance0).mulDiv(100, totalFees0 > 0 ? totalFees0 : 1);
+        uint256 protocolShare1 =
+            (finalProtocolBalance1 - initialProtocolBalance1).mulDiv(100, totalFees1 > 0 ? totalFees1 : 1);
+
+        // Protocol should get ~10% of total fees (allowing for rounding)
+        assertApproxEqAbs(protocolShare0, 10, 1, "Protocol share token0 should be ~10%");
+        assertApproxEqAbs(protocolShare1, 10, 1, "Protocol share token1 should be ~10%");
+    }
+
+    function test_protocolFees_OnWithdrawal_CollectsCorrectly() public {
+        address protocolAddr = makeAddr("protocol");
+        TestHelper.VaultSetup memory protocolSetup = helper.deployVaultWithPool(
+            TestConstants.HIGH_TVL_FEE, TestConstants.HIGH_PERF_FEE, TestConstants.PROTOCOL_FEE_PERCENT
+        );
+
+        helper.depositToVault(protocolSetup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
+        helper.createPositionAroundCurrentTick(
+            protocolSetup.vault,
+            protocolSetup.allocator,
+            TestConstants.TICK_RANGE_NARROW,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
+
+        helper.simulateTimePass(TestConstants.ONE_MONTH);
+
+        uint256 initialProtocolBalance0 = protocolSetup.token0.balanceOf(protocolAddr);
+        uint256 initialProtocolBalance1 = protocolSetup.token1.balanceOf(protocolAddr);
+
+        // Withdraw should trigger protocol fee collection
+        address recipient = makeAddr("recipient");
+        helper.withdrawFromVault(protocolSetup, TestConstants.QUARTER_SCALED_PERCENTAGE, recipient);
+
+        uint256 finalProtocolBalance0 = protocolSetup.token0.balanceOf(protocolAddr);
+        uint256 finalProtocolBalance1 = protocolSetup.token1.balanceOf(protocolAddr);
+
+        assertTrue(finalProtocolBalance0 > initialProtocolBalance0, "Protocol should receive token0 on withdrawal");
+        assertTrue(finalProtocolBalance1 > initialProtocolBalance1, "Protocol should receive token1 on withdrawal");
+    }
+
+    function test_protocolFees_ManualCollect_CollectsCorrectly() public {
+        address protocolAddr = makeAddr("protocol");
+        TestHelper.VaultSetup memory protocolSetup = helper.deployVaultWithPool(
+            TestConstants.HIGH_TVL_FEE, TestConstants.HIGH_PERF_FEE, TestConstants.PROTOCOL_FEE_PERCENT
+        );
+
+        helper.depositToVault(protocolSetup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
+        helper.simulateTimePass(TestConstants.ONE_MONTH);
+
+        uint256 initialProtocolBalance0 = protocolSetup.token0.balanceOf(protocolAddr);
+        uint256 initialProtocolBalance1 = protocolSetup.token1.balanceOf(protocolAddr);
+
+        // Manual collection should trigger protocol fees
+        vm.prank(protocolSetup.feeCollector);
+        protocolSetup.vault.collectPendingFees();
+
+        uint256 finalProtocolBalance0 = protocolSetup.token0.balanceOf(protocolAddr);
+        uint256 finalProtocolBalance1 = protocolSetup.token1.balanceOf(protocolAddr);
+
+        assertTrue(finalProtocolBalance0 > initialProtocolBalance0, "Protocol should receive token0 on manual collect");
+        assertTrue(finalProtocolBalance1 > initialProtocolBalance1, "Protocol should receive token1 on manual collect");
+    }
+
+    function testFuzz_protocolFees_DifferentProtocolFeeRates(uint256 protocolFeePercent) public {
+        // Bound protocol fee to valid range (0-100%)
+        protocolFeePercent = bound(protocolFeePercent, 0, MAX_SCALED_PERCENTAGE);
+
+        address protocolAddr = makeAddr("protocol");
+        TestHelper.VaultSetup memory protocolSetup =
+            helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE, 0, protocolFeePercent);
+
+        helper.depositToVault(protocolSetup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
+        helper.simulateTimePass(TestConstants.ONE_YEAR);
+
+        uint256 initialProtocolBalance0 = protocolSetup.token0.balanceOf(protocolAddr);
+        uint256 initialFeeCollectorBalance0 = protocolSetup.token0.balanceOf(protocolSetup.feeCollector);
+
+        helper.depositToVault(protocolSetup, 1, 1);
+
+        uint256 finalProtocolBalance0 = protocolSetup.token0.balanceOf(protocolAddr);
+        uint256 finalFeeCollectorBalance0 = protocolSetup.token0.balanceOf(protocolSetup.feeCollector);
+
+        uint256 protocolCollected = finalProtocolBalance0 - initialProtocolBalance0;
+        uint256 feeCollectorCollected = finalFeeCollectorBalance0 - initialFeeCollectorBalance0;
+
+        if (protocolFeePercent == 0) {
+            assertEq(protocolCollected, 0, "No protocol fees should be collected when rate is 0");
+        } else if (protocolFeePercent == MAX_SCALED_PERCENTAGE) {
+            assertEq(feeCollectorCollected, 0, "No fee collector fees when protocol takes 100%");
+            assertTrue(protocolCollected > 0, "Protocol should receive all fees at 100%");
+        } else {
+            uint256 totalCollected = protocolCollected + feeCollectorCollected;
+            if (totalCollected > 0) {
+                uint256 actualProtocolShare = protocolCollected.mulDiv(MAX_SCALED_PERCENTAGE, totalCollected);
+                // Allow 1% tolerance for rounding
+                assertApproxEqAbs(
+                    actualProtocolShare, protocolFeePercent, SCALING_FACTOR / 100, "Protocol share should match rate"
+                );
+            }
+        }
     }
 
     // todo: test protocol fees

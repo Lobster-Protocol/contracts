@@ -19,7 +19,8 @@ contract UniV3LpVaultViewsTest is Test {
         setup = helper.deployVaultWithPool();
         feeSetup = helper.deployVaultWithPool(
             TestConstants.HIGH_TVL_FEE, // 5% annual
-            TestConstants.HIGH_PERF_FEE
+            TestConstants.HIGH_PERF_FEE,
+            0
         );
     }
 

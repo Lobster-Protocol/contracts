@@ -25,6 +25,8 @@ contract TestHelper is Test {
 
     struct VaultSetup {
         UniV3LpVault vault;
+        UniV3LpVaultFactory factory;
+        address factoryOwner;
         MockERC20 token0;
         MockERC20 token1;
         IUniswapV3PoolMinimal pool;
@@ -43,10 +45,17 @@ contract TestHelper is Test {
     }
 
     function deployVaultWithPool() public returns (VaultSetup memory setup) {
-        return deployVaultWithPool(0, 0);
+        return deployVaultWithPool(0, 0, 0);
     }
 
-    function deployVaultWithPool(uint256 tvlFee, uint256 perfFee) public returns (VaultSetup memory setup) {
+    function deployVaultWithPool(
+        uint256 tvlFee,
+        uint256 perfFee,
+        uint256 protocolFee
+    )
+        public
+        returns (VaultSetup memory setup)
+    {
         // Create addresses
         setup.owner = makeAddr("vaultOwner");
         setup.allocator = makeAddr("allocator");
@@ -130,7 +139,8 @@ contract TestHelper is Test {
 
         // Deploy vault
         address vaultImplementation = address(new UniV3LpVault());
-        UniV3LpVaultFactory vaultFactory = new UniV3LpVaultFactory(vaultImplementation, address(1), 0);
+        address factoryOwner = makeAddr("factoryOwner");
+        UniV3LpVaultFactory vaultFactory = new UniV3LpVaultFactory(vaultImplementation, factoryOwner, protocolFee);
 
         setup.vault = UniV3LpVault(
             vaultFactory.deployVault(
