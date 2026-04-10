@@ -28,7 +28,7 @@ contract UniswapV3Proxy is IUniswapV3MintCallback, IUniswapV3SwapCallback {
     }
 
     /// @notice Mints liquidity to a Uniswap V3 pool
-    function mint(MintParams memory params)
+    function mint(MintParams calldata params)
         external
         checkDeadline(params.deadline)
         returns (uint256 amount0, uint256 amount1)
