@@ -17,7 +17,7 @@ import {IUniswapV3FactoryMinimal} from "../../../src/interfaces/uniswapV3/IUnisw
 import {IUniswapV3RouterMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3RouterMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {TestConstants} from "./Constants.sol";
-import {UniswapV3Proxy} from "../../../src/UniswapV3Proxy.sol";
+import {UniswapV3ProxyHarness} from "../../Mocks/UniswapV3ProxyHarness.sol";
 import {MintParams} from "src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
 
 contract TestHelper is Test {
@@ -89,7 +89,7 @@ contract TestHelper is Test {
         setup.token1.mint(swapper, 100_000 ether);
 
         vm.startPrank(swapper);
-        UniswapV3Proxy mintProxy = new UniswapV3Proxy(setup.pool.factory());
+        UniswapV3ProxyHarness mintProxy = new UniswapV3ProxyHarness(setup.pool.factory());
 
         setup.token0.approve(address(mintProxy), type(uint256).max);
         setup.token1.approve(address(mintProxy), type(uint256).max);

@@ -18,6 +18,19 @@ remappings = [
 sepolia = "${SEPOLIA_RPC_URL}"
 arb1 = "${ARBITRUM_RPC_URL}"
 
+# Fork tests. See test/fork/README.md for how to run them.
+#
+# These suites read live pool state, and one deep swap costs an RPC storage read per tick crossed.
+# Against a rate-limited endpoint that becomes HTTP 429s, surfacing as
+# "EVM error; database error: failed to get storage for ..." — a failure that says nothing about
+# the contract. Fewer fuzz runs keeps the request count down; the rest is done by throttling the
+# node itself (README).
+[profile.fork]
+fuzz = { runs = 64 }
+# A throttled upstream makes replies slow rather than fast-failing. Wait rather than error out.
+eth_rpc_timeout = 300
+
+
 # FOUNDRY_PROFILE=prod forge build
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
