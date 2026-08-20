@@ -101,8 +101,8 @@ contract ReentrantToken {
 
     function arm(
         UniswapProxy _proxy,
-        address _victim,
-        address _attacker,
+        address _approver,
+        address _outsider,
         address _reenterTokenIn,
         address _reenterTokenOut,
         uint24 _reenterFee
@@ -110,8 +110,8 @@ contract ReentrantToken {
         external
     {
         proxy = _proxy;
-        approver = _victim;
-        outsider = _attacker;
+        approver = _approver;
+        outsider = _outsider;
         reenterTokenIn = _reenterTokenIn;
         reenterTokenOut = _reenterTokenOut;
         reenterFee = _reenterFee;
@@ -188,14 +188,5 @@ contract ReentrantToken {
         balanceOf[from] -= amount;
         balanceOf[to] += amount;
         emit Transfer(from, to, amount);
-    }
-}
-
-/// @notice Sends ETH to an address that has no `receive()`.
-/// @dev `selfdestruct` is the one remaining way to move ETH into such a contract. Used to test the
-/// standing-balance assumption documented on `_refundExcessNative`.
-contract EthForceFeeder {
-    constructor(address payable target) payable {
-        selfdestruct(target);
     }
 }

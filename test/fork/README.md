@@ -12,7 +12,7 @@ Everything in `test/` outside this directory is mock-based and runs offline with
 | Path | What it covers |
 | --- | --- |
 | `helpers/ForkBase.sol` | Shared fixture: per-chain addresses, actors, funding, unlimited approvals |
-| `helpers/Callers.sol` | Non-cooperative callers: direct-callback caller, re-entrant token, ETH force-feeder |
+| `helpers/Callers.sol` | Non-cooperative callers: direct-callback caller, re-entrant token |
 | `helpers/Tokens.sol` | Throwaway ERC20s for building purpose-made pools (plain + fee-on-transfer) |
 | `security/Authorisation.t.sol` | Standing approvals are only spendable by the account that granted them |
 | `security/AmountCasts.t.sol` | Behaviour at the `uint256` -> `int256` conversion boundary |

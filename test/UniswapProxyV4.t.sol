@@ -118,6 +118,7 @@ contract UniswapProxyV4Test is Test {
             IPoolManager.ModifyLiquidityParams({
                 tickLower: -TICK_SPACING * 100,
                 tickUpper: TICK_SPACING * 100,
+                // forge-lint: disable-next-line(unsafe-typecast)
                 liquidityDelta: int256(LIQUIDITY),
                 salt: bytes32(0)
             }),

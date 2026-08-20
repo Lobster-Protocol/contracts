@@ -25,6 +25,11 @@ arb1 = "${ARBITRUM_RPC_URL}"
 # "EVM error; database error: failed to get storage for ..." — a failure that says nothing about
 # the contract. Fewer fuzz runs keeps the request count down; the rest is done by throttling the
 # node itself (README).
+# The CI workflow sets FOUNDRY_PROFILE=ci. Without this section Foundry warns and silently falls
+# back to the default profile, so any CI-specific setting would go unapplied.
+[profile.ci]
+fuzz = { runs = 256 }
+
 [profile.fork]
 fuzz = { runs = 64 }
 # A throttled upstream makes replies slow rather than fast-failing. Wait rather than error out.
@@ -40,7 +45,6 @@ line_length = 120
 tab_width = 4
 bracket_spacing = false
 int_types = 'long'
-func_call_arg_multiline = true     # This makes function call arguments multi-line
 multiline_func_header = 'all'      # This ensures function declarations stay multi-line
 quote_style = 'double'
 number_underscore = 'preserve'

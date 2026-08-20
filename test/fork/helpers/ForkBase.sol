@@ -48,10 +48,11 @@ abstract contract ForkBase is Test {
     // Sepolia's pools are real and usable but orders of magnitude thinner than mainnet's. The fix
     // is to size orders to the venue, not to skip the test: a swap that moves the price 1% proves
     // exactly as much about who pays as one that moves it 0.0001%.
-    uint256 internal tradeUsdc; // a routine swap, in USDC units
-    uint256 internal tradeWeth; // the same swap, in WETH units
-    uint256 internal lpUsdc; // a position-sized amount of USDC
-    uint256 internal lpWeth; // a position-sized amount of WETH
+    // uint128 because the v4 entry points take uint128 amounts; it widens implicitly for v3.
+    uint128 internal tradeUsdc; // a routine swap, in USDC units
+    uint128 internal tradeWeth; // the same swap, in WETH units
+    uint128 internal lpUsdc; // a position-sized amount of USDC
+    uint128 internal lpWeth; // a position-sized amount of WETH
     uint256 internal fundUsdc; // starting wallet balance
     uint256 internal fundWeth; // starting wallet + ETH balance
 

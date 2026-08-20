@@ -5,7 +5,7 @@ import "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {ForkBase} from "../helpers/ForkBase.sol";
-import {PoolImpersonator, ReentrantToken, EthForceFeeder} from "../helpers/Callers.sol";
+import {PoolImpersonator, ReentrantToken} from "../helpers/Callers.sol";
 import {MintParams, MintCallbackData} from "../../../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
 import {SwapCallbackData, ExactInputSingleParams} from "../../../src/interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
@@ -232,7 +232,7 @@ contract AuthorisationTest is ForkBase {
 
     /// @dev Fuzzed across callers, recipients, tokens, fees and amounts. No calldata combination
     /// should ever settle from an account other than the caller.
-    function testFuzz_victimUntouchedByArbitraryCalls(
+    function testFuzz_approverUntouchedByArbitraryCalls(
         address caller,
         address dest,
         uint256 amountIn,
@@ -300,6 +300,8 @@ contract AuthorisationTest is ForkBase {
 
         vm.prank(caller);
         try proxy.uniswapV3SwapCallback(
+            // casting to 'int256' is safe because `amount` is bounded to 1e24, far below int256 max
+            // forge-lint: disable-next-line(unsafe-typecast)
             int256(amount),
             -1,
             abi.encode(SwapCallbackData({tokenIn: USDC, tokenOut: otherToken, fee: fee, payer: approver}))
@@ -384,17 +386,5 @@ contract AuthorisationTest is ForkBase {
 
         assertFalse(ok, "proxy accepted a plain ETH transfer; the refund sweep is now unsafe");
         assertEq(address(proxy).balance, before, "proxy balance changed despite the bounced send");
-    }
-
-    function test_forceFedEthLandsInProxy() public {
-        vm.deal(outsider, 5 ether);
-        uint256 before = address(proxy).balance;
-        vm.prank(outsider);
-        new EthForceFeeder{value: 5 ether}(payable(address(proxy)));
-
-        // Documented, accepted: selfdestruct cannot be blocked. The exposure is bounded by the fact
-        // that the proxy is never *supposed* to hold ETH, so a non-zero balance here is only ever
-        // someone's donation — see V4Swap.t.sol for who gets to sweep it.
-        assertGe(address(proxy).balance - before, 5 ether, "force-feed did not land");
     }
 }

@@ -5,7 +5,6 @@ import "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {ForkBase} from "../helpers/ForkBase.sol";
-import {EthForceFeeder} from "../helpers/Callers.sol";
 import {Currency, PoolKey, IHooks, SwapParams} from "../../../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
 import {
     V4ExactInputSingleParams,
@@ -33,7 +32,7 @@ contract V4SwapTest is ForkBase {
     // ---------------------------------------------------------------------------
 
     function test_exactInputSingleV4_nativeForUsdc() public {
-        uint128 amountIn = uint128(tradeWeth);
+        uint128 amountIn = tradeWeth;
         uint256 usdcBefore = IERC20(USDC).balanceOf(recipient);
         uint256 ethBefore = approver.balance;
 
@@ -57,7 +56,7 @@ contract V4SwapTest is ForkBase {
     }
 
     function test_exactInputSingleV4_usdcForNative() public {
-        uint128 amountIn = uint128(tradeUsdc);
+        uint128 amountIn = tradeUsdc;
         uint256 ethBefore = recipient.balance;
 
         vm.prank(approver);
@@ -79,7 +78,7 @@ contract V4SwapTest is ForkBase {
     }
 
     function test_exactOutputSingleV4_deliversExactly() public {
-        uint128 amountOut = uint128(tradeUsdc);
+        uint128 amountOut = tradeUsdc;
         uint256 usdcBefore = IERC20(USDC).balanceOf(recipient);
 
         vm.prank(approver);
@@ -103,7 +102,7 @@ contract V4SwapTest is ForkBase {
     /// @dev The overpayment path: send far more ETH than the swap needs and confirm the remainder
     /// comes back rather than sitting in the proxy for the next caller to sweep.
     function test_excessNativeIsRefundedToCaller() public {
-        uint128 amountOut = uint128(tradeUsdc);
+        uint128 amountOut = tradeUsdc;
         uint256 ethBefore = approver.balance;
 
         vm.prank(approver);
@@ -144,7 +143,7 @@ contract V4SwapTest is ForkBase {
                 zeroForOne: true,
                 recipient: approver,
                 deadline: block.timestamp,
-                amountIn: uint128(tradeWeth),
+                amountIn: tradeWeth,
                 amountOutMinimum: 0,
                 sqrtPriceLimitX96: 0
             })
@@ -158,7 +157,7 @@ contract V4SwapTest is ForkBase {
                 zeroForOne: true,
                 recipient: approver,
                 deadline: block.timestamp,
-                amountOut: uint128(tradeUsdc),
+                amountOut: tradeUsdc,
                 amountInMaximum: type(uint128).max,
                 sqrtPriceLimitX96: 0
             })
@@ -180,7 +179,7 @@ contract V4SwapTest is ForkBase {
                 zeroForOne: false,
                 recipient: approver,
                 deadline: block.timestamp,
-                amountIn: uint128(tradeUsdc),
+                amountIn: tradeUsdc,
                 amountOutMinimum: 0,
                 sqrtPriceLimitX96: 0
             })
@@ -229,7 +228,7 @@ contract V4SwapTest is ForkBase {
                 zeroForOne: false,
                 recipient: outsider,
                 deadline: block.timestamp,
-                amountIn: uint128(tradeUsdc),
+                amountIn: tradeUsdc,
                 amountOutMinimum: 0,
                 sqrtPriceLimitX96: 0
             })
@@ -249,12 +248,9 @@ contract V4SwapTest is ForkBase {
     function test_forceFedEthIsSweptByTheNextV4Caller() public {
         // Deltas, not absolutes: on a fork the feeder's deterministic CREATE address may already be
         // a funded mainnet account, and its dust rides along with the selfdestruct.
-        vm.deal(address(this), 10 ether);
-        uint256 proxyBefore = address(proxy).balance;
-        new EthForceFeeder{value: 10 ether}(payable(address(proxy)));
-
-        uint256 stranded = address(proxy).balance - proxyBefore;
-        assertGe(stranded, 10 ether, "force-feed did not land");
+        // A contract with no `receive()` can still end up holding ETH — via `selfdestruct` or as a
+        // block's coinbase — and can prevent neither. `vm.deal` puts us in that state directly.
+        vm.deal(address(proxy), 10 ether);
 
         uint256 outsiderBefore = outsider.balance;
         uint256 sweepable = address(proxy).balance;
@@ -267,7 +263,7 @@ contract V4SwapTest is ForkBase {
                 zeroForOne: false,
                 recipient: recipient, // output goes elsewhere; only the sweep credits the caller
                 deadline: block.timestamp,
-                amountIn: uint128(tradeUsdc),
+                amountIn: tradeUsdc,
                 amountOutMinimum: 0,
                 sqrtPriceLimitX96: 0
             })
@@ -284,10 +280,7 @@ contract V4SwapTest is ForkBase {
     /// of `address(this).balance`, so a native-input swap with `msg.value == 0` settles from any
     /// balance the contract is carrying.
     function test_strandedEthCanPayForSomeoneElsesSwap() public {
-        vm.deal(address(this), 20 ether);
-        uint256 proxyBefore = address(proxy).balance;
-        new EthForceFeeder{value: 20 ether}(payable(address(proxy)));
-        assertGe(address(proxy).balance - proxyBefore, 20 ether, "force-feed did not land");
+        vm.deal(address(proxy), 20 ether);
 
         uint256 usdcBefore = IERC20(USDC).balanceOf(outsider);
         uint256 outsiderEthBefore = outsider.balance;
@@ -300,7 +293,7 @@ contract V4SwapTest is ForkBase {
                 zeroForOne: true, // native in
                 recipient: outsider,
                 deadline: block.timestamp,
-                amountIn: uint128(tradeWeth) * 5,
+                amountIn: tradeWeth * 5,
                 amountOutMinimum: 0,
                 sqrtPriceLimitX96: 0
             })
