@@ -117,11 +117,7 @@ contract UniswapV3ProxyTest is Test {
     }
 
     /// @dev Executes an exactInputSingle via snapshot, returns the result without persisting state
-    function _probeExactInput(
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn
-    )
+    function _probeExactInput(address tokenIn, address tokenOut, uint256 amountIn)
         internal
         returns (uint256 amountOut)
     {

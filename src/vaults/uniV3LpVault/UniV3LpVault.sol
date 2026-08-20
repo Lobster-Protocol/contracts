@@ -369,14 +369,7 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
      * @return scaledPercent Estimated withdrawal percentage (scaled by `SCALING_FACTOR`);
      * returns 0 if the requested withdrawal is not feasible.
      */
-    function previewWithdraw(
-        uint256 minAmount0,
-        uint256 minAmount1
-    )
-        external
-        view
-        returns (uint256 scaledPercent)
-    {
+    function previewWithdraw(uint256 minAmount0, uint256 minAmount1) external view returns (uint256 scaledPercent) {
         if (minAmount0 == 0 || minAmount1 == 0) return 0;
         (uint256 netAssets0, uint256 netAssets1) = _netAssetsValue();
 
@@ -758,14 +751,7 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
      * @return tvlFee0 TVL fee in token0
      * @return tvlFee1 TVL fee in token1
      */
-    function _pendingTvlFee(
-        uint256 amount0,
-        uint256 amount1
-    )
-        internal
-        view
-        returns (uint256 tvlFee0, uint256 tvlFee1)
-    {
+    function _pendingTvlFee(uint256 amount0, uint256 amount1) internal view returns (uint256 tvlFee0, uint256 tvlFee1) {
         uint256 pendingRelativeTvlFee = _pendingRelativeTvlFee();
 
         return (

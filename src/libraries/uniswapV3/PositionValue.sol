@@ -140,13 +140,11 @@ library PositionValue {
             feeParams.tickUpper
         );
 
-        amount0 =
-            uint256(poolFeeGrowthInside0LastX128 - feeParams.positionFeeGrowthInside0LastX128)
-                    .mulDiv(feeParams.liquidity, Q128) + feeParams.tokensOwed0;
+        amount0 = uint256(poolFeeGrowthInside0LastX128 - feeParams.positionFeeGrowthInside0LastX128)
+            .mulDiv(feeParams.liquidity, Q128) + feeParams.tokensOwed0;
 
-        amount1 =
-            (poolFeeGrowthInside1LastX128 - feeParams.positionFeeGrowthInside1LastX128)
-                .mulDiv(feeParams.liquidity, Q128) + feeParams.tokensOwed1;
+        amount1 = (poolFeeGrowthInside1LastX128 - feeParams.positionFeeGrowthInside1LastX128)
+        .mulDiv(feeParams.liquidity, Q128) + feeParams.tokensOwed1;
     }
 
     function _getFeeGrowthInside(

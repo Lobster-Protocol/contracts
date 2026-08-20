@@ -235,15 +235,7 @@ contract TestHelper is Test {
         );
     }
 
-    function assertApproxEqual(
-        uint256 actual,
-        uint256 expected,
-        uint256 tolerance,
-        string memory message
-    )
-        public
-        pure
-    {
+    function assertApproxEqual(uint256 actual, uint256 expected, uint256 tolerance, string memory message) public pure {
         if (expected == 0) {
             assertEq(actual, expected, message);
             return;

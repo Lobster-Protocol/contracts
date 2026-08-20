@@ -312,13 +312,7 @@ contract UniV3LpVaultFuzzTest is Test {
         );
     }
 
-    function testFuzz_invariant_NetAssetsNonNegative(
-        uint256 amount0,
-        uint256 amount1,
-        uint256 operations
-    )
-        public
-    {
+    function testFuzz_invariant_NetAssetsNonNegative(uint256 amount0, uint256 amount1, uint256 operations) public {
         amount0 = bound(amount0, TestConstants.SMALL_AMOUNT, TestConstants.LARGE_AMOUNT);
         amount1 = bound(amount1, TestConstants.SMALL_AMOUNT, TestConstants.LARGE_AMOUNT);
         operations = bound(operations, 1, 5);
