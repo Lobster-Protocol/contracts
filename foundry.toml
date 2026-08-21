@@ -14,6 +14,18 @@ remappings = [
     "solmate/=lib/v4-core/lib/solmate/"
 ]
 
+# Compiler determinism without touching source pragmas.
+#
+# The vault contracts declare `^0.8.28`, which is an open range: Foundry picks the newest solc it
+# can find, so the same source compiled to 0.8.28 last month and 0.8.33 this month. That also
+# dragged forge-std to 0.8.33, which emits 255 deprecation warnings for its assembly annotations.
+#
+# This closes the upper bound for those paths only. Interfaces and libraries keep their permissive
+# pragmas, which is what they are for.
+[[profile.default.compilation_restrictions]]
+paths = "src/vaults/**"
+version = "=0.8.28"
+
 [rpc_endpoints]
 sepolia = "${SEPOLIA_RPC_URL}"
 arb1 = "${ARBITRUM_RPC_URL}"

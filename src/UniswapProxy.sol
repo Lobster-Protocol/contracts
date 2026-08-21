@@ -3,8 +3,10 @@
 // PoolManager compiles this contract at 0.8.26. A floating pragma here let the deploy build resolve
 // to 0.8.28 instead, meaning the tests validated bytecode that would never ship. With `via_ir = true`
 // those two builds are not interchangeable. Pinning makes the tested and deployed artifact identical.
-// Consequence: a file importing this one cannot require a different exact version (the vault
-// contracts are currently `^0.8.28` and would need relaxing to `^0.8.26` first).
+// Consequence: a file importing this one cannot require a different exact version. The vault
+// contracts pin `=0.8.28`, which is fine only because nothing imports both them and this — the two
+// dependency graphs are disjoint, so they never share a compilation unit. Anything that needs both
+// would have to bring the vaults down to `=0.8.26`, since v4-core's pin is not negotiable.
 pragma solidity =0.8.26;
 
 import {UniswapV3MintProxy} from "./UniswapV3MintProxy.sol";
