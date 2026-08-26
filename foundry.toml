@@ -29,6 +29,7 @@ version = "=0.8.28"
 [rpc_endpoints]
 sepolia = "${SEPOLIA_RPC_URL}"
 arb1 = "${ARBITRUM_RPC_URL}"
+base = "${BASE_RPC_URL}"
 
 # Fork tests. See test/fork/README.md for how to run them.
 #

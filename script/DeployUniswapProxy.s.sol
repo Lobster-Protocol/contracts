@@ -59,6 +59,13 @@ contract DeployUniswapProxy is Script {
                 poolManager: 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543
             });
         }
+        if (chainId == 8453) {
+            // Base
+            return NetworkConfig({
+                uniV3Factory: 0x33128a8fC17869897dcE68Ed026d694621f6FDfD,
+                poolManager: 0x498581fF718922c3f8e6A244956aF099B2652b2b
+            });
+        }
         revert("Unknown network");
     }
 }
