@@ -2,7 +2,9 @@
 pragma solidity >=0.8.20;
 
 import "forge-std/Test.sol";
-import {UniswapV3Proxy, MintParams, ExactInputSingleParams, ExactOutputSingleParams} from "../src/UniswapV3Proxy.sol";
+import {UniswapV3ProxyHarness} from "./Mocks/UniswapV3ProxyHarness.sol";
+import {MintParams} from "../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
+import {ExactInputSingleParams, ExactOutputSingleParams} from "../src/interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
 import {MintCallbackData} from "../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
 import {SwapCallbackData} from "../src/interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
 import {MockERC20} from "./Mocks/MockERC20.sol";
@@ -15,7 +17,7 @@ import {TickMath} from "../src/libraries/uniswapV3/TickMath.sol";
 import {PoolAddress} from "../src/libraries/uniswapV3/PoolAddress.sol";
 
 contract UniswapV3ProxyTest is Test {
-    UniswapV3Proxy public proxy;
+    UniswapV3ProxyHarness public proxy;
     IUniswapV3FactoryMinimal public factory;
     IWETH public weth;
     MockERC20 public token0;
@@ -54,7 +56,7 @@ contract UniswapV3ProxyTest is Test {
         poolWithWeth =
             uniswapV3.createPoolAndInitialize(factory, address(weth), address(token1), FEE, initialSqrtPriceX96);
 
-        proxy = new UniswapV3Proxy(address(factory));
+        proxy = new UniswapV3ProxyHarness(address(factory));
 
         vm.deal(user, 10_000 ether);
         token0.mint(user, AMOUNT_DESIRED * 10);
@@ -115,11 +117,7 @@ contract UniswapV3ProxyTest is Test {
     }
 
     /// @dev Executes an exactInputSingle via snapshot, returns the result without persisting state
-    function _probeExactInput(
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn
-    )
+    function _probeExactInput(address tokenIn, address tokenOut, uint256 amountIn)
         internal
         returns (uint256 amountOut)
     {

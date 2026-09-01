@@ -21,7 +21,10 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: stable
+          # Pinned, not `stable`. `forge fmt` output changes between releases, so a floating
+          # version makes `fmt --check` fail whenever CI and local developers are on different
+          # builds. Bump this deliberately, and run `forge fmt` in the same commit.
+          version: v1.5.1
 
       - name: Show Forge version
         run: |
@@ -42,7 +45,9 @@ jobs:
           forge build --sizes --optimize
         id: build
 
+      # test/fork/** is excluded: those suites fork a live chain and need an RPC endpoint, so they
+      # are run locally rather than in CI. See test/fork/README.md.
       - name: Run Forge tests
         run: |
-          forge test -vvv
+          forge test --no-match-path "test/fork/**" -vvv
         id: test

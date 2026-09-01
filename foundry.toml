@@ -7,12 +7,47 @@ optimizer = true
 via_ir = true
 remappings = [
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
-    "forge-std/=lib/forge-std/src/"
+    "forge-std/=lib/forge-std/src/",
+    # v4-core is a TEST-ONLY dependency. src/ deliberately keeps its own vendored minimal
+    # interfaces (src/interfaces/uniswapV4) so the deployed contract has no external dependency.
+    "v4-core/=lib/v4-core/",
+    "solmate/=lib/v4-core/lib/solmate/"
 ]
+
+# Compiler determinism without touching source pragmas.
+#
+# The vault contracts declare `^0.8.28`, which is an open range: Foundry picks the newest solc it
+# can find, so the same source compiled to 0.8.28 last month and 0.8.33 this month. That also
+# dragged forge-std to 0.8.33, which emits 255 deprecation warnings for its assembly annotations.
+#
+# This closes the upper bound for those paths only. Interfaces and libraries keep their permissive
+# pragmas, which is what they are for.
+[[profile.default.compilation_restrictions]]
+paths = "src/vaults/**"
+version = "=0.8.28"
 
 [rpc_endpoints]
 sepolia = "${SEPOLIA_RPC_URL}"
 arb1 = "${ARBITRUM_RPC_URL}"
+base = "${BASE_RPC_URL}"
+
+# Fork tests. See test/fork/README.md for how to run them.
+#
+# These suites read live pool state, and one deep swap costs an RPC storage read per tick crossed.
+# Against a rate-limited endpoint that becomes HTTP 429s, surfacing as
+# "EVM error; database error: failed to get storage for ..." — a failure that says nothing about
+# the contract. Fewer fuzz runs keeps the request count down; the rest is done by throttling the
+# node itself (README).
+# The CI workflow sets FOUNDRY_PROFILE=ci. Without this section Foundry warns and silently falls
+# back to the default profile, so any CI-specific setting would go unapplied.
+[profile.ci]
+fuzz = { runs = 256 }
+
+[profile.fork]
+fuzz = { runs = 64 }
+# A throttled upstream makes replies slow rather than fast-failing. Wait rather than error out.
+eth_rpc_timeout = 300
+
 
 # FOUNDRY_PROFILE=prod forge build
 
@@ -23,7 +58,6 @@ line_length = 120
 tab_width = 4
 bracket_spacing = false
 int_types = 'long'
-func_call_arg_multiline = true     # This makes function call arguments multi-line
 multiline_func_header = 'all'      # This ensures function declarations stay multi-line
 quote_style = 'double'
 number_underscore = 'preserve'
