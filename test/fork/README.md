@@ -19,7 +19,7 @@ Everything in `test/` outside this directory is mock-based and runs offline with
 | `integration/HappyPath.t.sol` | V3 mint / exactInput / exactOutput work as documented |
 | `integration/V4Swap.t.sol` | V4 swaps, native ETH handling, hook rejection, the refund sweep |
 | `integration/SwapSemantics.t.sol` | Edge behaviour: short fills, non-standard tokens, mint slippage |
-| `integration/Multicall.t.sol` | V3 + V4 swaps batched in one transaction: equivalence, atomicity, payer |
+| `integration/BatchSwap.t.sol` | `batchSwap`: V3 + V4 swaps in one transaction; equivalence, atomicity, payer |
 
 `security/Authorisation.t.sol` is the one to read first — it states the invariant the whole design
 rests on: `payer` is always `msg.sender`, at any call depth.

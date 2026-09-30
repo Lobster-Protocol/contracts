@@ -12,31 +12,28 @@ pragma solidity =0.8.26;
 import {UniswapV3MintProxy} from "./UniswapV3MintProxy.sol";
 import {UniswapV3SwapProxy} from "./UniswapV3SwapProxy.sol";
 import {UniswapV4SwapProxy} from "./UniswapV4SwapProxy.sol";
+import {UniswapBatchSwapProxy} from "./UniswapBatchSwapProxy.sol";
 import {UniswapV3ProxyBase} from "./base/UniswapV3ProxyBase.sol";
-import {Multicall} from "./base/Multicall.sol";
 
 /// @title Uniswap V3 + V4 proxy
 /// @notice The deployable contract. Combines V3 liquidity provision, V3 swaps and V4 swaps behind a
-/// single address, so integrators approve one contract rather than three. Swaps on either version
-/// can be batched into one atomic transaction through `multicall`.
+/// single address, so integrators approve one contract rather than three. Any mix of V3 and V4 swaps
+/// can also be run as one atomic batch.
 /// @dev Composition only — every function lives in a mixin:
-/// - {UniswapV3MintProxy}  mint + uniswapV3MintCallback
-/// - {UniswapV3SwapProxy}  exactInputSingle / exactOutputSingle + uniswapV3SwapCallback
-/// - {UniswapV4SwapProxy}  exactInputSingleV4 / exactOutputSingleV4 + unlockCallback
-/// - {Multicall}           multicall
-///
-/// The one thing decided here rather than in a mixin is which entry points `multicall` accepts
-/// (`_isBatchable`), because this is the only contract that sees all of them.
+/// - {UniswapV3MintProxy}     mint + uniswapV3MintCallback
+/// - {UniswapV3SwapProxy}     exactInputSingle / exactOutputSingle + uniswapV3SwapCallback
+/// - {UniswapV4SwapProxy}     exactInputSingleV4 / exactOutputSingleV4 + unlockCallback
+/// - {UniswapBatchSwapProxy}  batchSwap: any sequence of the four swaps above
 ///
 /// The mixins are abstract and declare no constructors so that the two V3 mixins can share
 /// {UniswapV3ProxyBase} without its constructor arguments being supplied twice. That makes this
 /// contract the only place base constructors are called.
 ///
 /// Every path settles with `transferFrom(payer, ...)` where `payer` is always `msg.sender`, so an
-/// approval granted to this address is usable by all five entry points. Keep that in mind when
-/// adding another one. `multicall` preserves `msg.sender` into each batched call, so batching does
-/// not change who pays.
-contract UniswapProxy is Multicall, UniswapV3MintProxy, UniswapV3SwapProxy, UniswapV4SwapProxy {
+/// approval granted to this address is usable by all six entry points. Keep that in mind when
+/// adding another one. `batchSwap` runs each swap as an internal call, so there too the payer is
+/// whoever called it.
+contract UniswapProxy is UniswapV3MintProxy, UniswapV3SwapProxy, UniswapV4SwapProxy, UniswapBatchSwapProxy {
     constructor(
         address _uniV3Factory,
         address _poolManager
@@ -44,18 +41,4 @@ contract UniswapProxy is Multicall, UniswapV3MintProxy, UniswapV3SwapProxy, Unis
         UniswapV3ProxyBase(_uniV3Factory)
         UniswapV4SwapProxy(_poolManager)
     {}
-
-    /// @dev Swaps only, V3 and V4. Everything else is refused:
-    /// - `mint` is out of scope for now. Batching it would be safe; it is excluded to keep the
-    ///   batchable surface to swaps until LP batching is needed. Add its selector here to enable it.
-    /// - The three pool callbacks would revert in a batch anyway, since `msg.sender` there is the
-    ///   caller rather than a pool or the PoolManager. Listing them out makes that structural instead
-    ///   of something to re-argue on every change.
-    /// - `multicall` itself: nesting batches adds nothing.
-    function _isBatchable(bytes4 selector) internal pure override returns (bool) {
-        return selector == UniswapV3SwapProxy.exactInputSingle.selector
-            || selector == UniswapV3SwapProxy.exactOutputSingle.selector
-            || selector == UniswapV4SwapProxy.exactInputSingleV4.selector
-            || selector == UniswapV4SwapProxy.exactOutputSingleV4.selector;
-    }
 }

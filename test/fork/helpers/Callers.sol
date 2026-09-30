@@ -5,6 +5,7 @@ import {UniswapProxy} from "../../../src/UniswapProxy.sol";
 import {MintCallbackData} from "../../../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
 import {SwapCallbackData, ExactInputSingleParams} from "../../../src/interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
 import {PoolAddress} from "../../../src/libraries/uniswapV3/PoolAddress.sol";
+import {SwapType} from "../../../src/UniswapBatchSwapProxy.sol";
 
 /// @notice Invokes the proxy's payment callbacks directly while impersonating a pool, naming an
 /// arbitrary account as payer.
@@ -82,9 +83,9 @@ contract ReentrantToken {
     address public reenterTokenOut;
     uint24 public reenterFee;
     bool public armed;
-    /// @notice Route the entry-point re-entry through `multicall` rather than calling
+    /// @notice Route the entry-point re-entry through `batchSwap` rather than calling
     /// `exactInputSingle` directly, so the batching entry point gets the same scrutiny.
-    bool public viaMulticall;
+    bool public viaBatchSwap;
 
     /// @notice Set if either re-entrant call returned without reverting.
     bool public entryPointReentrySucceeded;
@@ -125,8 +126,8 @@ contract ReentrantToken {
         armed = false;
     }
 
-    function setViaMulticall(bool on) external {
-        viaMulticall = on;
+    function setViaBatchSwap(bool on) external {
+        viaBatchSwap = on;
     }
 
     function approve(address spender, uint256 amount) external returns (bool) {
@@ -151,7 +152,7 @@ contract ReentrantToken {
     /// @dev Runs from inside the proxy's own mint/swap callback, i.e. the deepest point of a
     /// legitimate, factory-verified pool interaction. Two calls, probing different assumptions:
     ///
-    ///  1. A normal entry point, directly or wrapped in `multicall` (see `viaMulticall`). The proxy
+    ///  1. A normal entry point, directly or as a one-swap batch (see `viaBatchSwap`). The proxy
     ///     stamps `payer = msg.sender`, which here is THIS token, so it should fail for lack of
     ///     *our* funds — the payer is the immediate caller at any call depth.
     ///  2. The raw callback, naming a third-party account as payer. Being mid-callback should not
@@ -170,10 +171,10 @@ contract ReentrantToken {
             sqrtPriceLimitX96: 0
         });
 
-        if (viaMulticall) {
-            bytes[] memory calls = new bytes[](1);
-            calls[0] = abi.encodeCall(proxy.exactInputSingle, (params));
-            try proxy.multicall(calls) {
+        if (viaBatchSwap) {
+            bytes[] memory swaps = new bytes[](1);
+            swaps[0] = abi.encodePacked(SwapType.V3_EXACT_INPUT, abi.encode(params));
+            try proxy.batchSwap(swaps) {
                 entryPointReentrySucceeded = true;
             } catch (bytes memory err) {
                 entryPointRevertData = err;

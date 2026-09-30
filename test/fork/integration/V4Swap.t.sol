@@ -271,7 +271,7 @@ contract V4SwapTest is ForkBase {
         vm.stopPrank();
 
         // The caller receives ETH it did not deposit. This is why the `_refundExcessNative`
-        // invariant (no receive, no payable multicall, one payable path per transaction) is load-bearing.
+        // invariant (no receive, exactly one payable path per transaction) is load-bearing.
         assertEq(outsider.balance, outsiderBefore + sweepable, "stray ETH was not swept by the caller");
         assertEq(address(proxy).balance, 0, "proxy still holds ETH");
     }

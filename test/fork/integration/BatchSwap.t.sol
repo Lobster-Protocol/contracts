@@ -5,8 +5,8 @@ import "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {ForkBase} from "../helpers/ForkBase.sol";
-import {UniswapV3SwapProxy} from "../../../src/UniswapV3SwapProxy.sol";
-import {UniswapV4SwapProxy} from "../../../src/UniswapV4SwapProxy.sol";
+import {BatchSwapCalls} from "../../helpers/BatchSwapCalls.sol";
+import {SwapType} from "../../../src/UniswapBatchSwapProxy.sol";
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {
     ExactInputSingleParams,
@@ -15,11 +15,11 @@ import {
 import {Currency, PoolKey, IHooks} from "../../../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
 import {V4ExactInputSingleParams} from "../../../src/interfaces/uniswapV4/IUnlockCallback.sol";
 
-/// @notice `multicall` against live pools: V3 and V4 swaps batched into one transaction.
-/// @dev The mock suite (test/UniswapProxyMulticall.t.sol) covers the batching rules in depth. This
+/// @notice `batchSwap` against live pools: V3 and V4 swaps in one transaction.
+/// @dev The mock suite (test/UniswapProxyBatchSwap.t.sol) covers the batching rules in depth. This
 /// one confirms they hold against the canonical deployments, where a V3 callback and a V4 unlock
 /// really do happen inside the same transaction.
-contract MulticallTest is ForkBase {
+contract BatchSwapTest is ForkBase {
     /// @dev The live ETH/USDC V4 pool: native currency0, no hooks.
     function _ethUsdcKey() internal view returns (PoolKey memory) {
         return PoolKey({
@@ -33,11 +33,12 @@ contract MulticallTest is ForkBase {
 
     /// @dev USDC -> WETH on V3 (0.05%), USDC -> ETH on V4, then an exact amount of USDC back out of
     /// WETH on V3 (0.3%). Two V3 pools, one V4 pool, both swap directions, both exact-in and exact-out.
-    function _mixedBatch(uint128 v4MinOut) internal view returns (bytes[] memory calls) {
-        calls = new bytes[](3);
-        calls[0] = abi.encodeCall(
-            UniswapV3SwapProxy.exactInputSingle,
-            (ExactInputSingleParams({
+    function _mixedBatch(uint128 v4MinOut) internal view returns (bytes[] memory swaps) {
+        swaps = new bytes[](3);
+        swaps[0] = abi.encodePacked(
+            SwapType.V3_EXACT_INPUT,
+            abi.encode(
+                ExactInputSingleParams({
                     tokenIn: USDC,
                     tokenOut: WETH,
                     fee: 500,
@@ -46,11 +47,13 @@ contract MulticallTest is ForkBase {
                     amountIn: tradeUsdc,
                     amountOutMinimum: 0,
                     sqrtPriceLimitX96: 0
-                }))
+                })
+            )
         );
-        calls[1] = abi.encodeCall(
-            UniswapV4SwapProxy.exactInputSingleV4,
-            (V4ExactInputSingleParams({
+        swaps[1] = abi.encodePacked(
+            SwapType.V4_EXACT_INPUT,
+            abi.encode(
+                V4ExactInputSingleParams({
                     poolKey: _ethUsdcKey(),
                     zeroForOne: false, // USDC in, native ETH out
                     recipient: recipient,
@@ -58,11 +61,13 @@ contract MulticallTest is ForkBase {
                     amountIn: tradeUsdc,
                     amountOutMinimum: v4MinOut,
                     sqrtPriceLimitX96: 0
-                }))
+                })
+            )
         );
-        calls[2] = abi.encodeCall(
-            UniswapV3SwapProxy.exactOutputSingle,
-            (ExactOutputSingleParams({
+        swaps[2] = abi.encodePacked(
+            SwapType.V3_EXACT_OUTPUT,
+            abi.encode(
+                ExactOutputSingleParams({
                     tokenIn: WETH,
                     tokenOut: USDC,
                     fee: 3000,
@@ -71,7 +76,8 @@ contract MulticallTest is ForkBase {
                     amountOut: tradeUsdc,
                     amountInMaximum: type(uint256).max,
                     sqrtPriceLimitX96: 0
-                }))
+                })
+            )
         );
     }
 
@@ -79,17 +85,17 @@ contract MulticallTest is ForkBase {
         (sqrtPriceX96,,,,,,) = IUniswapV3PoolMinimal(pool).slot0();
     }
 
-    function test_mixedV3AndV4Batch_matchesSameCallsMadeOneByOne() public {
-        bytes[] memory calls = _mixedBatch(0);
+    function test_mixedV3AndV4Batch_matchesSameSwapsMadeOneByOne() public {
+        bytes[] memory swaps = _mixedBatch(0);
 
-        // Reference run: the same calls, one transaction each, then rewind
+        // Reference run: each swap as a direct call to its single-swap entry point, then rewind
         uint256 snap = vm.snapshotState();
-        bytes[] memory expected = new bytes[](calls.length);
-        for (uint256 i = 0; i < calls.length; i++) {
+        uint256[] memory expected = new uint256[](swaps.length);
+        for (uint256 i = 0; i < swaps.length; i++) {
             vm.prank(approver);
-            (bool ok, bytes memory ret) = address(proxy).call(calls[i]);
+            (bool ok, bytes memory ret) = address(proxy).call(BatchSwapCalls.toDirectCall(swaps[i]));
             assertTrue(ok, "reference call failed");
-            expected[i] = ret;
+            expected[i] = abi.decode(ret, (uint256));
         }
         uint256[4] memory expectedHoldings = _approverHoldings();
         vm.revertToState(snap);
@@ -99,18 +105,18 @@ contract MulticallTest is ForkBase {
         uint256 ethBefore = recipient.balance;
 
         vm.prank(approver);
-        bytes[] memory results = proxy.multicall(calls);
+        uint256[] memory amounts = proxy.batchSwap(swaps);
 
-        for (uint256 i = 0; i < calls.length; i++) {
-            assertEq(results[i], expected[i], "batched result differs from the direct call");
+        for (uint256 i = 0; i < swaps.length; i++) {
+            assertEq(amounts[i], expected[i], "batched amount differs from the direct call");
         }
         uint256[4] memory holdings = _approverHoldings();
         for (uint256 i = 0; i < 4; i++) {
             assertEq(holdings[i], expectedHoldings[i], "approver balances differ from one-by-one");
         }
 
-        assertEq(IERC20(WETH).balanceOf(recipient) - wethBefore, abi.decode(results[0], (uint256)), "V3 output");
-        assertEq(recipient.balance - ethBefore, abi.decode(results[1], (uint256)), "V4 native output");
+        assertEq(IERC20(WETH).balanceOf(recipient) - wethBefore, amounts[0], "V3 output");
+        assertEq(recipient.balance - ethBefore, amounts[1], "V4 native output");
         assertEq(IERC20(USDC).balanceOf(recipient) - usdcBefore, tradeUsdc, "V3 exact output");
         assertEq(IERC20(USDC).balanceOf(address(proxy)), 0, "proxy retained USDC");
         assertEq(IERC20(WETH).balanceOf(address(proxy)), 0, "proxy retained WETH");
@@ -123,25 +129,25 @@ contract MulticallTest is ForkBase {
 
         vm.prank(approver);
         vm.expectRevert(bytes("Too little received"));
-        proxy.multicall(_mixedBatch(type(uint128).max));
+        proxy.batchSwap(_mixedBatch(type(uint128).max));
 
         _assertApproverUntouched(before, "reverted batch");
         assertEq(_price(USDC_WETH_500), price500, "V3 swap survived the revert");
     }
 
-    /// @dev The Authorisation suite's invariant, restated for batches: `payer` is `msg.sender` inside
-    /// every batched call, so a batch can never reach someone else's standing approval.
+    /// @dev The Authorisation suite's invariant, restated for batches: `payer` is `msg.sender` for
+    /// every batched swap, so a batch can never reach someone else's standing approval.
     function test_outsiderBatch_cannotSpendApproverAllowance() public {
         uint256[4] memory before = _approverHoldings();
 
         vm.prank(outsider);
         vm.expectRevert();
-        proxy.multicall(_mixedBatch(0));
+        proxy.batchSwap(_mixedBatch(0));
 
         vm.startPrank(outsider);
         IERC20(USDC).approve(address(proxy), type(uint256).max);
         IERC20(WETH).approve(address(proxy), type(uint256).max);
-        proxy.multicall(_mixedBatch(0));
+        proxy.batchSwap(_mixedBatch(0));
         vm.stopPrank();
 
         _assertApproverUntouched(before, "outsider batch");

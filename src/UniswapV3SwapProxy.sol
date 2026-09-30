@@ -19,11 +19,19 @@ import {UniswapV3ProxyBase} from "./base/UniswapV3ProxyBase.sol";
 /// constructor. Deploy {UniswapProxy} rather than this.
 abstract contract UniswapV3SwapProxy is UniswapV3ProxyBase, IUniswapV3SwapCallback {
     /// @notice Swaps `amountIn` of one token for as much as possible of another token (single pool)
-    function exactInputSingle(ExactInputSingleParams calldata params)
-        external
-        checkDeadline(params.deadline)
-        returns (uint256 amountOut)
-    {
+    function exactInputSingle(ExactInputSingleParams calldata params) external returns (uint256 amountOut) {
+        return _exactInputSingle(params);
+    }
+
+    /// @notice Swaps as little as possible of one token for `amountOut` of another token (single pool)
+    function exactOutputSingle(ExactOutputSingleParams calldata params) external returns (uint256 amountIn) {
+        return _exactOutputSingle(params);
+    }
+
+    /// @dev Body of {exactInputSingle}, shared with {UniswapBatchSwapProxy-batchSwap}. Pays from
+    /// `msg.sender`, which an internal call leaves unchanged, so both paths charge their own caller.
+    function _exactInputSingle(ExactInputSingleParams memory params) internal returns (uint256 amountOut) {
+        _checkDeadline(params.deadline);
         require(params.recipient != address(0));
 
         bool zeroForOne = params.tokenIn < params.tokenOut;
@@ -47,12 +55,9 @@ abstract contract UniswapV3SwapProxy is UniswapV3ProxyBase, IUniswapV3SwapCallba
         require(amountOut >= params.amountOutMinimum, "Too little received");
     }
 
-    /// @notice Swaps as little as possible of one token for `amountOut` of another token (single pool)
-    function exactOutputSingle(ExactOutputSingleParams calldata params)
-        external
-        checkDeadline(params.deadline)
-        returns (uint256 amountIn)
-    {
+    /// @dev Body of {exactOutputSingle}, shared with {UniswapBatchSwapProxy-batchSwap}
+    function _exactOutputSingle(ExactOutputSingleParams memory params) internal returns (uint256 amountIn) {
+        _checkDeadline(params.deadline);
         require(params.recipient != address(0));
 
         bool zeroForOne = params.tokenIn < params.tokenOut;
