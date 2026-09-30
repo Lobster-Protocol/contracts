@@ -82,6 +82,9 @@ contract ReentrantToken {
     address public reenterTokenOut;
     uint24 public reenterFee;
     bool public armed;
+    /// @notice Route the entry-point re-entry through `multicall` rather than calling
+    /// `exactInputSingle` directly, so the batching entry point gets the same scrutiny.
+    bool public viaMulticall;
 
     /// @notice Set if either re-entrant call returned without reverting.
     bool public entryPointReentrySucceeded;
@@ -122,6 +125,10 @@ contract ReentrantToken {
         armed = false;
     }
 
+    function setViaMulticall(bool on) external {
+        viaMulticall = on;
+    }
+
     function approve(address spender, uint256 amount) external returns (bool) {
         allowance[msg.sender][spender] = amount;
         emit Approval(msg.sender, spender, amount);
@@ -144,29 +151,39 @@ contract ReentrantToken {
     /// @dev Runs from inside the proxy's own mint/swap callback, i.e. the deepest point of a
     /// legitimate, factory-verified pool interaction. Two calls, probing different assumptions:
     ///
-    ///  1. A normal entry point. The proxy stamps `payer = msg.sender`, which here is THIS token,
-    ///     so it should fail for lack of *our* funds — the payer is the immediate caller at any
-    ///     call depth.
+    ///  1. A normal entry point, directly or wrapped in `multicall` (see `viaMulticall`). The proxy
+    ///     stamps `payer = msg.sender`, which here is THIS token, so it should fail for lack of
+    ///     *our* funds — the payer is the immediate caller at any call depth.
     ///  2. The raw callback, naming a third-party account as payer. Being mid-callback should not
     ///     weaken `CallbackValidation`.
     function _reenter() internal {
         reentryAttempts++;
 
-        try proxy.exactInputSingle(
-            ExactInputSingleParams({
-                tokenIn: reenterTokenIn,
-                tokenOut: reenterTokenOut,
-                fee: reenterFee,
-                recipient: outsider,
-                deadline: block.timestamp,
-                amountIn: 1000e6,
-                amountOutMinimum: 0,
-                sqrtPriceLimitX96: 0
-            })
-        ) {
-            entryPointReentrySucceeded = true;
-        } catch (bytes memory err) {
-            entryPointRevertData = err;
+        ExactInputSingleParams memory params = ExactInputSingleParams({
+            tokenIn: reenterTokenIn,
+            tokenOut: reenterTokenOut,
+            fee: reenterFee,
+            recipient: outsider,
+            deadline: block.timestamp,
+            amountIn: 1000e6,
+            amountOutMinimum: 0,
+            sqrtPriceLimitX96: 0
+        });
+
+        if (viaMulticall) {
+            bytes[] memory calls = new bytes[](1);
+            calls[0] = abi.encodeCall(proxy.exactInputSingle, (params));
+            try proxy.multicall(calls) {
+                entryPointReentrySucceeded = true;
+            } catch (bytes memory err) {
+                entryPointRevertData = err;
+            }
+        } else {
+            try proxy.exactInputSingle(params) {
+                entryPointReentrySucceeded = true;
+            } catch (bytes memory err) {
+                entryPointRevertData = err;
+            }
         }
 
         try proxy.uniswapV3MintCallback(

@@ -178,8 +178,10 @@ abstract contract UniswapV4SwapProxy is Deadline, IUnlockCallback {
     /// @dev Returns ETH that was sent in but not consumed by the swap.
     /// The proxy is not meant to hold a balance between calls (there is no `receive`), so anything
     /// left here at the end of a call is this caller's change.
-    /// INVARIANT: this holds only while the contract has no `receive`, no `multicall`, and exactly
-    /// one payable call path per transaction. Do not add any of those without revisiting this.
+    /// INVARIANT: this holds only while the contract has no `receive`, no *payable* `multicall`, and
+    /// exactly one payable call path per transaction. Do not add any of those without revisiting
+    /// this. {Multicall-multicall} is non-payable for exactly this reason: inside a batch
+    /// `msg.value` is 0, so there is no caller change for one batched swap to hand back early.
     function _refundExcessNative() private {
         uint256 balance = address(this).balance;
         if (balance > 0) TransferHelper.safeTransferETH(msg.sender, balance);
