@@ -22,6 +22,8 @@ abstract contract UniswapV3MintProxy is UniswapV3ProxyBase, IUniswapV3MintCallba
         returns (uint256 amount0, uint256 amount1)
     {
         require(params.recipient != address(0));
+        // Nothing can move tokens or positions out of the proxy again, so sending them here loses them
+        require(params.recipient != address(this), "Invalid recipient");
 
         PoolAddress.PoolKey memory poolKey =
             PoolAddress.PoolKey({token0: params.token0, token1: params.token1, fee: params.fee});

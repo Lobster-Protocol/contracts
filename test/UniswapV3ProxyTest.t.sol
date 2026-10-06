@@ -1571,6 +1571,75 @@ contract UniswapV3ProxyTest is Test {
     }
 
     // ===========================================================================
+    // RECIPIENT CANNOT BE THE PROXY -- nothing sent there could ever leave
+    // ===========================================================================
+
+    function testSwapsRejectTheProxyAsRecipient() public {
+        _mintDefaultLiquidity();
+        uint256 userBefore = token0.balanceOf(user);
+
+        vm.startPrank(user);
+        vm.expectRevert("Invalid recipient");
+        proxy.exactInputSingle(
+            ExactInputSingleParams({
+                tokenIn: address(token0),
+                tokenOut: address(token1),
+                fee: FEE,
+                recipient: address(proxy),
+                deadline: block.timestamp + 3600,
+                amountIn: SWAP_AMOUNT,
+                amountOutMinimum: 0,
+                sqrtPriceLimitX96: 0
+            })
+        );
+        vm.expectRevert("Invalid recipient");
+        proxy.exactOutputSingle(
+            ExactOutputSingleParams({
+                tokenIn: address(token0),
+                tokenOut: address(token1),
+                fee: FEE,
+                recipient: address(proxy),
+                deadline: block.timestamp + 3600,
+                amountOut: 5e18,
+                amountInMaximum: SWAP_AMOUNT,
+                sqrtPriceLimitX96: 0
+            })
+        );
+        vm.stopPrank();
+
+        assertEq(token0.balanceOf(user), userBefore, "caller paid");
+        assertEq(token1.balanceOf(address(proxy)), 0, "tokens reached the proxy");
+    }
+
+    /// @dev A position minted to the proxy would be owned by it in the pool, and the proxy has no
+    /// burn/collect, so the liquidity could never be withdrawn.
+    function testMintRejectsTheProxyAsRecipient() public {
+        uint256 userBefore = token0.balanceOf(user);
+
+        vm.prank(user);
+        vm.expectRevert("Invalid recipient");
+        proxy.mint(
+            MintParams({
+                token0: address(token0),
+                token1: address(token1),
+                fee: FEE,
+                tickLower: TICK_LOWER,
+                tickUpper: TICK_UPPER,
+                amount0Desired: AMOUNT_DESIRED,
+                amount1Desired: AMOUNT_DESIRED,
+                amount0Min: 0,
+                amount1Min: 0,
+                recipient: address(proxy),
+                deadline: block.timestamp + 3600
+            })
+        );
+
+        assertEq(token0.balanceOf(user), userBefore, "caller paid");
+        (uint128 liquidity,,,,) = pool.positions(keccak256(abi.encodePacked(address(proxy), TICK_LOWER, TICK_UPPER)));
+        assertEq(liquidity, 0, "a position was minted to the proxy");
+    }
+
+    // ===========================================================================
     // AMOUNTS CANNOT WRAP -- uint256 -> int256 is checked
     // ===========================================================================
 

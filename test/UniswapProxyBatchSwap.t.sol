@@ -539,6 +539,52 @@ contract UniswapProxyBatchSwapTest is Test {
         _assertHoldingsEq(_holdings(), before, "rejected batches");
     }
 
+    /// @notice A batched swap cannot name the proxy as recipient either, on V3 or V4, and refusing it
+    /// undoes the valid swap placed before it.
+    function test_proxyIsRejectedAsRecipientInsideBatch() public {
+        bytes memory validSwap = _v4In(cleanKey, true, 1e18, 0);
+        bytes[] memory toProxy = new bytes[](2);
+        toProxy[0] = abi.encodePacked(
+            SwapType.V3_EXACT_INPUT,
+            abi.encode(
+                ExactInputSingleParams({
+                    tokenIn: address(token0),
+                    tokenOut: address(token1),
+                    fee: FEE,
+                    recipient: address(proxy),
+                    deadline: block.timestamp,
+                    amountIn: 1e18,
+                    amountOutMinimum: 0,
+                    sqrtPriceLimitX96: 0
+                })
+            )
+        );
+        toProxy[1] = abi.encodePacked(
+            SwapType.V4_EXACT_OUTPUT,
+            abi.encode(
+                V4ExactOutputSingleParams({
+                    poolKey: cleanKey,
+                    zeroForOne: true,
+                    recipient: address(proxy),
+                    deadline: block.timestamp,
+                    amountOut: 1e18,
+                    amountInMaximum: type(uint128).max,
+                    sqrtPriceLimitX96: 0
+                })
+            )
+        );
+        uint256[6] memory before = _holdings();
+
+        for (uint256 i = 0; i < toProxy.length; i++) {
+            vm.prank(user);
+            vm.expectRevert(bytes("Invalid recipient"));
+            proxy.batchSwap(_batch(validSwap, toProxy[i]));
+        }
+
+        _assertHoldingsEq(_holdings(), before, "rejected batches");
+        _assertProxyHoldsNothing();
+    }
+
     // ---------------------------------------------------------------------------
     // Malformed batches
     // ---------------------------------------------------------------------------

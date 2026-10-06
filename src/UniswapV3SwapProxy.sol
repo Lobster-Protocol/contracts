@@ -43,6 +43,8 @@ abstract contract UniswapV3SwapProxy is UniswapV3ProxyBase, IUniswapV3SwapCallba
     function _exactInputSingle(ExactInputSingleParams memory params) internal returns (uint256 amountOut) {
         _checkDeadline(params.deadline);
         require(params.recipient != address(0));
+        // Nothing can move tokens or positions out of the proxy again, so sending them here loses them
+        require(params.recipient != address(this), "Invalid recipient");
 
         bool zeroForOne = params.tokenIn < params.tokenOut;
 
@@ -69,6 +71,8 @@ abstract contract UniswapV3SwapProxy is UniswapV3ProxyBase, IUniswapV3SwapCallba
     function _exactOutputSingle(ExactOutputSingleParams memory params) internal returns (uint256 amountIn) {
         _checkDeadline(params.deadline);
         require(params.recipient != address(0));
+        // Nothing can move tokens or positions out of the proxy again, so sending them here loses them
+        require(params.recipient != address(this), "Invalid recipient");
 
         bool zeroForOne = params.tokenIn < params.tokenOut;
 

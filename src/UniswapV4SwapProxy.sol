@@ -72,6 +72,8 @@ abstract contract UniswapV4SwapProxy is Deadline, IUnlockCallback {
     function _exactInputSingleV4(V4ExactInputSingleParams memory params) internal returns (uint256 amountOut) {
         _checkDeadline(params.deadline);
         require(params.recipient != address(0));
+        // Nothing can move tokens or positions out of the proxy again, so sending them here loses them
+        require(params.recipient != address(this), "Invalid recipient");
 
         uint256 amountIn;
         // negative amountSpecified == exact input in v4
@@ -93,6 +95,8 @@ abstract contract UniswapV4SwapProxy is Deadline, IUnlockCallback {
     function _exactOutputSingleV4(V4ExactOutputSingleParams memory params) internal returns (uint256 amountIn) {
         _checkDeadline(params.deadline);
         require(params.recipient != address(0));
+        // Nothing can move tokens or positions out of the proxy again, so sending them here loses them
+        require(params.recipient != address(this), "Invalid recipient");
 
         uint256 amountOut;
         // positive amountSpecified == exact output in v4

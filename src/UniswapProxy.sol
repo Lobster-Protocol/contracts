@@ -33,6 +33,10 @@ import {UniswapV3ProxyBase} from "./base/UniswapV3ProxyBase.sol";
 /// approval granted to this address is usable by all six entry points. Keep that in mind when
 /// adding another one. `batchSwap` runs each swap as an internal call, so there too the payer is
 /// whoever called it.
+///
+/// The proxy never holds anything between calls and has no way to send tokens or LP positions out
+/// again, so every entry point rejects `recipient == address(this)`. Tokens transferred to it
+/// directly, outside these entry points, are unrecoverable.
 contract UniswapProxy is UniswapV3MintProxy, UniswapV3SwapProxy, UniswapV4SwapProxy, UniswapBatchSwapProxy {
     constructor(
         address _uniV3Factory,
