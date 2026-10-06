@@ -10,6 +10,7 @@ import {MintParams, MintCallbackData} from "../../../src/interfaces/uniswapV3/IU
 import {SwapCallbackData, ExactInputSingleParams} from "../../../src/interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {PoolAddress} from "../../../src/libraries/uniswapV3/PoolAddress.sol";
+import {SwapType} from "../../../src/UniswapBatchSwapProxy.sol";
 
 /// @notice Authorisation tests for standing approvals.
 /// @dev Fixture: an account has granted this proxy `type(uint256).max` on four tokens and holds the
@@ -366,6 +367,84 @@ contract AuthorisationTest is ForkBase {
         assertFalse(reentrant.entryPointReentrySucceeded(), "re-entered entry point succeeded");
         assertFalse(reentrant.directCallbackReentrySucceeded(), "re-entered raw callback succeeded");
         _assertApproverUntouched(before, "re-entrant token");
+    }
+
+    /// @dev The same attack against the batching entry point: the victim-side swap runs inside a
+    /// `batchSwap`, and the token re-enters through `batchSwap` too. Each batched swap pays from
+    /// `msg.sender` = whoever called `batchSwap`, so the re-entered batch must be paid for by the
+    /// token itself, not by the account whose batch it interrupted and not by the approver.
+    function test_reentrantTokenViaBatchSwap_cannotRedirectPayer() public {
+        ReentrantToken reentrant = new ReentrantToken();
+        reentrant.mint(outsider, 1_000_000e18);
+        deal(USDC, outsider, 1_000_000e6);
+
+        address pool = factory.createPool(address(reentrant), USDC, 3000);
+        IUniswapV3PoolMinimal(pool).initialize(79228162514264337593543950336); // tick 0
+        (int24 lower, int24 upper) = _rangeAroundSpot(pool, 10);
+        (address token0, address token1) =
+            address(reentrant) < USDC ? (address(reentrant), USDC) : (USDC, address(reentrant));
+
+        // Liquidity first, while the token is still inert
+        vm.startPrank(outsider);
+        IERC20(USDC).approve(address(proxy), type(uint256).max);
+        reentrant.approve(address(proxy), type(uint256).max);
+        proxy.mint(
+            MintParams({
+                token0: token0,
+                token1: token1,
+                fee: 3000,
+                tickLower: lower,
+                tickUpper: upper,
+                amount0Desired: token0 == USDC ? 10_000e6 : 10_000e18,
+                amount1Desired: token1 == USDC ? 10_000e6 : 10_000e18,
+                amount0Min: 0,
+                amount1Min: 0,
+                recipient: outsider,
+                deadline: block.timestamp
+            })
+        );
+        vm.stopPrank();
+
+        reentrant.arm(proxy, approver, outsider, USDC, WETH, 500);
+        reentrant.setViaBatchSwap(true);
+
+        uint256[4] memory before = _approverHoldings();
+        uint256 outsiderUsdcBefore = IERC20(USDC).balanceOf(outsider);
+
+        // Selling the re-entrant token makes the proxy's swap callback call its `transferFrom`
+        bytes[] memory swaps = new bytes[](1);
+        swaps[0] = abi.encodePacked(
+            SwapType.V3_EXACT_INPUT,
+            abi.encode(
+                ExactInputSingleParams({
+                    tokenIn: address(reentrant),
+                    tokenOut: USDC,
+                    fee: 3000,
+                    recipient: outsider,
+                    deadline: block.timestamp,
+                    amountIn: 1e6,
+                    amountOutMinimum: 0,
+                    sqrtPriceLimitX96: 0
+                })
+            )
+        );
+        vm.prank(outsider);
+        proxy.batchSwap(swaps);
+
+        // The token really did receive control inside a batched swap's callback...
+        assertGt(reentrant.reentryAttempts(), 0, "re-entry never fired; test proves nothing");
+        // ...its batch was charged to the token itself, which cannot pay ("STF")...
+        assertFalse(reentrant.entryPointReentrySucceeded(), "re-entered batchSwap succeeded");
+        assertEq(
+            reentrant.entryPointRevertData(),
+            abi.encodeWithSignature("Error(string)", "STF"),
+            "re-entered batchSwap failed for an unexpected reason"
+        );
+        assertFalse(reentrant.directCallbackReentrySucceeded(), "re-entered raw callback succeeded");
+        // ...and nobody else paid for anything: the approver is untouched, and the outsider's only
+        // USDC movement is the output of their own swap.
+        _assertApproverUntouched(before, "re-entrant token via batchSwap");
+        assertGe(IERC20(USDC).balanceOf(outsider), outsiderUsdcBefore, "outsider paid USDC for the re-entry");
     }
 
     // ---------------------------------------------------------------------------

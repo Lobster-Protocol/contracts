@@ -52,13 +52,28 @@ abstract contract UniswapV4SwapProxy is Deadline, IUnlockCallback {
     /// @notice Swaps `amountIn` of one currency for as much as possible of another (single V4 pool)
     /// @dev Payable so that native-currency pools can be used directly, without wrapping to WETH.
     /// Any unspent ETH is refunded to msg.sender.
-    function exactInputSingleV4(V4ExactInputSingleParams calldata params)
+    function exactInputSingleV4(V4ExactInputSingleParams calldata params) external payable returns (uint256 amountOut) {
+        amountOut = _exactInputSingleV4(params);
+        _refundExcessNative();
+    }
+
+    /// @notice Swaps as little as possible of one currency for `amountOut` of another (single V4 pool)
+    function exactOutputSingleV4(V4ExactOutputSingleParams calldata params)
         external
         payable
-        checkDeadline(params.deadline)
-        returns (uint256 amountOut)
+        returns (uint256 amountIn)
     {
+        amountIn = _exactOutputSingleV4(params);
+        _refundExcessNative();
+    }
+
+    /// @dev Body of {exactInputSingleV4}, shared with {UniswapBatchSwapProxy-batchSwap}. Never
+    /// refunds: that belongs to the payable entry points, the only paths that take ETH in.
+    function _exactInputSingleV4(V4ExactInputSingleParams memory params) internal returns (uint256 amountOut) {
+        _checkDeadline(params.deadline);
         require(params.recipient != address(0));
+        // Nothing can move tokens or positions out of the proxy again, so sending them here loses them
+        require(params.recipient != address(this), "Invalid recipient");
 
         uint256 amountIn;
         // negative amountSpecified == exact input in v4
@@ -74,18 +89,14 @@ abstract contract UniswapV4SwapProxy is Deadline, IUnlockCallback {
         // a cheap assertion of the function's contract rather than as load-bearing protection.
         require(amountIn <= params.amountIn, "Too much requested");
         require(amountOut >= params.amountOutMinimum, "Too little received");
-
-        _refundExcessNative();
     }
 
-    /// @notice Swaps as little as possible of one currency for `amountOut` of another (single V4 pool)
-    function exactOutputSingleV4(V4ExactOutputSingleParams calldata params)
-        external
-        payable
-        checkDeadline(params.deadline)
-        returns (uint256 amountIn)
-    {
+    /// @dev Body of {exactOutputSingleV4}, shared with {UniswapBatchSwapProxy-batchSwap}. Never refunds.
+    function _exactOutputSingleV4(V4ExactOutputSingleParams memory params) internal returns (uint256 amountIn) {
+        _checkDeadline(params.deadline);
         require(params.recipient != address(0));
+        // Nothing can move tokens or positions out of the proxy again, so sending them here loses them
+        require(params.recipient != address(this), "Invalid recipient");
 
         uint256 amountOut;
         // positive amountSpecified == exact output in v4
@@ -101,8 +112,6 @@ abstract contract UniswapV4SwapProxy is Deadline, IUnlockCallback {
         // A swap can stop early on the price limit and deliver less than requested. When the caller
         // did not ask for a limit, that outcome is never intended, so reject it.
         if (params.sqrtPriceLimitX96 == 0) require(amountOut == params.amountOut, "Too little received");
-
-        _refundExcessNative();
     }
 
     /// @inheritdoc IUnlockCallback
@@ -139,10 +148,10 @@ abstract contract UniswapV4SwapProxy is Deadline, IUnlockCallback {
         return abi.encode(amountIn, amountOut);
     }
 
-    /// @dev Shared body of the two V4 swap entry points: opens the unlock window and unpacks the
+    /// @dev Shared by every V4 swap path, batched or not: opens the unlock window and unpacks the
     /// result. Also the single choke point where hooked pools are rejected.
     function _unlockAndSwap(
-        PoolKey calldata poolKey,
+        PoolKey memory poolKey,
         bool zeroForOne,
         int256 amountSpecified,
         uint160 sqrtPriceLimitX96,
@@ -178,8 +187,10 @@ abstract contract UniswapV4SwapProxy is Deadline, IUnlockCallback {
     /// @dev Returns ETH that was sent in but not consumed by the swap.
     /// The proxy is not meant to hold a balance between calls (there is no `receive`), so anything
     /// left here at the end of a call is this caller's change.
-    /// INVARIANT: this holds only while the contract has no `receive`, no `multicall`, and exactly
-    /// one payable call path per transaction. Do not add any of those without revisiting this.
+    /// INVARIANT: this holds only while the contract has no `receive` and exactly one payable call
+    /// path per transaction. Do not add either without revisiting this. For that reason
+    /// {UniswapBatchSwapProxy-batchSwap} is non-payable and never calls this: a batch carries no ETH
+    /// of its own, so there is no change to hand back, and no batched swap can sweep the balance early.
     function _refundExcessNative() private {
         uint256 balance = address(this).balance;
         if (balance > 0) TransferHelper.safeTransferETH(msg.sender, balance);
