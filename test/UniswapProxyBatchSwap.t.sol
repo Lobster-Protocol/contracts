@@ -18,6 +18,7 @@ import {
     IHooks as ProxyIHooks
 } from "../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
 import {BatchSwapCalls} from "./helpers/BatchSwapCalls.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 // `^0.8.0`, unlike UniswapV3Infra (`^0.8.28`), so a real V3 factory can share this 0.8.26 unit
 // with the real V4 PoolManager.
 import {FACTORY_BYTECODE} from "./Mocks/uniswapV3/bytecodes/factory.sol";
@@ -515,6 +516,25 @@ contract UniswapProxyBatchSwapTest is Test {
         vm.prank(user);
         vm.expectRevert(bytes("Too much requested"));
         proxy.batchSwap(_batch(validSwap, _v3Out(address(token1), address(token0), 1e18, 1)));
+
+        _assertHoldingsEq(_holdings(), before, "rejected batches");
+    }
+
+    /// @notice The V3 guards live in the shared internal bodies, so batched swaps get them too:
+    /// no silent partial fill on exact output, and no amount that wraps at 2**255.
+    function test_v3SafetyGuardsApplyInsideBatch() public {
+        bytes memory validSwap = _v4In(cleanKey, true, 1e18, 0);
+        uint256[6] memory before = _holdings();
+
+        // Far more token1 than the V3 pool holds: a partial fill, which must not pass as success
+        vm.prank(user);
+        vm.expectRevert(bytes("Too little received"));
+        proxy.batchSwap(_batch(validSwap, _v3Out(address(token0), address(token1), 5000e18, type(uint256).max)));
+
+        // An amount that would wrap negative and flip exact-input into exact-output
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(SafeCast.SafeCastOverflowedUintToInt.selector, uint256(2 ** 255)));
+        proxy.batchSwap(_batch(validSwap, _v3In(address(token0), address(token1), 2 ** 255, 1e18)));
 
         _assertHoldingsEq(_holdings(), before, "rejected batches");
     }
