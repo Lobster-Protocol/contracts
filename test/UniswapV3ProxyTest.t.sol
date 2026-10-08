@@ -1639,6 +1639,49 @@ contract UniswapV3ProxyTest is Test {
         assertEq(liquidity, 0, "a position was minted to the proxy");
     }
 
+    /// @notice The exit path the `mint` docs describe: only the recipient can withdraw a position,
+    /// with two direct calls on the pool. Not even the account that paid for it can.
+    function testOnlyTheRecipientCanExitAPositionDirectlyOnThePool() public {
+        vm.prank(user);
+        (uint256 paid0, uint256 paid1) = proxy.mint(
+            MintParams({
+                token0: address(token0),
+                token1: address(token1),
+                fee: FEE,
+                tickLower: TICK_LOWER,
+                tickUpper: TICK_UPPER,
+                amount0Desired: AMOUNT_DESIRED,
+                amount1Desired: AMOUNT_DESIRED,
+                amount0Min: 0,
+                amount1Min: 0,
+                recipient: recipient,
+                deadline: block.timestamp + 3600
+            })
+        );
+        bytes32 posKey = keccak256(abi.encodePacked(recipient, TICK_LOWER, TICK_UPPER));
+        (uint128 liquidity,,,,) = pool.positions(posKey);
+        assertGt(liquidity, 0, "no position minted");
+
+        // The payer is not the owner: the pool has no position of theirs to burn
+        vm.prank(user);
+        vm.expectRevert();
+        pool.burn(TICK_LOWER, TICK_UPPER, liquidity);
+
+        // The recipient exits with the two documented calls
+        uint256 r0 = token0.balanceOf(recipient);
+        uint256 r1 = token1.balanceOf(recipient);
+        vm.startPrank(recipient);
+        pool.burn(TICK_LOWER, TICK_UPPER, liquidity);
+        pool.collect(recipient, TICK_LOWER, TICK_UPPER, type(uint128).max, type(uint128).max);
+        vm.stopPrank();
+
+        // Burning rounds down by at most a wei per token
+        assertApproxEqAbs(token0.balanceOf(recipient) - r0, paid0, 1, "token0 principal not returned");
+        assertApproxEqAbs(token1.balanceOf(recipient) - r1, paid1, 1, "token1 principal not returned");
+        (liquidity,,,,) = pool.positions(posKey);
+        assertEq(liquidity, 0, "position not fully withdrawn");
+    }
+
     // ===========================================================================
     // AMOUNTS CANNOT WRAP -- uint256 -> int256 is checked
     // ===========================================================================

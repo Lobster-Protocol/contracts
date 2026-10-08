@@ -29,22 +29,37 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 /// constructor. Deploy {UniswapProxy} rather than this.
 abstract contract UniswapV3SwapProxy is UniswapV3ProxyBase, IUniswapV3SwapCallback {
     /// @notice Swaps `amountIn` of one token for as much as possible of another token (single pool)
-    function exactInputSingle(ExactInputSingleParams calldata params) external returns (uint256 amountOut) {
-        return _exactInputSingle(params);
+    function exactInputSingle(ExactInputSingleParams calldata params)
+        external
+        nonReentrant
+        returns (uint256 amountOut)
+    {
+        _checkRecipient(params.recipient);
+        return _exactInputSingle(params, msg.sender);
     }
 
     /// @notice Swaps as little as possible of one token for `amountOut` of another token (single pool)
-    function exactOutputSingle(ExactOutputSingleParams calldata params) external returns (uint256 amountIn) {
-        return _exactOutputSingle(params);
+    function exactOutputSingle(ExactOutputSingleParams calldata params)
+        external
+        nonReentrant
+        returns (uint256 amountIn)
+    {
+        _checkRecipient(params.recipient);
+        return _exactOutputSingle(params, msg.sender);
     }
 
-    /// @dev Body of {exactInputSingle}, shared with {UniswapBatchSwapProxy-batchSwap}. Pays from
-    /// `msg.sender`, which an internal call leaves unchanged, so both paths charge their own caller.
-    function _exactInputSingle(ExactInputSingleParams memory params) internal returns (uint256 amountOut) {
+    /// @dev Body of {exactInputSingle}, shared with {UniswapBatchSwapProxy-batchSwap}. The caller of
+    /// this body has already validated or resolved `params.recipient`. `payer` is the account the
+    /// pool is paid from: `msg.sender`, or the proxy itself when a chained swap spends what an
+    /// earlier swap in the batch produced.
+    function _exactInputSingle(
+        ExactInputSingleParams memory params,
+        address payer
+    )
+        internal
+        returns (uint256 amountOut)
+    {
         _checkDeadline(params.deadline);
-        require(params.recipient != address(0));
-        // Nothing can move tokens or positions out of the proxy again, so sending them here loses them
-        require(params.recipient != address(this), "Invalid recipient");
 
         bool zeroForOne = params.tokenIn < params.tokenOut;
 
@@ -58,7 +73,7 @@ abstract contract UniswapV3SwapProxy is UniswapV3ProxyBase, IUniswapV3SwapCallba
                     : params.sqrtPriceLimitX96,
                 abi.encode(
                     SwapCallbackData({
-                        tokenIn: params.tokenIn, tokenOut: params.tokenOut, fee: params.fee, payer: msg.sender
+                        tokenIn: params.tokenIn, tokenOut: params.tokenOut, fee: params.fee, payer: payer
                     })
                 )
             );
@@ -67,12 +82,16 @@ abstract contract UniswapV3SwapProxy is UniswapV3ProxyBase, IUniswapV3SwapCallba
         require(amountOut >= params.amountOutMinimum, "Too little received");
     }
 
-    /// @dev Body of {exactOutputSingle}, shared with {UniswapBatchSwapProxy-batchSwap}
-    function _exactOutputSingle(ExactOutputSingleParams memory params) internal returns (uint256 amountIn) {
+    /// @dev Body of {exactOutputSingle}, shared with {UniswapBatchSwapProxy-batchSwap}. Same contract
+    /// for `params.recipient` and `payer` as {_exactInputSingle}.
+    function _exactOutputSingle(
+        ExactOutputSingleParams memory params,
+        address payer
+    )
+        internal
+        returns (uint256 amountIn)
+    {
         _checkDeadline(params.deadline);
-        require(params.recipient != address(0));
-        // Nothing can move tokens or positions out of the proxy again, so sending them here loses them
-        require(params.recipient != address(this), "Invalid recipient");
 
         bool zeroForOne = params.tokenIn < params.tokenOut;
 
@@ -86,7 +105,7 @@ abstract contract UniswapV3SwapProxy is UniswapV3ProxyBase, IUniswapV3SwapCallba
                     : params.sqrtPriceLimitX96,
                 abi.encode(
                     SwapCallbackData({
-                        tokenIn: params.tokenIn, tokenOut: params.tokenOut, fee: params.fee, payer: msg.sender
+                        tokenIn: params.tokenIn, tokenOut: params.tokenOut, fee: params.fee, payer: payer
                     })
                 )
             );
@@ -111,6 +130,10 @@ abstract contract UniswapV3SwapProxy is UniswapV3ProxyBase, IUniswapV3SwapCallba
         // and the ternary only casts the positive value
         // forge-lint: disable-next-line(unsafe-typecast)
         uint256 amountToPay = amount0Delta > 0 ? uint256(amount0Delta) : uint256(amount1Delta);
-        TransferHelper.safeTransferFrom(data.tokenIn, data.payer, msg.sender, amountToPay);
+        // `payer` is the proxy only for a chained swap inside a batch, spending what an earlier swap
+        // left here. The data is the proxy's own: `verifyCallback` proves a genuine pool is calling,
+        // and a pool only calls back whoever called its `swap`, so this cannot be forged.
+        if (data.payer == address(this)) TransferHelper.safeTransfer(data.tokenIn, msg.sender, amountToPay);
+        else TransferHelper.safeTransferFrom(data.tokenIn, data.payer, msg.sender, amountToPay);
     }
 }

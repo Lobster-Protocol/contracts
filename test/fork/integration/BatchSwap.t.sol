@@ -7,6 +7,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ForkBase} from "../helpers/ForkBase.sol";
 import {BatchSwapCalls} from "../../helpers/BatchSwapCalls.sol";
 import {SwapType} from "../../../src/UniswapBatchSwapProxy.sol";
+import {Chaining} from "../../../src/libraries/Chaining.sol";
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {
     ExactInputSingleParams,
@@ -118,6 +119,84 @@ contract BatchSwapTest is ForkBase {
         assertEq(IERC20(WETH).balanceOf(recipient) - wethBefore, amounts[0], "V3 output");
         assertEq(recipient.balance - ethBefore, amounts[1], "V4 native output");
         assertEq(IERC20(USDC).balanceOf(recipient) - usdcBefore, tradeUsdc, "V3 exact output");
+        assertEq(IERC20(USDC).balanceOf(address(proxy)), 0, "proxy retained USDC");
+        assertEq(IERC20(WETH).balanceOf(address(proxy)), 0, "proxy retained WETH");
+        assertEq(address(proxy).balance, 0, "proxy retained ETH");
+    }
+
+    function _v4UsdcEth(
+        bool zeroForOne,
+        uint128 amountIn,
+        address to
+    )
+        internal
+        view
+        returns (V4ExactInputSingleParams memory)
+    {
+        return V4ExactInputSingleParams({
+            poolKey: _ethUsdcKey(),
+            zeroForOne: zeroForOne,
+            recipient: to,
+            deadline: block.timestamp,
+            amountIn: amountIn,
+            amountOutMinimum: 0,
+            sqrtPriceLimitX96: 0
+        });
+    }
+
+    function _v3UsdcWeth(uint256 amountIn, address to) internal view returns (ExactInputSingleParams memory) {
+        return ExactInputSingleParams({
+            tokenIn: USDC,
+            tokenOut: WETH,
+            fee: 500,
+            recipient: to,
+            deadline: block.timestamp,
+            amountIn: amountIn,
+            amountOutMinimum: 0,
+            sqrtPriceLimitX96: 0
+        });
+    }
+
+    /// @dev Chaining on live pools, crossing both versions with native ETH in the middle:
+    ///   USDC -V4-> ETH (parked) -V4-> USDC (parked) -V3-> WETH
+    /// Only the first amount is fixed. It must match the same legs made one by one with each output
+    /// fed by hand into the next, and leave the proxy holding nothing.
+    function test_chainedRoute_matchesManualSequence() public {
+        bytes[] memory swaps = new bytes[](3);
+        swaps[0] =
+            abi.encodePacked(SwapType.V4_EXACT_INPUT, abi.encode(_v4UsdcEth(false, tradeUsdc, Chaining.ADDRESS_THIS)));
+        swaps[1] = abi.encodePacked(
+            SwapType.V4_EXACT_INPUT, abi.encode(_v4UsdcEth(true, uint128(Chaining.HELD_BALANCE), Chaining.ADDRESS_THIS))
+        );
+        swaps[2] = abi.encodePacked(SwapType.V3_EXACT_INPUT, abi.encode(_v3UsdcWeth(Chaining.HELD_BALANCE, recipient)));
+
+        // Reference: three direct calls, each intermediate output delivered to the approver and
+        // passed by hand (as msg.value for the ETH leg)
+        uint256 snap = vm.snapshotState();
+        vm.startPrank(approver);
+        uint256 a = proxy.exactInputSingleV4(_v4UsdcEth(false, tradeUsdc, approver));
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint256 b = proxy.exactInputSingleV4{value: a}(_v4UsdcEth(true, uint128(a), approver));
+        uint256 c = proxy.exactInputSingle(_v3UsdcWeth(b, recipient));
+        vm.stopPrank();
+        uint256[4] memory expectedHoldings = _approverHoldings();
+        uint256 expectedApproverEth = approver.balance;
+        vm.revertToState(snap);
+
+        uint256 wethBefore = IERC20(WETH).balanceOf(recipient);
+        vm.prank(approver);
+        uint256[] memory amounts = proxy.batchSwap(swaps);
+
+        assertEq(amounts[0], a, "USDC -> ETH leg");
+        assertEq(amounts[1], b, "ETH -> USDC leg did not spend exactly the parked ETH");
+        assertEq(amounts[2], c, "USDC -> WETH leg did not spend exactly the parked USDC");
+        assertEq(IERC20(WETH).balanceOf(recipient) - wethBefore, c, "recipient did not get the WETH");
+
+        uint256[4] memory holdings = _approverHoldings();
+        for (uint256 i = 0; i < 4; i++) {
+            assertEq(holdings[i], expectedHoldings[i], "approver balances differ from the manual sequence");
+        }
+        assertEq(approver.balance, expectedApproverEth, "approver ETH differs from the manual sequence");
         assertEq(IERC20(USDC).balanceOf(address(proxy)), 0, "proxy retained USDC");
         assertEq(IERC20(WETH).balanceOf(address(proxy)), 0, "proxy retained WETH");
         assertEq(address(proxy).balance, 0, "proxy retained ETH");

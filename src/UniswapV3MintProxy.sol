@@ -11,19 +11,37 @@ import {CallbackValidation} from "./libraries/uniswapV3/CallbackValidation.sol";
 import {UniswapV3ProxyBase} from "./base/UniswapV3ProxyBase.sol";
 
 /// @title Uniswap V3 liquidity provision
-/// @notice Mints a position directly on a V3 pool and pays for it from the caller's balance.
+/// @notice Mints a position directly on a V3 pool and pays for it from the caller's balance. The
+/// position belongs to the recipient inside the pool itself; there is no NFT.
 /// @dev Abstract on purpose: this is a mixin combined into {UniswapProxy}, which owns the
 /// constructor. Deploy {UniswapProxy} rather than this.
 abstract contract UniswapV3MintProxy is UniswapV3ProxyBase, IUniswapV3MintCallback {
-    /// @notice Mints liquidity to a Uniswap V3 pool
+    /// @notice Mints liquidity to a Uniswap V3 pool, owned by `params.recipient`
+    /// @dev READ BEFORE CHOOSING A RECIPIENT. Unlike Uniswap's NonfungiblePositionManager, no NFT
+    /// is minted and nothing about the position is recorded here. It lives in the pool, keyed by
+    /// (recipient, tickLower, tickUpper), and the pool lets only that owner act on it: `burn` and
+    /// `collect` both identify the owner by `msg.sender`. This proxy has neither function, so it
+    /// cannot withdraw a position for anyone, and positions cannot be transferred.
+    ///
+    /// The recipient must therefore be able to call `burn` and `collect` on the pool itself:
+    /// - an EOA, or a smart account that can make arbitrary calls (e.g. a Safe): fine;
+    /// - a contract written to call `burn` and `collect` (e.g. a vault built for it): fine;
+    /// - any other contract: the liquidity, and every fee it earns, is locked permanently.
+    /// The proxy itself is rejected for exactly this reason. Other contracts cannot be told apart
+    /// on-chain, so choosing a recipient that can exit is the integrator's responsibility.
+    ///
+    /// Exiting is two calls, made by the owner directly on the pool. `burn` makes the principal and
+    /// fees owed to the owner, and `collect` sends them to `to`:
+    ///   pool.burn(tickLower, tickUpper, liquidity);
+    ///   pool.collect(to, tickLower, tickUpper, type(uint128).max, type(uint128).max);
+    /// Fees alone can be claimed the same way with `burn(tickLower, tickUpper, 0)` first.
     function mint(MintParams calldata params)
         external
+        nonReentrant
         checkDeadline(params.deadline)
         returns (uint256 amount0, uint256 amount1)
     {
-        require(params.recipient != address(0));
-        // Nothing can move tokens or positions out of the proxy again, so sending them here loses them
-        require(params.recipient != address(this), "Invalid recipient");
+        _checkRecipient(params.recipient);
 
         PoolAddress.PoolKey memory poolKey =
             PoolAddress.PoolKey({token0: params.token0, token1: params.token1, fee: params.fee});

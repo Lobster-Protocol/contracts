@@ -11,6 +11,7 @@ import {SwapCallbackData, ExactInputSingleParams} from "../../../src/interfaces/
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {PoolAddress} from "../../../src/libraries/uniswapV3/PoolAddress.sol";
 import {SwapType} from "../../../src/UniswapBatchSwapProxy.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
 /// @notice Authorisation tests for standing approvals.
 /// @dev Fixture: an account has granted this proxy `type(uint256).max` on four tokens and holds the
@@ -370,9 +371,10 @@ contract AuthorisationTest is ForkBase {
     }
 
     /// @dev The same attack against the batching entry point: the victim-side swap runs inside a
-    /// `batchSwap`, and the token re-enters through `batchSwap` too. Each batched swap pays from
-    /// `msg.sender` = whoever called `batchSwap`, so the re-entered batch must be paid for by the
-    /// token itself, not by the account whose batch it interrupted and not by the approver.
+    /// `batchSwap`, and the token re-enters through `batchSwap` too. Since chaining, a batch can hold
+    /// parked funds mid-flight, so every entry point is `nonReentrant` and the re-entered batch is
+    /// refused outright. Either way it must not be paid for by the account whose batch it interrupted,
+    /// nor by the approver.
     function test_reentrantTokenViaBatchSwap_cannotRedirectPayer() public {
         ReentrantToken reentrant = new ReentrantToken();
         reentrant.mint(outsider, 1_000_000e18);
@@ -433,11 +435,11 @@ contract AuthorisationTest is ForkBase {
 
         // The token really did receive control inside a batched swap's callback...
         assertGt(reentrant.reentryAttempts(), 0, "re-entry never fired; test proves nothing");
-        // ...its batch was charged to the token itself, which cannot pay ("STF")...
+        // ...and its batch was refused by the reentrancy lock...
         assertFalse(reentrant.entryPointReentrySucceeded(), "re-entered batchSwap succeeded");
         assertEq(
             reentrant.entryPointRevertData(),
-            abi.encodeWithSignature("Error(string)", "STF"),
+            abi.encodeWithSelector(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector),
             "re-entered batchSwap failed for an unexpected reason"
         );
         assertFalse(reentrant.directCallbackReentrySucceeded(), "re-entered raw callback succeeded");

@@ -18,6 +18,9 @@ struct MintParams {
     uint256 amount1Desired;
     uint256 amount0Min;
     uint256 amount1Min;
+    /// @dev Owns the minted position directly in the pool (no NFT), and is the only account that can
+    /// ever withdraw it. Must be able to call `pool.burn` and `pool.collect` itself, otherwise the
+    /// liquidity is locked forever. See {UniswapV3MintProxy-mint}.
     address recipient;
     uint256 deadline;
 }
