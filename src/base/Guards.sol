@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.24;
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {Deadline} from "./Deadline.sol";
 import {Chaining} from "../libraries/Chaining.sol";
@@ -20,5 +21,10 @@ abstract contract Guards is Deadline, ReentrancyGuardTransient {
     function _checkRecipient(address recipient) internal view {
         require(recipient != address(0));
         require(recipient != address(this) && recipient != Chaining.ADDRESS_THIS, "Invalid recipient");
+    }
+
+    /// @dev What the proxy holds of `token`; address(0) is native ETH, as in V4
+    function _heldBalance(address token) internal view returns (uint256) {
+        return token == address(0) ? address(this).balance : IERC20(token).balanceOf(address(this));
     }
 }

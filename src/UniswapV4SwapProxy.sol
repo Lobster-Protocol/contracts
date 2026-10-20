@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity >=0.8.20;
+pragma solidity >=0.8.24;
 
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {
     IPoolManagerMinimal,
     Currency,
@@ -11,6 +12,8 @@ import {
 import {
     IUnlockCallback,
     V4SwapCallbackData,
+    V4Leg,
+    V4UnlockData,
     V4ExactInputSingleParams,
     V4ExactOutputSingleParams
 } from "./interfaces/uniswapV4/IUnlockCallback.sol";
@@ -28,6 +31,17 @@ import {Guards} from "./base/Guards.sol";
 /// - V3 calls back per-swap. V4 calls back once per `unlock`, and everything happens inside it.
 /// - `amountSpecified` is positive for exact input in V3, but negative for exact input in V4.
 ///
+/// TWO WAYS THROUGH AN UNLOCK.
+/// - A single swap gets an unlock of its own, with compact static callback data
+///   ({V4SwapCallbackData}). This is the common case and the cheapest path, used by the direct entry
+///   points and by every batched V4 swap that is not part of a chain.
+/// - A chain ({_runChain}), consecutive swaps each spending exactly what the previous one parked,
+///   shares one unlock. Inside an unlock the PoolManager only tracks, per currency, what the proxy
+///   owes or is owed (flash accounting), so a parked output is not transferred at all: it stays as
+///   credit and the next swap spends it. The chain's intermediate currencies never move.
+/// A chain's unlock data starts with `CHAIN_TAG`, a single swap's never can, and `unlockCallback`
+/// dispatches on that first byte.
+///
 /// HOOKED POOLS ARE NOT SUPPORTED. Only `poolKey.hooks == address(0)` is accepted. A hook executes
 /// third-party code during the swap and may adjust the caller's balance delta
 /// (`swapDelta = swapDelta - hookDelta`, see v4-core Hooks.sol). Restricting to hookless pools keeps
@@ -43,7 +57,19 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
     uint160 internal constant MIN_SQRT_PRICE = 4295128739;
     uint160 internal constant MAX_SQRT_PRICE = 1461446703485210103287273052203988822378723970342;
 
+    /// @dev First byte of a chain's unlock data. A single swap's data always starts with 0x00: its
+    /// first word is `poolKey.currency0`, an address, whose top byte is zero.
+    bytes1 private constant CHAIN_TAG = 0x01;
+
     IPoolManagerMinimal public immutable POOL_MANAGER;
+
+    /// @dev Credit per currency that parked legs of the current chain have left in the PoolManager and
+    /// no later leg has spent yet. Lives in memory for the duration of one `unlockCallback`.
+    struct Ledger {
+        address[] currencies;
+        uint256[] credits;
+        uint256 length;
+    }
 
     constructor(address _poolManager) {
         POOL_MANAGER = IPoolManagerMinimal(_poolManager);
@@ -76,13 +102,17 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
     }
 
     /// @notice Accepts ETH from the PoolManager only
-    /// @dev ETH reaches the proxy this way only when a swap inside a batch sends native output to
-    /// `ADDRESS_THIS`, to be spent by a later swap of the same batch. Direct entry points refuse the
-    /// proxy as recipient, and `batchSwap` reverts unless everything it parked here is spent, so the
-    /// proxy still holds no ETH between transactions.
+    /// @dev ETH reaches the proxy this way only when a swap inside a batch parks native output, to be
+    /// spent by a later swap of the same batch. Direct entry points refuse the proxy as recipient, and
+    /// `batchSwap` reverts unless everything it parked here is spent, so the proxy still holds no ETH
+    /// between transactions.
     receive() external payable {
         require(msg.sender == address(POOL_MANAGER), "Not pool manager");
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // A single swap: one unlock of its own
+    // ---------------------------------------------------------------------------------------------
 
     /// @dev Body of {exactInputSingleV4}, shared with {UniswapBatchSwapProxy-batchSwap}. The caller of
     /// this body has already validated or resolved `params.recipient`. `payer` is who settles the
@@ -143,42 +173,7 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
         if (params.sqrtPriceLimitX96 == 0) require(amountOut == params.amountOut, "Too little received");
     }
 
-    /// @inheritdoc IUnlockCallback
-    /// @dev The only entry point the PoolManager uses. Runs the swap and nets both currency deltas
-    /// back to zero, otherwise the manager reverts the whole unlock with `CurrencyNotSettled`.
-    function unlockCallback(bytes calldata data) external override returns (bytes memory) {
-        require(msg.sender == address(POOL_MANAGER), "Not pool manager");
-
-        V4SwapCallbackData memory decoded = abi.decode(data, (V4SwapCallbackData));
-
-        // Empty hookData: _unlockAndSwap only lets hookless pools through, so there is nothing to
-        // pass it to.
-        BalanceDelta delta = POOL_MANAGER.swap(decoded.poolKey, decoded.swapParams, "");
-
-        (Currency inputCurrency, Currency outputCurrency) = decoded.swapParams.zeroForOne
-            ? (decoded.poolKey.currency0, decoded.poolKey.currency1)
-            : (decoded.poolKey.currency1, decoded.poolKey.currency0);
-
-        (int128 inputDelta, int128 outputDelta) =
-            decoded.swapParams.zeroForOne ? (delta.amount0(), delta.amount1()) : (delta.amount1(), delta.amount0());
-
-        // A hookless pool always leaves us owing the input and owed the output. The casts below rely
-        // on it, so assert rather than assume.
-        require(inputDelta <= 0 && outputDelta >= 0, "Unexpected delta");
-
-        // forge-lint: disable-next-line(unsafe-typecast)
-        uint256 amountIn = uint256(uint128(-inputDelta));
-        // forge-lint: disable-next-line(unsafe-typecast)
-        uint256 amountOut = uint256(uint128(outputDelta));
-
-        if (amountIn > 0) inputCurrency.settle(POOL_MANAGER, decoded.payer, amountIn);
-        if (amountOut > 0) outputCurrency.take(POOL_MANAGER, decoded.recipient, amountOut);
-
-        return abi.encode(amountIn, amountOut);
-    }
-
-    /// @dev Shared by every V4 swap path, batched or not: opens the unlock window and unpacks the
-    /// result. Also the single choke point where hooked pools are rejected.
+    /// @dev Opens an unlock for one swap and unpacks the result
     function _unlockAndSwap(
         PoolKey memory poolKey,
         bool zeroForOne,
@@ -190,9 +185,7 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
         private
         returns (uint256 amountIn, uint256 amountOut)
     {
-        // Everything downstream assumes a plain constant-product pool, so hooked pools are refused
-        // here — the single choke point both entry points route through.
-        require(address(poolKey.hooks) == address(0), "Hooks not supported");
+        _requireHookless(poolKey);
 
         bytes memory result = POOL_MANAGER.unlock(
             abi.encode(
@@ -212,6 +205,193 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
         );
 
         (amountIn, amountOut) = abi.decode(result, (uint256, uint256));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // A chain: one unlock for consecutive swaps, each spending what the previous one parked
+    // ---------------------------------------------------------------------------------------------
+
+    /// @dev A chain leg from exact-input params. The caller has already resolved the recipient.
+    function _exactInputLeg(V4ExactInputSingleParams memory params, bool fromHeld)
+        internal
+        view
+        returns (V4Leg memory)
+    {
+        _checkDeadline(params.deadline);
+        return V4Leg({
+            poolKey: params.poolKey,
+            zeroForOne: params.zeroForOne,
+            exactInput: true,
+            fromHeld: fromHeld,
+            amount: params.amountIn,
+            bound: params.amountOutMinimum,
+            sqrtPriceLimitX96: params.sqrtPriceLimitX96,
+            recipient: params.recipient
+        });
+    }
+
+    /// @dev A chain leg from exact-output params. The caller has already resolved the recipient.
+    function _exactOutputLeg(V4ExactOutputSingleParams memory params) internal view returns (V4Leg memory) {
+        _checkDeadline(params.deadline);
+        return V4Leg({
+            poolKey: params.poolKey,
+            zeroForOne: params.zeroForOne,
+            exactInput: false,
+            fromHeld: false,
+            amount: params.amountOut,
+            bound: params.amountInMaximum,
+            sqrtPriceLimitX96: params.sqrtPriceLimitX96,
+            recipient: params.recipient
+        });
+    }
+
+    /// @dev Runs `legs` in one unlock and returns, per leg, what its single-swap entry point would
+    /// return. Every leg not `fromHeld` is paid by `payer`.
+    function _runChain(address payer, V4Leg[] memory legs) internal returns (uint256[] memory amounts) {
+        for (uint256 i = 0; i < legs.length; i++) {
+            _requireHookless(legs[i].poolKey);
+        }
+        bytes memory result =
+            POOL_MANAGER.unlock(bytes.concat(CHAIN_TAG, abi.encode(V4UnlockData({payer: payer, legs: legs}))));
+        amounts = abi.decode(result, (uint256[]));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The callback
+    // ---------------------------------------------------------------------------------------------
+
+    /// @inheritdoc IUnlockCallback
+    /// @dev The only entry point the PoolManager uses. Every currency delta must be back to zero by the
+    /// end, or the manager reverts the whole unlock with `CurrencyNotSettled`.
+    function unlockCallback(bytes calldata data) external override returns (bytes memory) {
+        require(msg.sender == address(POOL_MANAGER), "Not pool manager");
+
+        if (data[0] == CHAIN_TAG) return _chainCallback(abi.decode(data[1:], (V4UnlockData)));
+
+        V4SwapCallbackData memory decoded = abi.decode(data, (V4SwapCallbackData));
+        (Currency inputCurrency, Currency outputCurrency) = _currencies(decoded.poolKey, decoded.swapParams.zeroForOne);
+        (uint256 amountIn, uint256 amountOut) = _swap(decoded.poolKey, decoded.swapParams);
+
+        if (amountIn > 0) inputCurrency.settle(POOL_MANAGER, decoded.payer, amountIn);
+        if (amountOut > 0) outputCurrency.take(POOL_MANAGER, decoded.recipient, amountOut);
+
+        return abi.encode(amountIn, amountOut);
+    }
+
+    /// @dev Runs every leg of a chain, then moves any parked credit no leg spent into the proxy, where a
+    /// later V3 swap of the batch can spend it and where the batch's end-of-batch check sees it.
+    function _chainCallback(V4UnlockData memory chain) private returns (bytes memory) {
+        uint256 n = chain.legs.length;
+        uint256[] memory amounts = new uint256[](n);
+        // Each leg touches at most two currencies
+        Ledger memory ledger = Ledger({currencies: new address[](2 * n), credits: new uint256[](2 * n), length: 0});
+
+        for (uint256 i = 0; i < n; i++) {
+            amounts[i] = _runLeg(chain.legs[i], chain.payer, ledger);
+        }
+
+        for (uint256 i = 0; i < ledger.length; i++) {
+            if (ledger.credits[i] > 0) {
+                Currency.wrap(ledger.currencies[i]).take(POOL_MANAGER, address(this), ledger.credits[i]);
+            }
+        }
+
+        return abi.encode(amounts);
+    }
+
+    /// @dev One leg of a chain: swap, check its bounds, pay its input, deliver its output. The bounds
+    /// are the same as the single-swap path's.
+    function _runLeg(V4Leg memory leg, address payer, Ledger memory ledger) private returns (uint256) {
+        (Currency inputCurrency, Currency outputCurrency) = _currencies(leg.poolKey, leg.zeroForOne);
+        uint256 inSlot = _slot(ledger, Currency.unwrap(inputCurrency));
+
+        // "Everything the proxy holds" includes credit parked by earlier legs of this chain, which has
+        // not been taken out of the PoolManager, on top of the proxy's own balance.
+        uint256 amountIn = leg.amount;
+        if (leg.fromHeld) {
+            amountIn = ledger.credits[inSlot] + _heldBalance(Currency.unwrap(inputCurrency));
+            require(amountIn != 0, "Nothing held");
+        }
+
+        (uint256 paid, uint256 received) = _swap(
+            leg.poolKey,
+            SwapParams({
+                zeroForOne: leg.zeroForOne,
+                // negative amountSpecified == exact input in v4, positive == exact output
+                amountSpecified: leg.exactInput
+                    ? -int256(uint256(SafeCast.toUint128(amountIn)))
+                    : int256(uint256(leg.amount)),
+                sqrtPriceLimitX96: leg.sqrtPriceLimitX96 == 0
+                    ? (leg.zeroForOne ? MIN_SQRT_PRICE + 1 : MAX_SQRT_PRICE - 1)
+                    : leg.sqrtPriceLimitX96
+            })
+        );
+
+        if (leg.exactInput) {
+            require(paid <= amountIn, "Too much requested"); // holds by construction for hookless pools
+            require(received >= leg.bound, "Too little received");
+        } else {
+            require(paid <= leg.bound, "Too much requested");
+            if (leg.sqrtPriceLimitX96 == 0) require(received == leg.amount, "Too little received");
+        }
+
+        // Pay the input. A held leg spends parked credit first, which needs no transfer at all, then
+        // the proxy's own balance. Every other leg is paid by the payer.
+        if (leg.fromHeld) {
+            uint256 credit = ledger.credits[inSlot];
+            uint256 fromCredit = paid < credit ? paid : credit;
+            ledger.credits[inSlot] = credit - fromCredit;
+            if (paid > fromCredit) inputCurrency.settle(POOL_MANAGER, address(this), paid - fromCredit);
+        } else if (paid > 0) {
+            inputCurrency.settle(POOL_MANAGER, payer, paid);
+        }
+
+        // Deliver the output. A parked output stays in the PoolManager as credit.
+        if (leg.recipient == address(this)) {
+            ledger.credits[_slot(ledger, Currency.unwrap(outputCurrency))] += received;
+        } else if (received > 0) {
+            outputCurrency.take(POOL_MANAGER, leg.recipient, received);
+        }
+
+        return leg.exactInput ? received : paid;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Shared pieces
+    // ---------------------------------------------------------------------------------------------
+
+    /// @dev Everything downstream assumes a plain constant-product pool, so hooked pools are refused
+    /// before any unlock. Both paths route through here.
+    function _requireHookless(PoolKey memory poolKey) private pure {
+        require(address(poolKey.hooks) == address(0), "Hooks not supported");
+    }
+
+    function _currencies(PoolKey memory key, bool zeroForOne) private pure returns (Currency input, Currency output) {
+        return zeroForOne ? (key.currency0, key.currency1) : (key.currency1, key.currency0);
+    }
+
+    /// @dev Runs the swap and returns what the proxy owes (`paid`) and is owed (`received`)
+    function _swap(PoolKey memory key, SwapParams memory params) private returns (uint256 paid, uint256 received) {
+        // Empty hookData: only hookless pools get this far, so there is nothing to pass it to
+        BalanceDelta delta = POOL_MANAGER.swap(key, params, "");
+        (int128 inputDelta, int128 outputDelta) =
+            params.zeroForOne ? (delta.amount0(), delta.amount1()) : (delta.amount1(), delta.amount0());
+        // A hookless pool always leaves us owing the input and owed the output. The casts below rely
+        // on it, so assert rather than assume.
+        require(inputDelta <= 0 && outputDelta >= 0, "Unexpected delta");
+        // forge-lint: disable-next-line(unsafe-typecast)
+        paid = uint256(uint128(-inputDelta));
+        // forge-lint: disable-next-line(unsafe-typecast)
+        received = uint256(uint128(outputDelta));
+    }
+
+    /// @dev Index of `currency` in the ledger, adding it with zero credit if absent
+    function _slot(Ledger memory ledger, address currency) private pure returns (uint256 i) {
+        for (; i < ledger.length; i++) {
+            if (ledger.currencies[i] == currency) return i;
+        }
+        ledger.currencies[i] = currency;
+        ledger.length++;
     }
 
     /// @dev Returns ETH that was sent in but not consumed by the swap.

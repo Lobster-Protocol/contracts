@@ -13,7 +13,12 @@ import {MintParams} from "../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol
 import {V4ExactInputSingleParams, V4ExactOutputSingleParams} from "../src/interfaces/uniswapV4/IUnlockCallback.sol";
 import {IUniswapV3FactoryMinimal} from "../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
-import {PoolKey as ProxyPoolKey} from "../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
+import {
+    PoolKey as ProxyPoolKey,
+    IPoolManagerMinimal,
+    SwapParams
+} from "../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
+import {V4Leg, V4UnlockData} from "../src/interfaces/uniswapV4/IUnlockCallback.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
@@ -636,5 +641,187 @@ contract UniswapProxyChainingTest is BatchSwapFixture {
             abi.encodeWithSelector(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector),
             "direct entry point was not locked"
         );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Consecutive chained V4 swaps share one unlock
+    // ---------------------------------------------------------------------------
+
+    /// @dev Expects exactly `count` PoolManager unlocks during the next call
+    function _expectUnlocks(uint64 count) internal {
+        vm.expectCall(address(manager), abi.encodeWithSelector(IPoolManagerMinimal.unlock.selector), count);
+    }
+
+    /// @notice V4 -> V4 -> V4, each spending what the previous parked: one unlock, and the intermediate
+    /// tokens never reach the proxy
+    function test_v4Chain_runsInOneUnlock() public {
+        bytes[] memory swaps = new bytes[](3);
+        swaps[0] = _item(E_V4_01, address(token0), 1e18, HERE);
+        swaps[1] = _item(E_V4_E1, address(token1), Chaining.HELD_BALANCE, HERE);
+        swaps[2] = _item(E_V4_EC, ETH, Chaining.HELD_BALANCE, recipient);
+
+        _expectUnlocks(1);
+        vm.prank(user);
+        proxy.batchSwap(swaps);
+        _assertNothingParked();
+    }
+
+    /// @notice V4 swaps that do not chain each get their own, cheaper, single-swap unlock
+    function test_unchainedV4Swaps_getAnUnlockEach() public {
+        bytes[] memory swaps = new bytes[](3);
+        swaps[0] = _item(E_V4_01, address(token0), 1e18, recipient); // not parked
+        swaps[1] = _item(E_V4_01, address(token1), 1e18, HERE); // parks token0...
+        swaps[2] = _item(E_V4_EC, address(tokenC), 1e18, recipient); // ...but this does not spend it
+        swaps = _append(swaps, _item(E_V3_01, address(token0), Chaining.HELD_BALANCE, recipient));
+
+        _expectUnlocks(3);
+        vm.prank(user);
+        proxy.batchSwap(swaps);
+        _assertNothingParked();
+    }
+
+    /// @notice A V3 swap between V4 swaps splits them: V4 -> V3 -> V4 is two unlocks. (That such a
+    /// route matches the manual sequence is covered by the route tests above.)
+    function test_v3SwapBreaksAV4Chain() public {
+        Leg[] memory legs = new Leg[](3);
+        legs[0] = Leg(E_V4_01, address(token1), 1e18, false); // -> token0
+        legs[1] = Leg(E_V3_01, address(token0), 0, false); // -> token1
+        legs[2] = Leg(E_V4_E1, address(token1), 0, true); // -> ETH
+
+        _expectUnlocks(2);
+        vm.prank(user);
+        proxy.batchSwap(_batchItems(legs));
+        _assertNothingParked();
+    }
+
+    /// @notice A chained V4 leg spends everything held: credit parked earlier in its unlock AND what an
+    /// earlier V3 swap parked in the proxy itself
+    function test_v4Chain_spendsCreditAndProxyBalanceTogether() public {
+        bytes[] memory swaps = new bytes[](3);
+        swaps[0] = _item(E_V3_01, address(token0), 1e18, HERE); // token1 parked in the proxy
+        swaps[1] = _item(E_V4_01, address(token0), 1e18, HERE); // token1 parked as V4 credit
+        swaps[2] = _item(E_V4_E1, address(token1), Chaining.HELD_BALANCE, recipient); // spends both
+
+        // Reference: both legs to the user, then one leg spending their sum
+        uint256 snap = vm.snapshotState();
+        vm.startPrank(user);
+        uint256 a = proxy.exactInputSingle(
+            abi.decode(_slice1(_item(E_V3_01, address(token0), 1e18, user)), (ExactInputSingleParams))
+        );
+        uint256 b = proxy.exactInputSingleV4(
+            abi.decode(_slice1(_item(E_V4_01, address(token0), 1e18, user)), (V4ExactInputSingleParams))
+        );
+        uint256 c = proxy.exactInputSingleV4(
+            abi.decode(_slice1(_item(E_V4_E1, address(token1), a + b, recipient)), (V4ExactInputSingleParams))
+        );
+        vm.stopPrank();
+        vm.revertToState(snap);
+
+        _expectUnlocks(1); // the two V4 swaps chain; the V3 swap needs no unlock
+        vm.prank(user);
+        uint256[] memory amounts = proxy.batchSwap(swaps);
+
+        assertEq(amounts[0], a, "V3 leg");
+        assertEq(amounts[1], b, "first V4 leg");
+        assertEq(amounts[2], c, "chained leg did not spend credit + proxy balance");
+        _assertNothingParked();
+    }
+
+    /// @notice An exact-output V4 leg can open a chain: its exact output is parked as credit and spent
+    function test_v4Chain_openedByAnExactOutputLeg() public {
+        bytes memory exactOut = abi.encodePacked(
+            SwapType.V4_EXACT_OUTPUT,
+            abi.encode(
+                V4ExactOutputSingleParams({
+                    poolKey: cleanKey,
+                    zeroForOne: true, // token0 in, exactly 2 token1 out
+                    recipient: HERE,
+                    deadline: block.timestamp,
+                    amountOut: 2e18,
+                    amountInMaximum: type(uint128).max,
+                    sqrtPriceLimitX96: 0
+                })
+            )
+        );
+
+        uint256 snap = vm.snapshotState();
+        vm.startPrank(user);
+        V4ExactOutputSingleParams memory direct = abi.decode(_slice1(exactOut), (V4ExactOutputSingleParams));
+        direct.recipient = user;
+        uint256 paid = proxy.exactOutputSingleV4(direct);
+        uint256 out = proxy.exactInputSingleV4(
+            abi.decode(_slice1(_item(E_V4_E1, address(token1), 2e18, recipient)), (V4ExactInputSingleParams))
+        );
+        vm.stopPrank();
+        vm.revertToState(snap);
+
+        _expectUnlocks(1);
+        vm.prank(user);
+        uint256[] memory amounts =
+            proxy.batchSwap(_batch(exactOut, _item(E_V4_E1, address(token1), Chaining.HELD_BALANCE, recipient)));
+
+        assertEq(amounts[0], paid, "exact-output leg");
+        assertEq(amounts[1], out, "chained leg did not spend exactly the 2 parked token1");
+        _assertNothingParked();
+    }
+
+    /// @notice A chained leg that stops early leaves credit behind; it is moved into the proxy when the
+    /// unlock ends, and the end-of-batch check refuses the batch
+    function test_v4Chain_partlySpent_reverts() public {
+        // token1 -> ETH with a limit one tick away spends only part of the parked token1
+        V4ExactInputSingleParams memory stopsEarly = abi.decode(
+            _slice1(_item(E_V4_E1, address(token1), Chaining.HELD_BALANCE, recipient)), (V4ExactInputSingleParams)
+        );
+        stopsEarly.sqrtPriceLimitX96 = TickMath.getSqrtRatioAtTick(1); // oneForZero pushes the price up
+
+        uint256[8] memory before = _all();
+        vm.prank(user);
+        vm.expectRevert(bytes("Funds left in proxy"));
+        proxy.batchSwap(
+            _batch(
+                _item(E_V4_01, address(token0), 1e18, HERE),
+                abi.encodePacked(SwapType.V4_EXACT_INPUT, abi.encode(stopsEarly))
+            )
+        );
+
+        uint256[8] memory afterAll = _all();
+        for (uint256 i = 0; i < 8; i++) {
+            assertEq(afterAll[i], before[i], "a rejected batch moved funds");
+        }
+    }
+
+    /// @notice Forged chain-format callback data is refused like any other: only the PoolManager may
+    /// call `unlockCallback`
+    function test_forgedChainCallbackIsRefused() public {
+        V4Leg[] memory legs = new V4Leg[](1);
+        legs[0] = V4Leg({
+            poolKey: cleanKey,
+            zeroForOne: true,
+            exactInput: true,
+            fromHeld: false,
+            amount: 1e18,
+            bound: 0,
+            sqrtPriceLimitX96: 0,
+            recipient: makeAddr("attacker")
+        });
+        bytes memory forged = bytes.concat(bytes1(0x01), abi.encode(V4UnlockData({payer: user, legs: legs})));
+        uint256[8] memory before = _all();
+
+        vm.prank(makeAddr("attacker"));
+        vm.expectRevert(bytes("Not pool manager"));
+        proxy.unlockCallback(forged);
+
+        uint256[8] memory afterAll = _all();
+        for (uint256 i = 0; i < 8; i++) {
+            assertEq(afterAll[i], before[i], "a forged callback moved funds");
+        }
+    }
+
+    function _append(bytes[] memory a, bytes memory b) internal pure returns (bytes[] memory out) {
+        out = new bytes[](a.length + 1);
+        for (uint256 i = 0; i < a.length; i++) {
+            out[i] = a[i];
+        }
+        out[a.length] = b;
     }
 }
