@@ -14,6 +14,7 @@ import {
 import {V4ExactOutputSingleParams} from "../../../src/interfaces/uniswapV4/IUnlockCallback.sol";
 import {Currency, PoolKey, IHooks} from "../../../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
+import {TickMath} from "../../../src/libraries/uniswapV3/TickMath.sol";
 
 /// @notice Does each entry point deliver what its name promises, at the edges?
 contract SwapSemanticsTest is ForkBase {
@@ -73,17 +74,20 @@ contract SwapSemanticsTest is ForkBase {
     // Exact output: does "exact" hold when the pool runs dry?
     // ---------------------------------------------------------------------------
 
-    /// @dev V3 exact-output swaps can stop early once liquidity is exhausted, filling only part of
-    /// the order. `exactOutputSingle` checks `amountIn <= amountInMaximum` and returns, so a partial
-    /// fill is reported as success. Callers that need the full amount should compare the delivered
-    /// balance themselves, or pass a non-zero `sqrtPriceLimitX96` and treat a short fill as expected.
-    function test_exactOutputSingle_shortFillSucceedsSilently() public {
+    /// @dev A V3 pool stops early once its liquidity is exhausted, filling only part of the order.
+    /// Without a price limit `exactOutputSingle` must not report that as success: `amountInMaximum`
+    /// would then cap only the total spent, not the price, and a sandwich that drains the honest
+    /// liquidity could fill the order against a tiny position at an absurd price. So it reverts,
+    /// like SwapRouter and the V4 path. Callers who accept partial fills pass a `sqrtPriceLimitX96`.
+    function test_exactOutputSingle_shortFillIsRejected() public {
         uint256 requested = 100_000e18; // far more SHAL than the pool holds
         uint256 balBefore = tok.balanceOf(recipient);
+        uint256 usdcBefore = IERC20(USDC).balanceOf(approver);
 
         vm.startPrank(approver);
         IERC20(USDC).approve(address(proxy), type(uint256).max);
-        uint256 amountIn = proxy.exactOutputSingle(
+        vm.expectRevert("Too little received");
+        proxy.exactOutputSingle(
             ExactOutputSingleParams({
                 tokenIn: USDC,
                 tokenOut: address(tok),
@@ -97,17 +101,44 @@ contract SwapSemanticsTest is ForkBase {
         );
         vm.stopPrank();
 
-        uint256 delivered = tok.balanceOf(recipient) - balBefore;
-
-        // The call succeeded and money changed hands...
-        assertGt(amountIn, 0, "nothing was paid");
-        assertGt(delivered, 0, "nothing was delivered");
-        // ...but the caller did not get the amount they asked for, and was told nothing.
-        assertLt(delivered, requested, "expected a short fill from the shallow pool");
+        assertEq(tok.balanceOf(recipient), balBefore, "a partial fill was delivered");
+        assertEq(IERC20(USDC).balanceOf(approver), usdcBefore, "the caller paid for a partial fill");
     }
 
-    /// @dev `exactOutputSingleV4` additionally requires `amountOut == params.amountOut` when no
-    /// price limit was given. The revert here comes from v4-core's own arithmetic before that check
+    /// @dev With a price limit the caller has bounded the price themselves, so a partial fill is a
+    /// legitimate outcome and still succeeds.
+    function test_exactOutputSingle_withPriceLimit_mayFillPartially() public {
+        uint256 requested = 100_000e18;
+        uint256 balBefore = tok.balanceOf(recipient);
+        bool zeroForOne = USDC < address(tok);
+        (, int24 tick,,,,,) = IUniswapV3PoolMinimal(pool).slot0();
+        // 600 ticks (~6%) in the direction of the trade
+        uint160 limit = TickMath.getSqrtRatioAtTick(zeroForOne ? tick - 600 : tick + 600);
+
+        vm.startPrank(approver);
+        IERC20(USDC).approve(address(proxy), type(uint256).max);
+        uint256 amountIn = proxy.exactOutputSingle(
+            ExactOutputSingleParams({
+                tokenIn: USDC,
+                tokenOut: address(tok),
+                fee: 3000,
+                recipient: recipient,
+                deadline: block.timestamp,
+                amountOut: requested,
+                amountInMaximum: type(uint256).max,
+                sqrtPriceLimitX96: limit
+            })
+        );
+        vm.stopPrank();
+
+        uint256 delivered = tok.balanceOf(recipient) - balBefore;
+        assertGt(amountIn, 0, "nothing was paid");
+        assertGt(delivered, 0, "nothing was delivered");
+        assertLt(delivered, requested, "expected a partial fill up to the price limit");
+    }
+
+    /// @dev `exactOutputSingleV4` applies the same rule: it requires `amountOut == params.amountOut`
+    /// when no price limit was given. The revert here comes from v4-core's own arithmetic before that check
     /// is reached, so this asserts only that an unfillable order does not return successfully.
     function test_exactOutputSingleV4_shortFillIsRejected() public {
         // Skipped on mainnet, and the reason is worth stating: proving an order is UNFILLABLE means

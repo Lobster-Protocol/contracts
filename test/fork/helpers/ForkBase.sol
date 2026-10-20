@@ -74,7 +74,7 @@ abstract contract ForkBase is Test {
         recipient = _actor("recipient");
 
         address deployed = vm.envOr("PROXY", address(0));
-        proxy = deployed == address(0) ? new UniswapProxy(V3_FACTORY, POOL_MANAGER) : UniswapProxy(deployed);
+        proxy = deployed == address(0) ? new UniswapProxy(V3_FACTORY, POOL_MANAGER) : UniswapProxy(payable(deployed));
 
         // Sanity: attaching to a wrong/stale address would make every assertion below meaningless.
         require(address(proxy).code.length > 0, "no code at proxy");

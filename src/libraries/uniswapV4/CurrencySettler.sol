@@ -8,11 +8,13 @@ import {TransferHelper} from "../uniswapV3/TransferHelper.sol";
 /// @dev Mirrors the settle/take pattern used by Uniswap's own periphery (`DeltaResolver`).
 library CurrencySettler {
     /// @notice Pays the manager what is owed for `currency`
-    /// @dev Native currency is paid from this contract's balance (funded by msg.value); ERC20s are
-    /// pulled straight from `payer` into the manager, so the proxy never custodies them.
+    /// @dev Native currency is paid from this contract's balance: a direct swap's msg.value, or ETH a
+    /// previous swap in the same batch left in the proxy. ERC20s are pulled straight from `payer` into
+    /// the manager, or sent from the proxy's own balance when `payer` is the proxy (a chained swap
+    /// spending what an earlier swap in the batch produced).
     /// @param currency The currency owed to the manager
     /// @param manager The PoolManager singleton
-    /// @param payer The address to pull ERC20 tokens from. Ignored for the native currency.
+    /// @param payer The account paying. Ignored for the native currency.
     /// @param amount The amount to settle
     function settle(Currency currency, IPoolManagerMinimal manager, address payer, uint256 amount) internal {
         // sync checkpoints the manager's balance so that settle() can measure what arrived
@@ -21,7 +23,9 @@ library CurrencySettler {
         if (isNative(currency)) {
             manager.settle{value: amount}();
         } else {
-            TransferHelper.safeTransferFrom(Currency.unwrap(currency), payer, address(manager), amount);
+            address token = Currency.unwrap(currency);
+            if (payer == address(this)) TransferHelper.safeTransfer(token, address(manager), amount);
+            else TransferHelper.safeTransferFrom(token, payer, address(manager), amount);
             manager.settle();
         }
     }

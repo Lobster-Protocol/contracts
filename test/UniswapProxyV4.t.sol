@@ -334,6 +334,37 @@ contract UniswapProxyV4Test is Test {
         proxy.exactInputSingleV4(p);
     }
 
+    /// @dev An ERC20 output sent to the proxy could never leave it. (A native output already
+    /// bounced, since the proxy has no `receive`; it is now refused up front with the same message.)
+    function test_swapsRejectTheProxyAsRecipient() public {
+        uint256 balBefore = token0.balanceOf(user);
+
+        V4ExactInputSingleParams memory exactIn = _exactIn(cleanKey, 1e18, 0);
+        exactIn.recipient = address(proxy);
+        exactIn.deadline = block.timestamp;
+        vm.prank(user);
+        vm.expectRevert(bytes("Invalid recipient"));
+        proxy.exactInputSingleV4(exactIn);
+
+        V4ExactOutputSingleParams memory exactOut = _exactOut(cleanKey, 1e18, 2e18);
+        exactOut.recipient = address(proxy);
+        exactOut.deadline = block.timestamp;
+        vm.prank(user);
+        vm.expectRevert(bytes("Invalid recipient"));
+        proxy.exactOutputSingleV4(exactOut);
+
+        V4ExactInputSingleParams memory nativeOut = _exactIn(nativeKey, 1e18, 0);
+        nativeOut.zeroForOne = false; // token1 in, ETH out
+        nativeOut.recipient = address(proxy);
+        nativeOut.deadline = block.timestamp;
+        vm.prank(user);
+        vm.expectRevert(bytes("Invalid recipient"));
+        proxy.exactInputSingleV4(nativeOut);
+
+        assertEq(token0.balanceOf(user), balBefore, "caller paid");
+        assertEq(token1.balanceOf(address(proxy)), 0, "tokens reached the proxy");
+    }
+
     // ---------------------------------------------------------------------------
     // Native ETH
     // ---------------------------------------------------------------------------
