@@ -34,6 +34,10 @@ contract UniswapV3ProxyTest is Test {
     uint256 constant AMOUNT_DESIRED = 1000e18;
     uint256 constant AMOUNT_MIN = 900e18;
     uint256 constant SWAP_AMOUNT = 10e18;
+    uint256 constant MAX_DEVIATION_BPS = 100; // 1%
+    uint16 constant OBSERVATION_CARDINALITY = 100;
+
+    event MaxPriceDeviationSet(address indexed vault, address indexed pool, uint256 maxDeviationBps);
 
     function setUp() public {
         token0 = new MockERC20();
@@ -64,7 +68,12 @@ contract UniswapV3ProxyTest is Test {
         token0.approve(address(proxy), type(uint256).max);
         token1.approve(address(proxy), type(uint256).max);
         weth.approve(address(proxy), type(uint256).max);
+        proxy.setMaxPriceDeviation(address(pool), MAX_DEVIATION_BPS);
         vm.stopPrank();
+
+        // Give the oracle room for several observations and enough history to cover the TWAP window
+        pool.increaseObservationCardinalityNext(OBSERVATION_CARDINALITY);
+        vm.warp(block.timestamp + proxy.TWAP_PERIOD());
     }
 
     // ---------------------------------------------------------------------------
@@ -415,6 +424,8 @@ contract UniswapV3ProxyTest is Test {
         address noApproval = makeAddr("noApproval");
         token0.mint(noApproval, AMOUNT_DESIRED);
         token1.mint(noApproval, AMOUNT_DESIRED);
+        vm.prank(noApproval);
+        proxy.setMaxPriceDeviation(address(pool), MAX_DEVIATION_BPS);
 
         MintParams memory params = MintParams({
             token0: address(token0),
@@ -443,6 +454,7 @@ contract UniswapV3ProxyTest is Test {
         vm.startPrank(poor);
         token0.approve(address(proxy), type(uint256).max);
         token1.approve(address(proxy), type(uint256).max);
+        proxy.setMaxPriceDeviation(address(pool), MAX_DEVIATION_BPS);
         vm.stopPrank();
 
         MintParams memory params = MintParams({
@@ -1431,5 +1443,206 @@ contract UniswapV3ProxyTest is Test {
 
         assertEq(token0.balanceOf(address(proxy)), 0, "proxy should hold zero token0");
         assertEq(token1.balanceOf(address(proxy)), 0, "proxy should hold zero token1");
+    }
+
+    // ===========================================================================
+    // MINT -- TWAP price deviation
+    // ===========================================================================
+
+    function _defaultMintParams() internal view returns (MintParams memory) {
+        return MintParams({
+            token0: address(token0),
+            token1: address(token1),
+            fee: FEE,
+            tickLower: TICK_LOWER_WIDE,
+            tickUpper: TICK_UPPER_WIDE,
+            amount0Desired: AMOUNT_DESIRED,
+            amount1Desired: AMOUNT_DESIRED,
+            amount0Min: 0,
+            amount1Min: 0,
+            recipient: user,
+            deadline: block.timestamp + 3600
+        });
+    }
+
+    /// @dev Swaps `amountIn` of tokenIn through the pool to move the spot price away from the TWAP
+    function _movePrice(address tokenIn, address tokenOut, uint256 amountIn) internal {
+        ExactInputSingleParams memory p = ExactInputSingleParams({
+            tokenIn: tokenIn,
+            tokenOut: tokenOut,
+            fee: FEE,
+            recipient: user,
+            deadline: block.timestamp + 3600,
+            amountIn: amountIn,
+            amountOutMinimum: 0,
+            sqrtPriceLimitX96: 0
+        });
+        vm.prank(user);
+        proxy.exactInputSingle(p);
+    }
+
+    /// @dev Spot vs TWAP deviation in bps, computed independently of the proxy
+    function _spotVsTwapBps() internal view returns (uint256) {
+        uint32[] memory secondsAgos = new uint32[](2);
+        secondsAgos[0] = proxy.TWAP_PERIOD();
+        (int56[] memory cumulatives,) = pool.observe(secondsAgos);
+        int24 twapTick = int24((cumulatives[1] - cumulatives[0]) / int56(uint56(proxy.TWAP_PERIOD())));
+        (, int24 spotTick,,,,,) = pool.slot0();
+        int256 tickDelta = int256(spotTick) - int256(twapTick);
+        // 1 tick ~= 1 bps
+        return uint256(tickDelta < 0 ? -tickDelta : tickDelta);
+    }
+
+    function testTwapPeriodIsTenMinutes() public view {
+        assertEq(proxy.TWAP_PERIOD(), 600);
+    }
+
+    function testSetMaxPriceDeviation() public {
+        vm.expectEmit(true, true, false, true, address(proxy));
+        emit MaxPriceDeviationSet(user, address(pool), 250);
+
+        vm.prank(user);
+        proxy.setMaxPriceDeviation(address(pool), 250);
+
+        assertEq(proxy.maxPriceDeviationBps(user, address(pool)), 250);
+    }
+
+    function testSetMaxPriceDeviationAcceptsMax() public {
+        uint256 maxBps = proxy.MAX_DEVIATION_BPS();
+        vm.prank(user);
+        proxy.setMaxPriceDeviation(address(pool), maxBps);
+        assertEq(proxy.maxPriceDeviationBps(user, address(pool)), maxBps);
+    }
+
+    function testSetMaxPriceDeviationRevertsAboveMax() public {
+        uint256 tooHigh = proxy.MAX_DEVIATION_BPS() + 1;
+        vm.prank(user);
+        vm.expectRevert("Invalid deviation");
+        proxy.setMaxPriceDeviation(address(pool), tooHigh);
+    }
+
+    function testSetMaxPriceDeviationIsPerCallerAndPerPool() public {
+        address otherVault = makeAddr("otherVault");
+
+        vm.prank(otherVault);
+        proxy.setMaxPriceDeviation(address(pool), 5000);
+
+        // other vault's setting does not touch user's
+        assertEq(proxy.maxPriceDeviationBps(user, address(pool)), MAX_DEVIATION_BPS);
+        assertEq(proxy.maxPriceDeviationBps(otherVault, address(pool)), 5000);
+        // and user's setting for one pool does not apply to another
+        assertEq(proxy.maxPriceDeviationBps(user, address(poolWithWeth)), 0);
+    }
+
+    function testMintRevertsWhenDeviationNotSet() public {
+        address unconfigured = makeAddr("unconfigured");
+        token0.mint(unconfigured, AMOUNT_DESIRED);
+        token1.mint(unconfigured, AMOUNT_DESIRED);
+        vm.startPrank(unconfigured);
+        token0.approve(address(proxy), type(uint256).max);
+        token1.approve(address(proxy), type(uint256).max);
+
+        vm.expectRevert("Price deviation not set");
+        proxy.mint(_defaultMintParams());
+        vm.stopPrank();
+    }
+
+    function testMintRevertsAfterDeviationReset() public {
+        vm.prank(user);
+        proxy.setMaxPriceDeviation(address(pool), 0);
+
+        vm.prank(user);
+        vm.expectRevert("Price deviation not set");
+        proxy.mint(_defaultMintParams());
+    }
+
+    function testMintSucceedsWithSmallPriceMove() public {
+        _mintDefaultLiquidity();
+        _movePrice(address(token1), address(token0), 1e18);
+        assertLt(_spotVsTwapBps(), MAX_DEVIATION_BPS);
+
+        vm.prank(user);
+        proxy.mint(_defaultMintParams());
+    }
+
+    function testMintRevertsWhenSpotAboveTwap() public {
+        _mintDefaultLiquidity();
+        _movePrice(address(token1), address(token0), 50e18);
+        assertGt(_spotVsTwapBps(), MAX_DEVIATION_BPS);
+
+        vm.prank(user);
+        vm.expectRevert("Price deviation too high");
+        proxy.mint(_defaultMintParams());
+    }
+
+    function testMintRevertsWhenSpotBelowTwap() public {
+        _mintDefaultLiquidity();
+        _movePrice(address(token0), address(token1), 50e18);
+        assertGt(_spotVsTwapBps(), MAX_DEVIATION_BPS);
+
+        vm.prank(user);
+        vm.expectRevert("Price deviation too high");
+        proxy.mint(_defaultMintParams());
+    }
+
+    function testMintRevertsOnPriceMoveBeyondMaxDeviation() public {
+        _mintDefaultLiquidity();
+        // push the price way up so even 100% deviation is not enough
+        _movePrice(address(token1), address(token0), 2000e18);
+
+        vm.startPrank(user);
+        proxy.setMaxPriceDeviation(address(pool), proxy.MAX_DEVIATION_BPS());
+        vm.expectRevert("Price deviation too high");
+        proxy.mint(_defaultMintParams());
+        vm.stopPrank();
+    }
+
+    function testMintSucceedsWhenVaultAllowsLargerDeviation() public {
+        _mintDefaultLiquidity();
+        _movePrice(address(token1), address(token0), 50e18);
+        uint256 deviation = _spotVsTwapBps();
+        assertGt(deviation, MAX_DEVIATION_BPS);
+
+        vm.startPrank(user);
+        proxy.setMaxPriceDeviation(address(pool), deviation * 2);
+        proxy.mint(_defaultMintParams());
+        vm.stopPrank();
+    }
+
+    function testMintSucceedsOnceTwapCatchesUp() public {
+        _mintDefaultLiquidity();
+        _movePrice(address(token1), address(token0), 50e18);
+
+        vm.prank(user);
+        vm.expectRevert("Price deviation too high");
+        proxy.mint(_defaultMintParams());
+
+        // after a full TWAP window at the new price, the TWAP equals spot again
+        vm.warp(block.timestamp + proxy.TWAP_PERIOD());
+
+        vm.prank(user);
+        proxy.mint(_defaultMintParams());
+    }
+
+    function testMintRevertsWithoutEnoughOracleHistory() public {
+        MockERC20 tokenA = new MockERC20();
+        MockERC20 tokenB = new MockERC20();
+        if (address(tokenA) > address(tokenB)) (tokenA, tokenB) = (tokenB, tokenA);
+
+        IUniswapV3PoolMinimal freshPool =
+            IUniswapV3PoolMinimal(factory.createPool(address(tokenA), address(tokenB), FEE));
+        freshPool.initialize(2 ** 96);
+
+        vm.prank(user);
+        proxy.setMaxPriceDeviation(address(freshPool), MAX_DEVIATION_BPS);
+
+        MintParams memory params = _defaultMintParams();
+        params.token0 = address(tokenA);
+        params.token1 = address(tokenB);
+
+        // pool was initialized in this block: the oracle cannot look back TWAP_PERIOD seconds
+        vm.prank(user);
+        vm.expectRevert(bytes("OLD"));
+        proxy.mint(params);
     }
 }

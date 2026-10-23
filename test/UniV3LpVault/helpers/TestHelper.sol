@@ -96,6 +96,10 @@ contract TestHelper is Test {
         setup.token0.approve(address(setup.router), type(uint256).max);
         setup.token1.approve(address(setup.router), type(uint256).max);
 
+        // the proxy checks spot against the TWAP on mint: configure the deviation and build oracle history
+        mintProxy.setMaxPriceDeviation(address(setup.pool), 100);
+        vm.warp(block.timestamp + mintProxy.TWAP_PERIOD());
+
         // deposit liquidity
         MintParams memory mintParams = MintParams({
             token0: address(setup.token0),

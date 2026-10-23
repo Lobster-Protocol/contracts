@@ -31,7 +31,7 @@ contract UniV3LpVaultInitializeTest is Test {
         assertEq(address(setup.vault.TOKEN0()), address(setup.token0));
         assertEq(address(setup.vault.TOKEN1()), address(setup.token1));
         assertEq(address(setup.vault.POOL()), address(setup.pool));
-        assertEq(setup.vault.tvlFeeCollectedAt(), 1209601);
+        assertEq(setup.vault.tvlFeeCollectedAt(), block.timestamp);
         assertEq(setup.vault.tvlFeeScaled(), TestConstants.HIGH_TVL_FEE);
         assertEq(setup.vault.performanceFeeScaled(), TestConstants.HIGH_PERF_FEE);
         assertEq(setup.vault.feeCollector(), setup.feeCollector);
