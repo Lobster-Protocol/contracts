@@ -12,8 +12,9 @@ import {Chaining} from "../libraries/Chaining.sol";
 /// one swap until a later swap spends it. Any call that re-entered the proxy at that moment (say
 /// from a token's transfer hook) could spend those funds as its own. Every external entry point is
 /// therefore `nonReentrant`; only the pool callbacks and `receive` stay open, since the pools must
-/// call them mid-swap. The lock lives in transient storage, so the proxy still has no persistent
-/// state, and it costs a few hundred gas per call.
+/// call them mid-swap. The lock lives in transient storage, so it adds no persistent state (the only
+/// persistent state is the per-caller price bands of {UniswapV3MintProxy}), and it costs a few
+/// hundred gas per call.
 abstract contract Guards is Deadline, ReentrancyGuardTransient {
     /// @dev For recipients supplied by the caller. The proxy itself is refused because nothing can
     /// move tokens or positions out of it again; `Chaining.ADDRESS_THIS` because it only means

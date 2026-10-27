@@ -19,6 +19,7 @@ import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV
 import {TestConstants} from "./Constants.sol";
 import {UniswapV3ProxyHarness} from "../../Mocks/UniswapV3ProxyHarness.sol";
 import {MintParams} from "src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
+import {TickMath} from "../../../src/libraries/uniswapV3/TickMath.sol";
 
 contract TestHelper is Test {
     using Math for uint256;
@@ -95,6 +96,9 @@ contract TestHelper is Test {
         setup.token1.approve(address(mintProxy), type(uint256).max);
         setup.token0.approve(address(setup.router), type(uint256).max);
         setup.token1.approve(address(setup.router), type(uint256).max);
+
+        // the proxy only mints inside the caller's price band: allow any price for this seed liquidity
+        mintProxy.setPriceBand(address(setup.pool), TickMath.MIN_TICK, TickMath.MAX_TICK);
 
         // deposit liquidity
         MintParams memory mintParams = MintParams({

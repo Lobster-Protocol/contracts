@@ -180,12 +180,14 @@ contract AuthorisationTest is ForkBase {
     function test_outsiderMint_debitsOutsiderNotApprover() public {
         uint256[4] memory before = _approverHoldings();
         (int24 lower, int24 upper) = _rangeAroundSpot(USDC_WETH_500, 10);
+        (int24 minTick, int24 maxTick) = _bandAroundSpot(USDC_WETH_500, 1000);
 
         // Directing the resulting position elsewhere changes nothing about who pays: `mint` stamps
         // payer = msg.sender into the callback data.
         vm.startPrank(outsider);
         IERC20(USDC).approve(address(proxy), type(uint256).max);
         IERC20(WETH).approve(address(proxy), type(uint256).max);
+        proxy.setPriceBand(USDC_WETH_500, minTick, maxTick);
         proxy.mint(
             MintParams({
                 token0: USDC,
@@ -341,10 +343,12 @@ contract AuthorisationTest is ForkBase {
             address(reentrant) < USDC ? (address(reentrant), USDC) : (USDC, address(reentrant));
 
         uint256[4] memory before = _approverHoldings();
+        (int24 minTick, int24 maxTick) = _bandAroundSpot(pool, 1000);
 
         vm.startPrank(outsider);
         IERC20(USDC).approve(address(proxy), type(uint256).max);
         reentrant.approve(address(proxy), type(uint256).max);
+        proxy.setPriceBand(pool, minTick, maxTick);
         proxy.mint(
             MintParams({
                 token0: token0,
@@ -386,10 +390,13 @@ contract AuthorisationTest is ForkBase {
         (address token0, address token1) =
             address(reentrant) < USDC ? (address(reentrant), USDC) : (USDC, address(reentrant));
 
+        (int24 minTick, int24 maxTick) = _bandAroundSpot(pool, 1000);
+
         // Liquidity first, while the token is still inert
         vm.startPrank(outsider);
         IERC20(USDC).approve(address(proxy), type(uint256).max);
         reentrant.approve(address(proxy), type(uint256).max);
+        proxy.setPriceBand(pool, minTick, maxTick);
         proxy.mint(
             MintParams({
                 token0: token0,

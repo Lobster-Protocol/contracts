@@ -44,10 +44,12 @@ contract SwapSemanticsTest is ForkBase {
 
         (address token0, address token1) = _sorted(address(tok), USDC);
         (int24 lower, int24 upper) = _rangeAroundSpot(pool, 10);
+        (int24 minTick, int24 maxTick) = _bandAroundSpot(pool, 1000);
 
         vm.startPrank(lp);
         IERC20(USDC).approve(address(proxy), type(uint256).max);
         tok.approve(address(proxy), type(uint256).max);
+        proxy.setPriceBand(pool, minTick, maxTick);
         proxy.mint(
             MintParams({
                 token0: token0,
@@ -234,8 +236,11 @@ contract SwapSemanticsTest is ForkBase {
 
         uint256 approverUsdcBefore = IERC20(USDC).balanceOf(approver);
 
+        (int24 minTick, int24 maxTick) = _bandAroundSpot(fotPool, 1000);
+
         vm.startPrank(approver);
         fot.approve(address(proxy), type(uint256).max);
+        proxy.setPriceBand(fotPool, minTick, maxTick);
         vm.expectRevert(); // pool's own balance check (M0) rejects the underpayment
         proxy.mint(
             MintParams({
@@ -270,10 +275,12 @@ contract SwapSemanticsTest is ForkBase {
         (int24 lower, int24 upper) = _rangeAroundSpot(pool, 10);
 
         tok.mint(approver, 1_000e18);
+        (int24 minTick, int24 maxTick) = _bandAroundSpot(pool, 1000);
 
         vm.startPrank(approver);
         IERC20(USDC).approve(address(proxy), type(uint256).max);
         tok.approve(address(proxy), type(uint256).max);
+        proxy.setPriceBand(pool, minTick, maxTick);
         vm.expectRevert("Price slippage check");
         proxy.mint(
             MintParams({
@@ -305,9 +312,12 @@ contract SwapSemanticsTest is ForkBase {
         uint256 desired0 = token0 == USDC ? 100e6 : 100e18;
         uint256 desired1 = token1 == USDC ? 100e6 : 100e18;
 
+        (int24 minTick, int24 maxTick) = _bandAroundSpot(pool, 1000);
+
         vm.startPrank(approver);
         IERC20(USDC).approve(address(proxy), type(uint256).max);
         tok.approve(address(proxy), type(uint256).max);
+        proxy.setPriceBand(pool, minTick, maxTick);
         (uint256 amount0, uint256 amount1) = proxy.mint(
             MintParams({
                 token0: token0,

@@ -20,7 +20,7 @@ import {UniswapV3ProxyBase} from "./base/UniswapV3ProxyBase.sol";
 /// single address, so integrators approve one contract rather than three. Any mix of V3 and V4 swaps
 /// can also be run as one atomic batch, chained so that a swap spends what the previous one produced.
 /// @dev Composition only — every function lives in a mixin:
-/// - {UniswapV3MintProxy}     mint + uniswapV3MintCallback
+/// - {UniswapV3MintProxy}     setPriceBand + mint + uniswapV3MintCallback
 /// - {UniswapV3SwapProxy}     exactInputSingle / exactOutputSingle + uniswapV3SwapCallback
 /// - {UniswapV4SwapProxy}     exactInputSingleV4 / exactOutputSingleV4 + unlockCallback + receive
 /// - {UniswapBatchSwapProxy}  batchSwap: any sequence of the four swaps above, optionally chained
@@ -46,6 +46,11 @@ import {UniswapV3ProxyBase} from "./base/UniswapV3ProxyBase.sol";
 /// LP positions from `mint` are owned by their recipient directly in the pool, with no NFT, and only
 /// that recipient can ever withdraw them. A recipient that cannot call the pool's `burn` and
 /// `collect` locks the liquidity forever; see {UniswapV3MintProxy-mint}.
+///
+/// PRICE BANDS. `mint` only runs while the pool's current tick is inside the caller's price band for
+/// that pool, set with `setPriceBand`; no band means no mint. The bands are the proxy's only
+/// persistent state. Each caller can only set its own, so an account that mints on a vault's behalf
+/// (e.g. a Zodiac Roles manager) must not be allowed to call `setPriceBand`.
 contract UniswapProxy is UniswapV3MintProxy, UniswapV3SwapProxy, UniswapV4SwapProxy, UniswapBatchSwapProxy {
     constructor(
         address _uniV3Factory,

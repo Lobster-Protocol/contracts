@@ -122,6 +122,7 @@ contract UniswapProxyChainingTest is BatchSwapFixture {
     /// @dev Wide liquidity (1000 of each) in a V3 pool, paid by this contract
     function _mintV3(address a, address b) internal {
         (address t0, address t1) = _sorted(a, b);
+        _allowAnyMintPrice(address(_v3PoolFor(t0, t1)));
         proxy.mint(
             MintParams({
                 token0: t0,

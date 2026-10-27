@@ -13,10 +13,43 @@ import {UniswapV3ProxyBase} from "./base/UniswapV3ProxyBase.sol";
 /// @title Uniswap V3 liquidity provision
 /// @notice Mints a position directly on a V3 pool and pays for it from the caller's balance. The
 /// position belongs to the recipient inside the pool itself; there is no NFT.
+/// A mint only goes through while the pool's current tick is inside the caller's price band for
+/// that pool (see `setPriceBand`).
 /// @dev Abstract on purpose: this is a mixin combined into {UniswapProxy}, which owns the
 /// constructor. Deploy {UniswapProxy} rather than this.
 abstract contract UniswapV3MintProxy is UniswapV3ProxyBase, IUniswapV3MintCallback {
-    /// @notice Mints liquidity to a Uniswap V3 pool, owned by `params.recipient`
+    /// @notice Price range, as pool ticks, in which a caller allows minting into a pool
+    /// @dev Both bounds are inclusive. The default (0, 0) means not configured: minting into that pool reverts.
+    struct PriceBand {
+        int24 minTick;
+        int24 maxTick;
+    }
+
+    /// @notice The price band each caller (vault) allows per pool
+    mapping(address vault => mapping(address pool => PriceBand)) public priceBands;
+
+    event PriceBandSet(address indexed vault, address indexed pool, int24 minTick, int24 maxTick);
+
+    /// @notice Sets the price band the caller allows when minting into `pool`: the pool's current tick must be
+    /// within [minTick, maxTick]
+    /// @dev Settings are keyed by msg.sender, so each vault only ever configures its own mints. A vault whose
+    /// mints are made by a delegate (e.g. a Zodiac Roles manager) must not let that delegate call this.
+    /// @param pool The Uniswap V3 pool the setting applies to
+    /// @param minTick Lowest allowed pool tick (inclusive)
+    /// @param maxTick Highest allowed pool tick (inclusive), greater than `minTick`.
+    /// (0, 0) clears the band, which blocks minting into `pool` for the caller
+    function setPriceBand(address pool, int24 minTick, int24 maxTick) external nonReentrant {
+        require(
+            (minTick == 0 && maxTick == 0)
+                || (minTick < maxTick && minTick >= TickMath.MIN_TICK && maxTick <= TickMath.MAX_TICK),
+            "Invalid price band"
+        );
+        priceBands[msg.sender][pool] = PriceBand({minTick: minTick, maxTick: maxTick});
+        emit PriceBandSet(msg.sender, pool, minTick, maxTick);
+    }
+
+    /// @notice Mints liquidity to a Uniswap V3 pool, owned by `params.recipient`. Reverts unless the
+    /// pool's current tick is inside the caller's price band for that pool (see `setPriceBand`).
     /// @dev READ BEFORE CHOOSING A RECIPIENT. Unlike Uniswap's NonfungiblePositionManager, no NFT
     /// is minted and nothing about the position is recorded here. It lives in the pool, keyed by
     /// (recipient, tickLower, tickUpper), and the pool lets only that owner act on it: `burn` and
@@ -49,10 +82,16 @@ abstract contract UniswapV3MintProxy is UniswapV3ProxyBase, IUniswapV3MintCallba
         // Get the pool address
         IUniswapV3PoolMinimal pool = IUniswapV3PoolMinimal(PoolAddress.computeAddress(UNI_V3_FACTORY, poolKey));
 
+        PriceBand memory band = priceBands[msg.sender][address(pool)];
+        // a configured band always has minTick < maxTick, the default (0, 0) does not
+        require(band.minTick < band.maxTick, "Price band not set");
+
         // compute the liquidity amount
         uint128 liquidity;
         {
-            (uint160 sqrtPriceX96,,,,,,) = pool.slot0();
+            (uint160 sqrtPriceX96, int24 tick,,,,,) = pool.slot0();
+            require(tick >= band.minTick && tick <= band.maxTick, "Price out of band");
+
             uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(params.tickLower);
             uint160 sqrtRatioBX96 = TickMath.getSqrtRatioAtTick(params.tickUpper);
 

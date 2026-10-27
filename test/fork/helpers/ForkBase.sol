@@ -225,6 +225,14 @@ abstract contract ForkBase is Test {
         upper = centre + widthInSpacings * spacing;
     }
 
+    /// @dev A price band of `halfWidth` ticks either side of the pool's current tick, for `setPriceBand`.
+    /// Computed here and set by the caller, so a `vm.prank` lands on `setPriceBand` and not on `slot0`.
+    function _bandAroundSpot(address pool, int24 halfWidth) internal view returns (int24 minTick, int24 maxTick) {
+        (, int24 tick,,,,,) = IUniswapV3PoolMinimal(pool).slot0();
+        minTick = tick - halfWidth;
+        maxTick = tick + halfWidth;
+    }
+
     function _poolFor(address tokenA, address tokenB, uint24 fee) internal view returns (address) {
         return PoolAddress.computeAddress(V3_FACTORY, PoolAddress.getPoolKey(tokenA, tokenB, fee));
     }

@@ -37,6 +37,11 @@ contract UniswapV3ProxyTest is Test {
     uint256 constant AMOUNT_DESIRED = 1000e18;
     uint256 constant AMOUNT_MIN = 900e18;
     uint256 constant SWAP_AMOUNT = 10e18;
+    // price band around the 1:1 start price (tick 0), roughly +-5%
+    int24 constant BAND_MIN_TICK = -500;
+    int24 constant BAND_MAX_TICK = 500;
+
+    event PriceBandSet(address indexed vault, address indexed pool, int24 minTick, int24 maxTick);
 
     function setUp() public {
         token0 = new MockERC20();
@@ -67,6 +72,7 @@ contract UniswapV3ProxyTest is Test {
         token0.approve(address(proxy), type(uint256).max);
         token1.approve(address(proxy), type(uint256).max);
         weth.approve(address(proxy), type(uint256).max);
+        proxy.setPriceBand(address(pool), BAND_MIN_TICK, BAND_MAX_TICK);
         vm.stopPrank();
     }
 
@@ -414,6 +420,8 @@ contract UniswapV3ProxyTest is Test {
         address noApproval = makeAddr("noApproval");
         token0.mint(noApproval, AMOUNT_DESIRED);
         token1.mint(noApproval, AMOUNT_DESIRED);
+        vm.prank(noApproval);
+        proxy.setPriceBand(address(pool), BAND_MIN_TICK, BAND_MAX_TICK);
 
         MintParams memory params = MintParams({
             token0: address(token0),
@@ -442,6 +450,7 @@ contract UniswapV3ProxyTest is Test {
         vm.startPrank(poor);
         token0.approve(address(proxy), type(uint256).max);
         token1.approve(address(proxy), type(uint256).max);
+        proxy.setPriceBand(address(pool), BAND_MIN_TICK, BAND_MAX_TICK);
         vm.stopPrank();
 
         MintParams memory params = MintParams({
@@ -1449,6 +1458,7 @@ contract UniswapV3ProxyTest is Test {
         vm.startPrank(lp);
         token0.approve(address(proxy), type(uint256).max);
         token1.approve(address(proxy), type(uint256).max);
+        proxy.setPriceBand(address(thin), TickMath.MIN_TICK, TickMath.MAX_TICK);
         proxy.mint(_thinMintParams(-6000, 6000, 20e18, 20e18, lp));
         vm.stopPrank();
     }
@@ -1534,7 +1544,7 @@ contract UniswapV3ProxyTest is Test {
     /// a tiny position at a price ~20x worse than fair. Before the fix the victim's "exactly 2, for at
     /// most 2.2" order filled 0.1 of the 2 against it for ~1.95 and reported success. Now it reverts.
     function testExactOutputSingleSandwichAgainstShortFillReverts() public {
-        _createThinPool();
+        IUniswapV3PoolMinimal thin = _createThinPool();
 
         address attacker = makeAddr("attacker");
         token0.mint(attacker, 1000e18);
@@ -1542,6 +1552,8 @@ contract UniswapV3ProxyTest is Test {
         vm.startPrank(attacker);
         token0.approve(address(proxy), type(uint256).max);
         token1.approve(address(proxy), type(uint256).max);
+        // the band only guards each caller's own mints: the attacker allows any price for theirs
+        proxy.setPriceBand(address(thin), TickMath.MIN_TICK, TickMath.MAX_TICK);
         // Front-run 1: buy out all honest token1, stopping just past the honest range
         proxy.exactInputSingle(
             ExactInputSingleParams({
@@ -1737,5 +1749,260 @@ contract UniswapV3ProxyTest is Test {
         }
 
         assertEq(token0.balanceOf(user), userBefore, "caller paid");
+    }
+
+    // ===========================================================================
+    // MINT -- price band
+    // ===========================================================================
+
+    function _defaultMintParams() internal view returns (MintParams memory) {
+        return MintParams({
+            token0: address(token0),
+            token1: address(token1),
+            fee: FEE,
+            tickLower: TICK_LOWER_WIDE,
+            tickUpper: TICK_UPPER_WIDE,
+            amount0Desired: AMOUNT_DESIRED,
+            amount1Desired: AMOUNT_DESIRED,
+            amount0Min: 0,
+            amount1Min: 0,
+            recipient: user,
+            deadline: type(uint256).max
+        });
+    }
+
+    /// @dev Swaps `amountIn` of tokenIn through the pool to move the price
+    function _movePrice(address tokenIn, address tokenOut, uint256 amountIn) internal {
+        ExactInputSingleParams memory p = ExactInputSingleParams({
+            tokenIn: tokenIn,
+            tokenOut: tokenOut,
+            fee: FEE,
+            recipient: user,
+            deadline: type(uint256).max,
+            amountIn: amountIn,
+            amountOutMinimum: 0,
+            sqrtPriceLimitX96: 0
+        });
+        vm.prank(user);
+        proxy.exactInputSingle(p);
+    }
+
+    function _currentTick() internal view returns (int24 tick) {
+        (, tick,,,,,) = pool.slot0();
+    }
+
+    function _band(address vault, address pool_) internal view returns (int24 minTick, int24 maxTick) {
+        (minTick, maxTick) = proxy.priceBands(vault, pool_);
+    }
+
+    // --- setPriceBand --------------------------------------------------------
+
+    function testSetPriceBand() public {
+        vm.expectEmit(true, true, false, true, address(proxy));
+        emit PriceBandSet(user, address(pool), -1200, 800);
+
+        vm.prank(user);
+        proxy.setPriceBand(address(pool), -1200, 800);
+
+        (int24 minTick, int24 maxTick) = _band(user, address(pool));
+        assertEq(minTick, -1200);
+        assertEq(maxTick, 800);
+    }
+
+    function testSetPriceBandOverwritesPreviousValues() public {
+        vm.startPrank(user);
+        proxy.setPriceBand(address(pool), -100, 100);
+        proxy.setPriceBand(address(pool), 2000, 3000);
+        vm.stopPrank();
+
+        (int24 minTick, int24 maxTick) = _band(user, address(pool));
+        assertEq(minTick, 2000);
+        assertEq(maxTick, 3000);
+    }
+
+    function testSetPriceBandAcceptsFullTickRange() public {
+        vm.prank(user);
+        proxy.setPriceBand(address(pool), TickMath.MIN_TICK, TickMath.MAX_TICK);
+
+        (int24 minTick, int24 maxTick) = _band(user, address(pool));
+        assertEq(minTick, TickMath.MIN_TICK);
+        assertEq(maxTick, TickMath.MAX_TICK);
+    }
+
+    function testSetPriceBandAcceptsNegativeAndPositiveBands() public {
+        vm.startPrank(user);
+        proxy.setPriceBand(address(pool), -5000, -4000);
+        proxy.setPriceBand(address(pool), 4000, 5000);
+        vm.stopPrank();
+    }
+
+    function testSetPriceBandRevertsWhenMinEqualsMax() public {
+        vm.prank(user);
+        vm.expectRevert("Invalid price band");
+        proxy.setPriceBand(address(pool), 100, 100);
+    }
+
+    function testSetPriceBandRevertsWhenMinAboveMax() public {
+        vm.prank(user);
+        vm.expectRevert("Invalid price band");
+        proxy.setPriceBand(address(pool), 100, -100);
+    }
+
+    function testSetPriceBandRevertsBelowMinTick() public {
+        vm.prank(user);
+        vm.expectRevert("Invalid price band");
+        proxy.setPriceBand(address(pool), TickMath.MIN_TICK - 1, 0);
+    }
+
+    function testSetPriceBandRevertsAboveMaxTick() public {
+        vm.prank(user);
+        vm.expectRevert("Invalid price band");
+        proxy.setPriceBand(address(pool), 0, TickMath.MAX_TICK + 1);
+    }
+
+    function testSetPriceBandIsPerCallerAndPerPool() public {
+        address otherVault = makeAddr("otherVault");
+
+        vm.prank(otherVault);
+        proxy.setPriceBand(address(pool), -10, 10);
+
+        // other vault's band does not touch user's
+        (int24 minTick, int24 maxTick) = _band(user, address(pool));
+        assertEq(minTick, BAND_MIN_TICK);
+        assertEq(maxTick, BAND_MAX_TICK);
+        (minTick, maxTick) = _band(otherVault, address(pool));
+        assertEq(minTick, -10);
+        assertEq(maxTick, 10);
+        // and user's band for one pool does not apply to another
+        (minTick, maxTick) = _band(user, address(poolWithWeth));
+        assertEq(minTick, 0);
+        assertEq(maxTick, 0);
+    }
+
+    // --- mint: configuration -------------------------------------------------
+
+    function testMintRevertsWhenPriceBandNotSet() public {
+        address unconfigured = makeAddr("unconfigured");
+        token0.mint(unconfigured, AMOUNT_DESIRED);
+        token1.mint(unconfigured, AMOUNT_DESIRED);
+        vm.startPrank(unconfigured);
+        token0.approve(address(proxy), type(uint256).max);
+        token1.approve(address(proxy), type(uint256).max);
+
+        vm.expectRevert("Price band not set");
+        proxy.mint(_defaultMintParams());
+        vm.stopPrank();
+    }
+
+    function testMintRevertsAfterPriceBandCleared() public {
+        vm.prank(user);
+        proxy.setPriceBand(address(pool), 0, 0);
+
+        (int24 minTick, int24 maxTick) = _band(user, address(pool));
+        assertEq(minTick, 0);
+        assertEq(maxTick, 0);
+
+        vm.prank(user);
+        vm.expectRevert("Price band not set");
+        proxy.mint(_defaultMintParams());
+    }
+
+    // --- mint: band check ----------------------------------------------------
+
+    function testMintSucceedsInsideBand() public {
+        int24 tick = _currentTick();
+        assertGe(tick, BAND_MIN_TICK);
+        assertLe(tick, BAND_MAX_TICK);
+
+        vm.prank(user);
+        proxy.mint(_defaultMintParams());
+    }
+
+    function testMintSucceedsWhenTickEqualsMinTick() public {
+        int24 tick = _currentTick();
+        vm.prank(user);
+        proxy.setPriceBand(address(pool), tick, tick + 1);
+
+        vm.prank(user);
+        proxy.mint(_defaultMintParams());
+    }
+
+    function testMintSucceedsWhenTickEqualsMaxTick() public {
+        int24 tick = _currentTick();
+        vm.prank(user);
+        proxy.setPriceBand(address(pool), tick - 1, tick);
+
+        vm.prank(user);
+        proxy.mint(_defaultMintParams());
+    }
+
+    function testMintRevertsWhenTickOneBelowBand() public {
+        int24 tick = _currentTick();
+        vm.prank(user);
+        proxy.setPriceBand(address(pool), tick + 1, tick + 100);
+
+        vm.prank(user);
+        vm.expectRevert("Price out of band");
+        proxy.mint(_defaultMintParams());
+    }
+
+    function testMintRevertsWhenTickOneAboveBand() public {
+        int24 tick = _currentTick();
+        vm.prank(user);
+        proxy.setPriceBand(address(pool), tick - 100, tick - 1);
+
+        vm.prank(user);
+        vm.expectRevert("Price out of band");
+        proxy.mint(_defaultMintParams());
+    }
+
+    function testMintRevertsWhenPriceMovesAboveBand() public {
+        _mintDefaultLiquidity();
+        _movePrice(address(token1), address(token0), 200e18);
+        assertGt(_currentTick(), BAND_MAX_TICK);
+
+        vm.prank(user);
+        vm.expectRevert("Price out of band");
+        proxy.mint(_defaultMintParams());
+    }
+
+    function testMintRevertsWhenPriceMovesBelowBand() public {
+        _mintDefaultLiquidity();
+        _movePrice(address(token0), address(token1), 200e18);
+        assertLt(_currentTick(), BAND_MIN_TICK);
+
+        vm.prank(user);
+        vm.expectRevert("Price out of band");
+        proxy.mint(_defaultMintParams());
+    }
+
+    function testMintSucceedsAfterBandUpdated() public {
+        _mintDefaultLiquidity();
+        _movePrice(address(token1), address(token0), 200e18);
+        int24 tick = _currentTick();
+
+        vm.prank(user);
+        vm.expectRevert("Price out of band");
+        proxy.mint(_defaultMintParams());
+
+        // the Safe moves its band to the new price level
+        vm.prank(user);
+        proxy.setPriceBand(address(pool), tick - 500, tick + 500);
+
+        vm.prank(user);
+        proxy.mint(_defaultMintParams());
+    }
+
+    function testBandOfAnotherVaultDoesNotAffectMint() public {
+        address otherVault = makeAddr("otherVault");
+        int24 tick = _currentTick();
+
+        // another vault configures a band that excludes the current price
+        vm.prank(otherVault);
+        proxy.setPriceBand(address(pool), tick + 1000, tick + 2000);
+
+        // user's own band still applies to user's mints
+        vm.prank(user);
+        proxy.mint(_defaultMintParams());
     }
 }

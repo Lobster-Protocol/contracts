@@ -78,6 +78,10 @@ contract HappyPathTest is ForkBase {
         uint256 usdcBefore = IERC20(USDC).balanceOf(approver);
         uint256 wethBefore = IERC20(WETH).balanceOf(approver);
 
+        (int24 minTick, int24 maxTick) = _bandAroundSpot(USDC_WETH_500, 1000);
+        vm.prank(approver);
+        proxy.setPriceBand(USDC_WETH_500, minTick, maxTick);
+
         vm.prank(approver);
         (uint256 amount0, uint256 amount1) = proxy.mint(
             MintParams({
@@ -107,6 +111,41 @@ contract HappyPathTest is ForkBase {
         bytes32 key = keccak256(abi.encodePacked(recipient, lower, upper));
         (uint128 liquidity,,,,) = IUniswapV3PoolMinimal(USDC_WETH_500).positions(key);
         assertGt(liquidity, 0, "recipient holds no liquidity");
+    }
+
+    /// @notice On the real pool, a mint is refused when the live price is outside the caller's band,
+    /// and nothing is spent
+    function test_mint_refusedWhenSpotOutsideBand() public {
+        (int24 lower, int24 upper) = _rangeAroundSpot(USDC_WETH_500, 10);
+        (, int24 tick,,,,,) = IUniswapV3PoolMinimal(USDC_WETH_500).slot0();
+
+        // a band entirely above today's price, as if it had been set before the price dropped
+        vm.prank(approver);
+        proxy.setPriceBand(USDC_WETH_500, tick + 100, tick + 2000);
+
+        uint256 usdcBefore = IERC20(USDC).balanceOf(approver);
+        uint256 wethBefore = IERC20(WETH).balanceOf(approver);
+
+        vm.prank(approver);
+        vm.expectRevert("Price out of band");
+        proxy.mint(
+            MintParams({
+                token0: USDC,
+                token1: WETH,
+                fee: 500,
+                tickLower: lower,
+                tickUpper: upper,
+                amount0Desired: lpUsdc,
+                amount1Desired: lpWeth,
+                amount0Min: 0,
+                amount1Min: 0,
+                recipient: recipient,
+                deadline: block.timestamp
+            })
+        );
+
+        assertEq(IERC20(USDC).balanceOf(approver), usdcBefore, "USDC spent on a refused mint");
+        assertEq(IERC20(WETH).balanceOf(approver), wethBefore, "WETH spent on a refused mint");
     }
 
     function test_deadlineIsEnforced() public {

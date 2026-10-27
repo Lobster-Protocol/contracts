@@ -22,6 +22,7 @@ import {
 } from "../../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
 import {BatchSwapCalls} from "./BatchSwapCalls.sol";
 import {Chaining} from "../../src/libraries/Chaining.sol";
+import {TickMath} from "../../src/libraries/uniswapV3/TickMath.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 // `^0.8.0`, unlike UniswapV3Infra (`^0.8.28`), so a real V3 factory can share this 0.8.26 unit
 // with the real V4 PoolManager.
@@ -87,6 +88,7 @@ abstract contract BatchSwapFixture is Test {
 
         token0.approve(address(proxy), type(uint256).max);
         token1.approve(address(proxy), type(uint256).max);
+        _allowAnyMintPrice(address(v3Pool));
         proxy.mint(
             MintParams({
                 token0: address(token0),
@@ -130,6 +132,12 @@ abstract contract BatchSwapFixture is Test {
     // ---------------------------------------------------------------------------
     // Helpers: fixture
     // ---------------------------------------------------------------------------
+
+    /// @dev The caller's price band for `pool` set to the whole tick range: for mints that only seed
+    /// liquidity, where the band is not what is under test
+    function _allowAnyMintPrice(address pool) internal {
+        proxy.setPriceBand(pool, TickMath.MIN_TICK, TickMath.MAX_TICK);
+    }
 
     function _deployV3Factory() internal returns (address factory) {
         bytes memory code = FACTORY_BYTECODE;
