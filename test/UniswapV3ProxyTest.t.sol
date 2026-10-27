@@ -34,10 +34,11 @@ contract UniswapV3ProxyTest is Test {
     uint256 constant AMOUNT_DESIRED = 1000e18;
     uint256 constant AMOUNT_MIN = 900e18;
     uint256 constant SWAP_AMOUNT = 10e18;
-    uint256 constant MAX_DEVIATION_BPS = 100; // 1%
-    uint16 constant OBSERVATION_CARDINALITY = 100;
+    // price band around the 1:1 start price (tick 0), roughly +-5%
+    int24 constant BAND_MIN_TICK = -500;
+    int24 constant BAND_MAX_TICK = 500;
 
-    event MaxPriceDeviationSet(address indexed vault, address indexed pool, uint256 maxDeviationBps);
+    event PriceBandSet(address indexed vault, address indexed pool, int24 minTick, int24 maxTick);
 
     function setUp() public {
         token0 = new MockERC20();
@@ -68,12 +69,8 @@ contract UniswapV3ProxyTest is Test {
         token0.approve(address(proxy), type(uint256).max);
         token1.approve(address(proxy), type(uint256).max);
         weth.approve(address(proxy), type(uint256).max);
-        proxy.setMaxPriceDeviation(address(pool), MAX_DEVIATION_BPS);
+        proxy.setPriceBand(address(pool), BAND_MIN_TICK, BAND_MAX_TICK);
         vm.stopPrank();
-
-        // Give the oracle room for several observations and enough history to cover the TWAP window
-        pool.increaseObservationCardinalityNext(OBSERVATION_CARDINALITY);
-        vm.warp(block.timestamp + proxy.TWAP_PERIOD());
     }
 
     // ---------------------------------------------------------------------------
@@ -425,7 +422,7 @@ contract UniswapV3ProxyTest is Test {
         token0.mint(noApproval, AMOUNT_DESIRED);
         token1.mint(noApproval, AMOUNT_DESIRED);
         vm.prank(noApproval);
-        proxy.setMaxPriceDeviation(address(pool), MAX_DEVIATION_BPS);
+        proxy.setPriceBand(address(pool), BAND_MIN_TICK, BAND_MAX_TICK);
 
         MintParams memory params = MintParams({
             token0: address(token0),
@@ -454,7 +451,7 @@ contract UniswapV3ProxyTest is Test {
         vm.startPrank(poor);
         token0.approve(address(proxy), type(uint256).max);
         token1.approve(address(proxy), type(uint256).max);
-        proxy.setMaxPriceDeviation(address(pool), MAX_DEVIATION_BPS);
+        proxy.setPriceBand(address(pool), BAND_MIN_TICK, BAND_MAX_TICK);
         vm.stopPrank();
 
         MintParams memory params = MintParams({
@@ -1445,8 +1442,9 @@ contract UniswapV3ProxyTest is Test {
         assertEq(token1.balanceOf(address(proxy)), 0, "proxy should hold zero token1");
     }
 
+
     // ===========================================================================
-    // MINT -- TWAP price deviation
+    // MINT -- price band
     // ===========================================================================
 
     function _defaultMintParams() internal view returns (MintParams memory) {
@@ -1461,18 +1459,18 @@ contract UniswapV3ProxyTest is Test {
             amount0Min: 0,
             amount1Min: 0,
             recipient: user,
-            deadline: block.timestamp + 3600
+            deadline: type(uint256).max
         });
     }
 
-    /// @dev Swaps `amountIn` of tokenIn through the pool to move the spot price away from the TWAP
+    /// @dev Swaps `amountIn` of tokenIn through the pool to move the price
     function _movePrice(address tokenIn, address tokenOut, uint256 amountIn) internal {
         ExactInputSingleParams memory p = ExactInputSingleParams({
             tokenIn: tokenIn,
             tokenOut: tokenOut,
             fee: FEE,
             recipient: user,
-            deadline: block.timestamp + 3600,
+            deadline: type(uint256).max,
             amountIn: amountIn,
             amountOutMinimum: 0,
             sqrtPriceLimitX96: 0
@@ -1481,60 +1479,101 @@ contract UniswapV3ProxyTest is Test {
         proxy.exactInputSingle(p);
     }
 
-    /// @dev Spot vs TWAP deviation in bps, computed independently of the proxy
-    function _spotVsTwapBps() internal view returns (uint256) {
-        uint32[] memory secondsAgos = new uint32[](2);
-        secondsAgos[0] = proxy.TWAP_PERIOD();
-        (int56[] memory cumulatives,) = pool.observe(secondsAgos);
-        int24 twapTick = int24((cumulatives[1] - cumulatives[0]) / int56(uint56(proxy.TWAP_PERIOD())));
-        (, int24 spotTick,,,,,) = pool.slot0();
-        int256 tickDelta = int256(spotTick) - int256(twapTick);
-        // 1 tick ~= 1 bps
-        return uint256(tickDelta < 0 ? -tickDelta : tickDelta);
+    function _currentTick() internal view returns (int24 tick) {
+        (, tick,,,,,) = pool.slot0();
     }
 
-    function testTwapPeriodIsTenMinutes() public view {
-        assertEq(proxy.TWAP_PERIOD(), 600);
+    function _band(address vault, address pool_) internal view returns (int24 minTick, int24 maxTick) {
+        (minTick, maxTick) = proxy.priceBands(vault, pool_);
     }
 
-    function testSetMaxPriceDeviation() public {
+    // --- setPriceBand --------------------------------------------------------
+
+    function testSetPriceBand() public {
         vm.expectEmit(true, true, false, true, address(proxy));
-        emit MaxPriceDeviationSet(user, address(pool), 250);
+        emit PriceBandSet(user, address(pool), -1200, 800);
 
         vm.prank(user);
-        proxy.setMaxPriceDeviation(address(pool), 250);
+        proxy.setPriceBand(address(pool), -1200, 800);
 
-        assertEq(proxy.maxPriceDeviationBps(user, address(pool)), 250);
+        (int24 minTick, int24 maxTick) = _band(user, address(pool));
+        assertEq(minTick, -1200);
+        assertEq(maxTick, 800);
     }
 
-    function testSetMaxPriceDeviationAcceptsMax() public {
-        uint256 maxBps = proxy.MAX_DEVIATION_BPS();
+    function testSetPriceBandOverwritesPreviousValues() public {
+        vm.startPrank(user);
+        proxy.setPriceBand(address(pool), -100, 100);
+        proxy.setPriceBand(address(pool), 2000, 3000);
+        vm.stopPrank();
+
+        (int24 minTick, int24 maxTick) = _band(user, address(pool));
+        assertEq(minTick, 2000);
+        assertEq(maxTick, 3000);
+    }
+
+    function testSetPriceBandAcceptsFullTickRange() public {
         vm.prank(user);
-        proxy.setMaxPriceDeviation(address(pool), maxBps);
-        assertEq(proxy.maxPriceDeviationBps(user, address(pool)), maxBps);
+        proxy.setPriceBand(address(pool), TickMath.MIN_TICK, TickMath.MAX_TICK);
+
+        (int24 minTick, int24 maxTick) = _band(user, address(pool));
+        assertEq(minTick, TickMath.MIN_TICK);
+        assertEq(maxTick, TickMath.MAX_TICK);
     }
 
-    function testSetMaxPriceDeviationRevertsAboveMax() public {
-        uint256 tooHigh = proxy.MAX_DEVIATION_BPS() + 1;
+    function testSetPriceBandAcceptsNegativeAndPositiveBands() public {
+        vm.startPrank(user);
+        proxy.setPriceBand(address(pool), -5000, -4000);
+        proxy.setPriceBand(address(pool), 4000, 5000);
+        vm.stopPrank();
+    }
+
+    function testSetPriceBandRevertsWhenMinEqualsMax() public {
         vm.prank(user);
-        vm.expectRevert("Invalid deviation");
-        proxy.setMaxPriceDeviation(address(pool), tooHigh);
+        vm.expectRevert("Invalid price band");
+        proxy.setPriceBand(address(pool), 100, 100);
     }
 
-    function testSetMaxPriceDeviationIsPerCallerAndPerPool() public {
+    function testSetPriceBandRevertsWhenMinAboveMax() public {
+        vm.prank(user);
+        vm.expectRevert("Invalid price band");
+        proxy.setPriceBand(address(pool), 100, -100);
+    }
+
+    function testSetPriceBandRevertsBelowMinTick() public {
+        vm.prank(user);
+        vm.expectRevert("Invalid price band");
+        proxy.setPriceBand(address(pool), TickMath.MIN_TICK - 1, 0);
+    }
+
+    function testSetPriceBandRevertsAboveMaxTick() public {
+        vm.prank(user);
+        vm.expectRevert("Invalid price band");
+        proxy.setPriceBand(address(pool), 0, TickMath.MAX_TICK + 1);
+    }
+
+    function testSetPriceBandIsPerCallerAndPerPool() public {
         address otherVault = makeAddr("otherVault");
 
         vm.prank(otherVault);
-        proxy.setMaxPriceDeviation(address(pool), 5000);
+        proxy.setPriceBand(address(pool), -10, 10);
 
-        // other vault's setting does not touch user's
-        assertEq(proxy.maxPriceDeviationBps(user, address(pool)), MAX_DEVIATION_BPS);
-        assertEq(proxy.maxPriceDeviationBps(otherVault, address(pool)), 5000);
-        // and user's setting for one pool does not apply to another
-        assertEq(proxy.maxPriceDeviationBps(user, address(poolWithWeth)), 0);
+        // other vault's band does not touch user's
+        (int24 minTick, int24 maxTick) = _band(user, address(pool));
+        assertEq(minTick, BAND_MIN_TICK);
+        assertEq(maxTick, BAND_MAX_TICK);
+        (minTick, maxTick) = _band(otherVault, address(pool));
+        assertEq(minTick, -10);
+        assertEq(maxTick, 10);
+        // and user's band for one pool does not apply to another
+        (minTick, maxTick) = _band(user, address(poolWithWeth));
+        assertEq(minTick, 0);
+        assertEq(maxTick, 0);
     }
 
-    function testMintRevertsWhenDeviationNotSet() public {
+    // --- mint: configuration -------------------------------------------------
+
+    function testMintRevertsWhenPriceBandNotSet() public {
         address unconfigured = makeAddr("unconfigured");
         token0.mint(unconfigured, AMOUNT_DESIRED);
         token1.mint(unconfigured, AMOUNT_DESIRED);
@@ -1542,107 +1581,120 @@ contract UniswapV3ProxyTest is Test {
         token0.approve(address(proxy), type(uint256).max);
         token1.approve(address(proxy), type(uint256).max);
 
-        vm.expectRevert("Price deviation not set");
+        vm.expectRevert("Price band not set");
         proxy.mint(_defaultMintParams());
         vm.stopPrank();
     }
 
-    function testMintRevertsAfterDeviationReset() public {
+    function testMintRevertsAfterPriceBandCleared() public {
         vm.prank(user);
-        proxy.setMaxPriceDeviation(address(pool), 0);
+        proxy.setPriceBand(address(pool), 0, 0);
+
+        (int24 minTick, int24 maxTick) = _band(user, address(pool));
+        assertEq(minTick, 0);
+        assertEq(maxTick, 0);
 
         vm.prank(user);
-        vm.expectRevert("Price deviation not set");
+        vm.expectRevert("Price band not set");
         proxy.mint(_defaultMintParams());
     }
 
-    function testMintSucceedsWithSmallPriceMove() public {
+    // --- mint: band check ----------------------------------------------------
+
+    function testMintSucceedsInsideBand() public {
+        int24 tick = _currentTick();
+        assertGe(tick, BAND_MIN_TICK);
+        assertLe(tick, BAND_MAX_TICK);
+
+        vm.prank(user);
+        proxy.mint(_defaultMintParams());
+    }
+
+    function testMintSucceedsWhenTickEqualsMinTick() public {
+        int24 tick = _currentTick();
+        vm.prank(user);
+        proxy.setPriceBand(address(pool), tick, tick + 1);
+
+        vm.prank(user);
+        proxy.mint(_defaultMintParams());
+    }
+
+    function testMintSucceedsWhenTickEqualsMaxTick() public {
+        int24 tick = _currentTick();
+        vm.prank(user);
+        proxy.setPriceBand(address(pool), tick - 1, tick);
+
+        vm.prank(user);
+        proxy.mint(_defaultMintParams());
+    }
+
+    function testMintRevertsWhenTickOneBelowBand() public {
+        int24 tick = _currentTick();
+        vm.prank(user);
+        proxy.setPriceBand(address(pool), tick + 1, tick + 100);
+
+        vm.prank(user);
+        vm.expectRevert("Price out of band");
+        proxy.mint(_defaultMintParams());
+    }
+
+    function testMintRevertsWhenTickOneAboveBand() public {
+        int24 tick = _currentTick();
+        vm.prank(user);
+        proxy.setPriceBand(address(pool), tick - 100, tick - 1);
+
+        vm.prank(user);
+        vm.expectRevert("Price out of band");
+        proxy.mint(_defaultMintParams());
+    }
+
+    function testMintRevertsWhenPriceMovesAboveBand() public {
         _mintDefaultLiquidity();
-        _movePrice(address(token1), address(token0), 1e18);
-        assertLt(_spotVsTwapBps(), MAX_DEVIATION_BPS);
+        _movePrice(address(token1), address(token0), 200e18);
+        assertGt(_currentTick(), BAND_MAX_TICK);
 
         vm.prank(user);
+        vm.expectRevert("Price out of band");
         proxy.mint(_defaultMintParams());
     }
 
-    function testMintRevertsWhenSpotAboveTwap() public {
+    function testMintRevertsWhenPriceMovesBelowBand() public {
         _mintDefaultLiquidity();
-        _movePrice(address(token1), address(token0), 50e18);
-        assertGt(_spotVsTwapBps(), MAX_DEVIATION_BPS);
+        _movePrice(address(token0), address(token1), 200e18);
+        assertLt(_currentTick(), BAND_MIN_TICK);
 
         vm.prank(user);
-        vm.expectRevert("Price deviation too high");
+        vm.expectRevert("Price out of band");
         proxy.mint(_defaultMintParams());
     }
 
-    function testMintRevertsWhenSpotBelowTwap() public {
+    function testMintSucceedsAfterBandUpdated() public {
         _mintDefaultLiquidity();
-        _movePrice(address(token0), address(token1), 50e18);
-        assertGt(_spotVsTwapBps(), MAX_DEVIATION_BPS);
+        _movePrice(address(token1), address(token0), 200e18);
+        int24 tick = _currentTick();
 
         vm.prank(user);
-        vm.expectRevert("Price deviation too high");
+        vm.expectRevert("Price out of band");
         proxy.mint(_defaultMintParams());
-    }
 
-    function testMintRevertsOnPriceMoveBeyondMaxDeviation() public {
-        _mintDefaultLiquidity();
-        // push the price way up so even 100% deviation is not enough
-        _movePrice(address(token1), address(token0), 2000e18);
-
-        vm.startPrank(user);
-        proxy.setMaxPriceDeviation(address(pool), proxy.MAX_DEVIATION_BPS());
-        vm.expectRevert("Price deviation too high");
-        proxy.mint(_defaultMintParams());
-        vm.stopPrank();
-    }
-
-    function testMintSucceedsWhenVaultAllowsLargerDeviation() public {
-        _mintDefaultLiquidity();
-        _movePrice(address(token1), address(token0), 50e18);
-        uint256 deviation = _spotVsTwapBps();
-        assertGt(deviation, MAX_DEVIATION_BPS);
-
-        vm.startPrank(user);
-        proxy.setMaxPriceDeviation(address(pool), deviation * 2);
-        proxy.mint(_defaultMintParams());
-        vm.stopPrank();
-    }
-
-    function testMintSucceedsOnceTwapCatchesUp() public {
-        _mintDefaultLiquidity();
-        _movePrice(address(token1), address(token0), 50e18);
-
+        // the Safe moves its band to the new price level
         vm.prank(user);
-        vm.expectRevert("Price deviation too high");
-        proxy.mint(_defaultMintParams());
-
-        // after a full TWAP window at the new price, the TWAP equals spot again
-        vm.warp(block.timestamp + proxy.TWAP_PERIOD());
+        proxy.setPriceBand(address(pool), tick - 500, tick + 500);
 
         vm.prank(user);
         proxy.mint(_defaultMintParams());
     }
 
-    function testMintRevertsWithoutEnoughOracleHistory() public {
-        MockERC20 tokenA = new MockERC20();
-        MockERC20 tokenB = new MockERC20();
-        if (address(tokenA) > address(tokenB)) (tokenA, tokenB) = (tokenB, tokenA);
+    function testBandOfAnotherVaultDoesNotAffectMint() public {
+        address otherVault = makeAddr("otherVault");
+        int24 tick = _currentTick();
 
-        IUniswapV3PoolMinimal freshPool =
-            IUniswapV3PoolMinimal(factory.createPool(address(tokenA), address(tokenB), FEE));
-        freshPool.initialize(2 ** 96);
+        // another vault configures a band that excludes the current price
+        vm.prank(otherVault);
+        proxy.setPriceBand(address(pool), tick + 1000, tick + 2000);
 
+        // user's own band still applies to user's mints
         vm.prank(user);
-        proxy.setMaxPriceDeviation(address(freshPool), MAX_DEVIATION_BPS);
-
-        MintParams memory params = _defaultMintParams();
-        params.token0 = address(tokenA);
-        params.token1 = address(tokenB);
-
-        // pool was initialized in this block: the oracle cannot look back TWAP_PERIOD seconds
-        vm.prank(user);
-        vm.expectRevert(bytes("OLD"));
-        proxy.mint(params);
+        proxy.mint(_defaultMintParams());
     }
 }

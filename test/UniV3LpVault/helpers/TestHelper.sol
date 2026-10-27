@@ -18,6 +18,7 @@ import {IUniswapV3RouterMinimal} from "../../../src/interfaces/uniswapV3/IUniswa
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {TestConstants} from "./Constants.sol";
 import {UniswapV3Proxy} from "../../../src/UniswapV3Proxy.sol";
+import {TickMath} from "../../../src/libraries/uniswapV3/TickMath.sol";
 import {MintParams} from "src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
 
 contract TestHelper is Test {
@@ -96,9 +97,8 @@ contract TestHelper is Test {
         setup.token0.approve(address(setup.router), type(uint256).max);
         setup.token1.approve(address(setup.router), type(uint256).max);
 
-        // the proxy checks spot against the TWAP on mint: configure the deviation and build oracle history
-        mintProxy.setMaxPriceDeviation(address(setup.pool), 100);
-        vm.warp(block.timestamp + mintProxy.TWAP_PERIOD());
+        // the proxy only mints inside the caller's price band: allow any price for this seed liquidity
+        mintProxy.setPriceBand(address(setup.pool), TickMath.MIN_TICK, TickMath.MAX_TICK);
 
         // deposit liquidity
         MintParams memory mintParams = MintParams({
