@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity >=0.8.24;
+pragma solidity >=0.8.27;
 
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {ExactInputSingleParams, ExactOutputSingleParams} from "./interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
@@ -41,8 +41,8 @@ library SwapType {
 /// Results are identical either way; only gas differs.
 ///
 /// While a batch runs, the proxy holds other people's money. Three rules keep that safe:
-/// 1. Everything parked must be spent by the end of the batch, or it reverts ("Funds left in
-///    proxy"), so the proxy never carries a balance into the next transaction.
+/// 1. Everything parked must be spent by the end of the batch, or it reverts (`FundsLeftInProxy`),
+///    so the proxy never carries a balance into the next transaction.
 /// 2. Every entry point is `nonReentrant` (see {Guards}), so nothing can call back in mid-batch and
 ///    spend parked funds.
 /// 3. The proxy pays only through `HELD_BALANCE`, and only in a batch.
@@ -53,13 +53,19 @@ library SwapType {
 /// reached the proxy outside the entry points (a direct transfer, a selfdestruct) are not anyone's
 /// in particular; a `HELD_BALANCE` swap spends them like any other balance.
 ///
-/// Abstract on purpose: this is a mixin combined into {UniswapProxy}. Deploy that rather than this.
+/// Abstract on purpose: this is a mixin combined into {LobsterProxy}. Deploy that rather than this.
 abstract contract UniswapBatchSwapProxy is UniswapV3SwapProxy, UniswapV4SwapProxy {
     /// @notice Executes `swaps` in order, atomically
     /// @param swaps One element per swap: a {SwapType} byte followed by the ABI-encoded params
     /// @return amounts Per swap, what its single-swap entry point would return: the amount received
     /// for an exact-input swap, the amount paid for an exact-output swap
-    function batchSwap(bytes[] calldata swaps) external nonReentrant returns (uint256[] memory amounts) {
+    function batchSwap(bytes[] calldata swaps) external virtual nonReentrant returns (uint256[] memory amounts) {
+        return _batchSwap(swaps);
+    }
+
+    /// @dev Body of {batchSwap}, shared with {LobsterProxy-batchSwap}, which validates the whole
+    /// batch first and then runs this unchanged.
+    function _batchSwap(bytes[] calldata swaps) internal returns (uint256[] memory amounts) {
         uint256 n = swaps.length;
         amounts = new uint256[](n);
         // Every token this batch parks in the proxy, so it can insist they are all spent by the end.
@@ -73,7 +79,7 @@ abstract contract UniswapBatchSwapProxy is UniswapV3SwapProxy, UniswapV4SwapProx
             if (swapType == SwapType.V3_EXACT_INPUT || swapType == SwapType.V3_EXACT_OUTPUT) {
                 parkedCount = _runV3Item(swaps[i], i, amounts, parked, parkedCount);
                 i++;
-            } else if (_isV4(swapType)) {
+            } else if (swapType == SwapType.V4_EXACT_INPUT || swapType == SwapType.V4_EXACT_OUTPUT) {
                 // A chain starts here only if this swap parks its output and the next one spends exactly
                 // that. Otherwise the swap runs alone, on the cheaper single-swap path.
                 uint256 end = i + 1;
@@ -83,22 +89,37 @@ abstract contract UniswapBatchSwapProxy is UniswapV3SwapProxy, UniswapV4SwapProx
                     : _runV4Chain(swaps, i, end, amounts, parked, parkedCount);
                 i = end;
             } else {
-                revert("Invalid swap type");
+                revert InvalidSwapType();
             }
         }
 
         for (uint256 j = 0; j < parkedCount; j++) {
-            require(_heldBalance(parked[j]) == 0, "Funds left in proxy");
+            require(_heldBalance(parked[j]) == 0, FundsLeftInProxy());
         }
     }
 
-    function _swapType(bytes calldata item) private pure returns (uint8) {
-        require(item.length != 0, "Invalid swap type");
+    function _swapType(bytes calldata item) internal pure returns (uint8) {
+        require(item.length != 0, InvalidSwapType());
         return uint8(item[0]);
     }
 
-    function _isV4(uint8 swapType) private pure returns (bool) {
-        return swapType == SwapType.V4_EXACT_INPUT || swapType == SwapType.V4_EXACT_OUTPUT;
+    // The only place batch items are decoded. Execution uses these, and so does any validation of a
+    // batch (see {LobsterProxy}), so the two can never read an item differently.
+
+    function _decodeV3ExactInput(bytes calldata item) internal pure returns (ExactInputSingleParams memory) {
+        return abi.decode(item[1:], (ExactInputSingleParams));
+    }
+
+    function _decodeV3ExactOutput(bytes calldata item) internal pure returns (ExactOutputSingleParams memory) {
+        return abi.decode(item[1:], (ExactOutputSingleParams));
+    }
+
+    function _decodeV4ExactInput(bytes calldata item) internal pure returns (V4ExactInputSingleParams memory) {
+        return abi.decode(item[1:], (V4ExactInputSingleParams));
+    }
+
+    function _decodeV4ExactOutput(bytes calldata item) internal pure returns (V4ExactOutputSingleParams memory) {
+        return abi.decode(item[1:], (V4ExactOutputSingleParams));
     }
 
     /// @dev Whether `next` spends exactly what `prev` parks: `prev` sends its output to
@@ -149,17 +170,16 @@ abstract contract UniswapBatchSwapProxy is UniswapV3SwapProxy, UniswapV4SwapProx
         private
         returns (uint256)
     {
-        bytes calldata data = item[1:];
         bool parks;
         if (uint8(item[0]) == SwapType.V3_EXACT_INPUT) {
-            ExactInputSingleParams memory p = abi.decode(data, (ExactInputSingleParams));
+            ExactInputSingleParams memory p = _decodeV3ExactInput(item);
             address payer;
             (payer, p.amountIn) = _resolveInput(p.tokenIn, p.amountIn);
             (p.recipient, parks) = _resolveRecipient(p.recipient);
             if (parks) parked[parkedCount++] = p.tokenOut;
             amounts[index] = _exactInputSingle(p, payer);
         } else {
-            ExactOutputSingleParams memory p = abi.decode(data, (ExactOutputSingleParams));
+            ExactOutputSingleParams memory p = _decodeV3ExactOutput(item);
             (p.recipient, parks) = _resolveRecipient(p.recipient);
             if (parks) parked[parkedCount++] = p.tokenOut;
             amounts[index] = _exactOutputSingle(p, msg.sender);
@@ -180,12 +200,11 @@ abstract contract UniswapBatchSwapProxy is UniswapV3SwapProxy, UniswapV4SwapProx
         private
         returns (uint256)
     {
-        bytes calldata data = item[1:];
         address tokenIn;
         address tokenOut;
         bool parks;
         if (uint8(item[0]) == SwapType.V4_EXACT_INPUT) {
-            V4ExactInputSingleParams memory p = abi.decode(data, (V4ExactInputSingleParams));
+            V4ExactInputSingleParams memory p = _decodeV4ExactInput(item);
             (tokenIn, tokenOut) = _v4Tokens(p.poolKey, p.zeroForOne);
             (address payer, uint256 amountIn) = _resolveInput(tokenIn, p.amountIn);
             _requireNativeInputIsParked(tokenIn, payer == address(this));
@@ -194,7 +213,7 @@ abstract contract UniswapBatchSwapProxy is UniswapV3SwapProxy, UniswapV4SwapProx
             if (parks) parked[parkedCount++] = tokenOut;
             amounts[index] = _exactInputSingleV4(p, payer);
         } else {
-            V4ExactOutputSingleParams memory p = abi.decode(data, (V4ExactOutputSingleParams));
+            V4ExactOutputSingleParams memory p = _decodeV4ExactOutput(item);
             (tokenIn, tokenOut) = _v4Tokens(p.poolKey, p.zeroForOne);
             _requireNativeInputIsParked(tokenIn, false);
             (p.recipient, parks) = _resolveRecipient(p.recipient);
@@ -232,17 +251,16 @@ abstract contract UniswapBatchSwapProxy is UniswapV3SwapProxy, UniswapV4SwapProx
     /// @dev Decodes and validates one V4 item of a chain into a leg, resolving `ADDRESS_THIS` and
     /// `HELD_BALANCE`. A held leg's amount is resolved inside the unlock, where parked credit is known.
     function _v4Leg(bytes calldata item) private view returns (V4Leg memory leg, address tokenOut) {
-        bytes calldata data = item[1:];
         address tokenIn;
         if (uint8(item[0]) == SwapType.V4_EXACT_INPUT) {
-            V4ExactInputSingleParams memory p = abi.decode(data, (V4ExactInputSingleParams));
+            V4ExactInputSingleParams memory p = _decodeV4ExactInput(item);
             (tokenIn, tokenOut) = _v4Tokens(p.poolKey, p.zeroForOne);
             bool fromHeld = p.amountIn == Chaining.HELD_BALANCE;
             _requireNativeInputIsParked(tokenIn, fromHeld);
             (p.recipient,) = _resolveRecipient(p.recipient);
             leg = _exactInputLeg(p, fromHeld);
         } else {
-            V4ExactOutputSingleParams memory p = abi.decode(data, (V4ExactOutputSingleParams));
+            V4ExactOutputSingleParams memory p = _decodeV4ExactOutput(item);
             (tokenIn, tokenOut) = _v4Tokens(p.poolKey, p.zeroForOne);
             _requireNativeInputIsParked(tokenIn, false);
             (p.recipient,) = _resolveRecipient(p.recipient);
@@ -256,7 +274,7 @@ abstract contract UniswapBatchSwapProxy is UniswapV3SwapProxy, UniswapV4SwapProx
     function _resolveInput(address tokenIn, uint256 amountIn) private view returns (address payer, uint256 resolved) {
         if (amountIn != Chaining.HELD_BALANCE) return (msg.sender, amountIn);
         resolved = _heldBalance(tokenIn);
-        require(resolved != 0, "Nothing held");
+        require(resolved != 0, NothingHeld());
         return (address(this), resolved);
     }
 
@@ -272,7 +290,7 @@ abstract contract UniswapBatchSwapProxy is UniswapV3SwapProxy, UniswapV4SwapProx
     /// through `HELD_BALANCE`. Any other native-input swap would quietly draw on that parked ETH while
     /// presenting itself as paid by the caller.
     function _requireNativeInputIsParked(address tokenIn, bool fromHeld) private pure {
-        if (tokenIn == address(0)) require(fromHeld, "Native input must come from a previous swap");
+        if (tokenIn == address(0)) require(fromHeld, NativeInputMustComeFromAPreviousSwap());
     }
 
     function _v4Tokens(PoolKey memory key, bool zeroForOne) private pure returns (address tokenIn, address tokenOut) {

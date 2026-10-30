@@ -3,11 +3,10 @@ pragma solidity >=0.8.20;
 
 import "forge-std/Test.sol";
 
-import {UniswapProxy} from "../src/UniswapProxy.sol";
 import {UniswapBatchSwapProxy, SwapType} from "../src/UniswapBatchSwapProxy.sol";
-import {ExactInputSingleParams, ExactOutputSingleParams} from "../src/interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
+import {ExactInputSingleParams} from "../src/interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
 import {MintParams} from "../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
-import {V4ExactInputSingleParams, V4ExactOutputSingleParams} from "../src/interfaces/uniswapV4/IUnlockCallback.sol";
+import {V4ExactInputSingleParams} from "../src/interfaces/uniswapV4/IUnlockCallback.sol";
 import {IUniswapV3FactoryMinimal} from "../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 // The proxy deliberately uses its own vendored types, so they are distinct from v4-core's even
@@ -25,7 +24,6 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 // with the real V4 PoolManager.
 import {FACTORY_BYTECODE} from "./Mocks/uniswapV3/bytecodes/factory.sol";
 
-import {PoolManager} from "v4-core/src/PoolManager.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
@@ -35,39 +33,45 @@ import {PoolModifyLiquidityTest} from "v4-core/src/test/PoolModifyLiquidityTest.
 // NOTE: solmate's mock, not test/Mocks/MockERC20.sol. v4-core's PoolManager pins `pragma =0.8.26`
 // and the repo mock requires ^0.8.28, which makes the two impossible to compile together.
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
+import {IProxyErrors} from "../src/interfaces/IProxyErrors.sol";
 
-/// @notice `batchSwap`: V3 and V4 swaps in one atomic transaction.
+/// @notice LobsterProxy's `batchSwap`: V3 and V4 swaps in one atomic transaction.
 /// @dev Runs against a real V3 factory and a real V4 PoolManager side by side, so a single batch can
-/// cross both versions. The central property: a batch is exactly equivalent to making the same swaps
-/// one by one from the same account, except that it is all-or-nothing. Chaining has its own suite.
-contract UniswapProxyBatchSwapTest is BatchSwapFixture {
+/// cross both versions. Every pool is registered for the user (the vault), so the registry is never
+/// what stops a swap here; its checks have their own suites. The central property: a batch is exactly
+/// equivalent to making the same swaps one by one from the same account, except that it is
+/// all-or-nothing. Chaining has its own suite.
+contract LobsterBatchSwapTest is BatchSwapFixture {
     // ---------------------------------------------------------------------------
     // Batch == the same swaps one by one
     // ---------------------------------------------------------------------------
 
-    /// @notice The defining property: a batch of V3 and V4 swaps, both exact-in and exact-out, has
-    /// exactly the effect of the same four swaps made one by one — same amounts, same balances.
+    /// @notice The defining property: a batch of V3 and V4 swaps, in both directions, has exactly the
+    /// effect of the same four swaps made one by one — same amounts, same balances.
     function test_mixedV3AndV4Batch_matchesSameSwapsMadeOneByOne() public {
         bytes[] memory swaps = new bytes[](4);
         swaps[0] = _v3In(address(token0), address(token1), 1e18, 0);
         swaps[1] = _v4In(cleanKey, false, 1e18, 0); // token1 -> token0
-        swaps[2] = _v3Out(address(token1), address(token0), 0.5e18, type(uint256).max);
-        swaps[3] = _v4Out(cleanKey, true, 0.5e18, type(uint128).max); // token0 -> token1
+        swaps[2] = _v3In(address(token1), address(token0), 0.5e18, 0);
+        swaps[3] = _v4In(cleanKey, true, 0.5e18, 0); // token0 -> token1
 
         uint256[6] memory before = _holdings();
 
         (bool succeeded, uint256[] memory amounts) = _assertBatchMatchesOneByOne(swaps);
         assertTrue(succeeded, "fixture: every swap should succeed");
 
-        // amounts[i] is what swap i's single-swap entry point returns
-        assertEq(token1.balanceOf(recipient) - before[4], amounts[0] + 0.5e18, "token1 delivered");
-        assertEq(token0.balanceOf(recipient) - before[3], amounts[1] + 0.5e18, "token0 delivered");
-        assertEq(before[0] - token0.balanceOf(user), 1e18 + amounts[3], "token0 paid by caller");
-        assertEq(before[1] - token1.balanceOf(user), 1e18 + amounts[2], "token1 paid by caller");
+        // amounts[i] is what swap i's single-swap entry point returns. The caller is also the
+        // recipient, so each token's net change is what it received minus what it paid.
+        assertEq(
+            token1.balanceOf(user) + 1e18 + 0.5e18, before[1] + amounts[0] + amounts[3], "token1: received minus paid"
+        );
+        assertEq(
+            token0.balanceOf(user) + 1e18 + 0.5e18, before[0] + amounts[1] + amounts[2], "token0: received minus paid"
+        );
         _assertProxyHoldsNothing();
     }
 
-    /// @notice The same property over random batches: any length up to six, any mix of the four swap
+    /// @notice The same property over random batches: any length up to six, any mix of the two swap
     /// types, pools, directions and sizes, including the native pool paying out ETH.
     function testFuzz_randomBatch_matchesSameSwapsMadeOneByOne(uint256 seed, uint256 length) public {
         uint256 n = bound(length, 1, 6);
@@ -79,12 +83,13 @@ contract UniswapProxyBatchSwapTest is BatchSwapFixture {
         _assertBatchMatchesOneByOne(swaps);
     }
 
-    function test_allFourSwapTypesAreBatchable() public {
+    /// @notice Both swap types, on all three pools, in one batch
+    function test_bothSwapTypesAreBatchable() public {
         bytes[] memory swaps = new bytes[](4);
         swaps[0] = _v3In(address(token0), address(token1), 1e18, 0);
-        swaps[1] = _v3Out(address(token0), address(token1), 1e18, type(uint256).max);
+        swaps[1] = _v3In(address(token1), address(token0), 1e18, 0);
         swaps[2] = _v4In(cleanKey, true, 1e18, 0);
-        swaps[3] = _v4Out(cleanKey, true, 1e18, type(uint128).max);
+        swaps[3] = _v4In(nativeKey, false, 1e18, 0); // token1 -> ETH
 
         vm.prank(user);
         uint256[] memory amounts = proxy.batchSwap(swaps);
@@ -121,7 +126,7 @@ contract UniswapProxyBatchSwapTest is BatchSwapFixture {
         uint160 priceBefore = _v3Price();
 
         vm.prank(user);
-        vm.expectRevert(bytes("Too little received"));
+        vm.expectRevert(IProxyErrors.TooLittleReceived.selector);
         proxy.batchSwap(swaps);
 
         _assertHoldingsEq(_holdings(), before, "reverted batch");
@@ -133,11 +138,12 @@ contract UniswapProxyBatchSwapTest is BatchSwapFixture {
         bytes memory validSwap = _v3In(address(token0), address(token1), 1e18, 0);
         uint256[6] memory before = _holdings();
 
-        // Hooked V4 pools are still refused
+        // Hooked V4 pools are still refused, even registered
         ProxyPoolKey memory hooked = cleanKey;
         hooked.hooks = ProxyIHooks(makeAddr("someHook"));
+        _allow(user, proxy.v4Key(hooked), SWAP);
         vm.prank(user);
-        vm.expectRevert(bytes("Hooks not supported"));
+        vm.expectRevert(IProxyErrors.HooksNotSupported.selector);
         proxy.batchSwap(_batch(validSwap, _v4In(hooked, true, 1e18, 0)));
 
         // Each swap's own deadline is still enforced
@@ -157,27 +163,22 @@ contract UniswapProxyBatchSwapTest is BatchSwapFixture {
             )
         );
         vm.prank(user);
-        vm.expectRevert(bytes("Transaction too old"));
+        vm.expectRevert(IProxyErrors.TransactionTooOld.selector);
         proxy.batchSwap(_batch(validSwap, expired));
 
-        // So is the exact-output bound
+        // So is each swap's own amountOutMinimum
         vm.prank(user);
-        vm.expectRevert(bytes("Too much requested"));
-        proxy.batchSwap(_batch(validSwap, _v3Out(address(token1), address(token0), 1e18, 1)));
+        vm.expectRevert(IProxyErrors.TooLittleReceived.selector);
+        proxy.batchSwap(_batch(validSwap, _v3In(address(token1), address(token0), 1e18, 2e18)));
 
         _assertHoldingsEq(_holdings(), before, "rejected batches");
     }
 
-    /// @notice The V3 guards live in the shared internal bodies, so batched swaps get them too:
-    /// no silent partial fill on exact output, and no amount that wraps at 2**255.
+    /// @notice The V3 guard lives in the shared internal body, so batched swaps get it too: no amount
+    /// that wraps at 2**255.
     function test_v3SafetyGuardsApplyInsideBatch() public {
         bytes memory validSwap = _v4In(cleanKey, true, 1e18, 0);
         uint256[6] memory before = _holdings();
-
-        // Far more token1 than the V3 pool holds: a partial fill, which must not pass as success
-        vm.prank(user);
-        vm.expectRevert(bytes("Too little received"));
-        proxy.batchSwap(_batch(validSwap, _v3Out(address(token0), address(token1), 5000e18, type(uint256).max)));
 
         // An amount that would wrap negative and flip exact-input into exact-output
         vm.prank(user);
@@ -187,8 +188,8 @@ contract UniswapProxyBatchSwapTest is BatchSwapFixture {
         _assertHoldingsEq(_holdings(), before, "rejected batches");
     }
 
-    /// @notice A batched swap cannot name the proxy as recipient either, on V3 or V4, and refusing it
-    /// undoes the valid swap placed before it.
+    /// @notice A batched swap cannot name the proxy as recipient either, on V3 or V4: only the caller
+    /// or ADDRESS_THIS. Refused before anything runs, valid swap before it included.
     function test_proxyIsRejectedAsRecipientInsideBatch() public {
         bytes memory validSwap = _v4In(cleanKey, true, 1e18, 0);
         bytes[] memory toProxy = new bytes[](2);
@@ -208,15 +209,15 @@ contract UniswapProxyBatchSwapTest is BatchSwapFixture {
             )
         );
         toProxy[1] = abi.encodePacked(
-            SwapType.V4_EXACT_OUTPUT,
+            SwapType.V4_EXACT_INPUT,
             abi.encode(
-                V4ExactOutputSingleParams({
+                V4ExactInputSingleParams({
                     poolKey: cleanKey,
                     zeroForOne: true,
                     recipient: address(proxy),
                     deadline: block.timestamp,
-                    amountOut: 1e18,
-                    amountInMaximum: type(uint128).max,
+                    amountIn: 1e18,
+                    amountOutMinimum: 0,
                     sqrtPriceLimitX96: 0
                 })
             )
@@ -225,7 +226,7 @@ contract UniswapProxyBatchSwapTest is BatchSwapFixture {
 
         for (uint256 i = 0; i < toProxy.length; i++) {
             vm.prank(user);
-            vm.expectRevert(bytes("Invalid recipient"));
+            vm.expectRevert(IProxyErrors.RecipientMustBeCaller.selector);
             proxy.batchSwap(_batch(validSwap, toProxy[i]));
         }
 
@@ -237,8 +238,9 @@ contract UniswapProxyBatchSwapTest is BatchSwapFixture {
     // Malformed batches
     // ---------------------------------------------------------------------------
 
-    /// @notice An item whose first byte is not a known swap type is refused, and refusing it undoes
-    /// the valid swap placed before it. Includes 0x00, so a zeroed item is never read as a swap.
+    /// @notice An item whose first byte is not a known swap type (0x01-0x04) is refused, and refusing
+    /// it undoes the valid swap placed before it. Includes 0x00, so a zeroed item is never read as a
+    /// swap.
     function test_invalidSwapTypeIsRejected() public {
         bytes memory validSwap = _v3In(address(token0), address(token1), 1e18, 0);
         bytes memory validParams = new bytes(validSwap.length - 1);
@@ -257,7 +259,7 @@ contract UniswapProxyBatchSwapTest is BatchSwapFixture {
 
         for (uint256 i = 0; i < invalid.length; i++) {
             vm.prank(user);
-            vm.expectRevert(bytes("Invalid swap type"));
+            vm.expectRevert(IProxyErrors.InvalidSwapType.selector);
             proxy.batchSwap(_batch(validSwap, invalid[i]));
         }
 
@@ -265,13 +267,13 @@ contract UniswapProxyBatchSwapTest is BatchSwapFixture {
         assertEq(_v3Price(), priceBefore, "a rejected batch moved the pool");
     }
 
-    /// @notice Every byte value outside the four swap types is refused, whatever follows it.
+    /// @notice Every byte value other than the four swap types is refused, whatever follows it.
     function testFuzz_anyUnknownSwapTypeIsRejected(uint8 swapType, bytes calldata params) public {
         vm.assume(swapType == 0 || swapType > SwapType.V4_EXACT_OUTPUT);
         uint256[6] memory before = _holdings();
 
         vm.prank(user);
-        vm.expectRevert(bytes("Invalid swap type"));
+        vm.expectRevert(IProxyErrors.InvalidSwapType.selector);
         proxy.batchSwap(_batch(_v3In(address(token0), address(token1), 1e18, 0), abi.encodePacked(swapType, params)));
 
         _assertHoldingsEq(_holdings(), before, "rejected batch");
@@ -358,7 +360,7 @@ contract UniswapProxyBatchSwapTest is BatchSwapFixture {
 
         // A native-input swap with a fixed amount would quietly draw on it, so it is refused
         vm.prank(user);
-        vm.expectRevert(bytes("Native input must come from a previous swap"));
+        vm.expectRevert(IProxyErrors.NativeInputMustComeFromAPreviousSwap.selector);
         proxy.batchSwap(_batch(_v4In(nativeKey, true, 1e18, 0)));
 
         // HELD_BALANCE spends all of it
@@ -375,10 +377,15 @@ contract UniswapProxyBatchSwapTest is BatchSwapFixture {
     // ---------------------------------------------------------------------------
 
     /// @notice A batch pays from whoever submits it, never from another account's standing approval.
+    /// The outsider is a vault in its own right here (its own registrations, its own output), so the
+    /// only thing between it and the user's allowance is who pays.
     function test_batchAlwaysPaysFromItsCaller() public {
         address outsider = makeAddr("outsider");
         token0.mint(outsider, 10e18);
+        _allow(outsider, proxy.v3Key(address(v3Pool)), SWAP);
+        _allow(outsider, proxy.v4Key(cleanKey), SWAP);
         uint256[6] memory userBefore = _holdings();
+        recipient = outsider; // the items below pay out to the outsider
 
         // Without an approval of their own, the outsider's batch cannot reach the user's allowance
         vm.prank(outsider);

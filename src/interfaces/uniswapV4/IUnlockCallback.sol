@@ -5,7 +5,7 @@ import {PoolKey, SwapParams} from "./IPoolManagerMinimal.sol";
 
 /// @notice Unlock data for a single swap: the common case, and the cheapest to encode and decode.
 /// @dev The PoolManager does not forward the original caller, so the payer has to be carried here.
-/// No `hookData` field: {UniswapProxy} only accepts pools with `hooks == address(0)`, so there is
+/// No `hookData` field: {LobsterProxy} only accepts pools with `hooks == address(0)`, so there is
 /// never a hook to pass data to. Its encoding always starts with a zero byte (the first word is
 /// `poolKey.currency0`, an address), which is how `unlockCallback` tells it from a chain.
 struct V4SwapCallbackData {
@@ -15,7 +15,7 @@ struct V4SwapCallbackData {
     address recipient;
 }
 
-/// @notice One swap. Built only by the proxy, from validated params.
+/// @notice One swap of a chain. Built only by the proxy, from validated params.
 struct V4Leg {
     PoolKey poolKey;
     bool zeroForOne;

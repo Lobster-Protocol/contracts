@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity >=0.8.20;
+pragma solidity >=0.8.27;
 
 import {
     IUniswapV3SwapCallback,
@@ -7,6 +7,7 @@ import {
     ExactInputSingleParams,
     ExactOutputSingleParams
 } from "./interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
+import {IUniswapV3PoolMinimal} from "./interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {TransferHelper} from "./libraries/uniswapV3/TransferHelper.sol";
 import {TickMath} from "./libraries/uniswapV3/TickMath.sol";
 import {CallbackValidation} from "./libraries/uniswapV3/CallbackValidation.sol";
@@ -25,12 +26,13 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 ///   early when it runs out of liquidity; accepting that partial fill would let `amountInMaximum`
 ///   be spent on a fraction of the order.
 ///
-/// Abstract on purpose: this is a mixin combined into {UniswapProxy}, which owns the
-/// constructor. Deploy {UniswapProxy} rather than this.
+/// Abstract on purpose: this is a mixin combined into {LobsterProxy}, which owns the
+/// constructor. Deploy {LobsterProxy} rather than this.
 abstract contract UniswapV3SwapProxy is UniswapV3ProxyBase, IUniswapV3SwapCallback {
     /// @notice Swaps `amountIn` of one token for as much as possible of another token (single pool)
     function exactInputSingle(ExactInputSingleParams calldata params)
         external
+        virtual
         nonReentrant
         returns (uint256 amountOut)
     {
@@ -41,6 +43,7 @@ abstract contract UniswapV3SwapProxy is UniswapV3ProxyBase, IUniswapV3SwapCallba
     /// @notice Swaps as little as possible of one token for `amountOut` of another token (single pool)
     function exactOutputSingle(ExactOutputSingleParams calldata params)
         external
+        virtual
         nonReentrant
         returns (uint256 amountIn)
     {
@@ -62,24 +65,24 @@ abstract contract UniswapV3SwapProxy is UniswapV3ProxyBase, IUniswapV3SwapCallba
         _checkDeadline(params.deadline);
 
         bool zeroForOne = params.tokenIn < params.tokenOut;
+        IUniswapV3PoolMinimal pool = _getPool(params.tokenIn, params.tokenOut, params.fee);
 
-        (int256 amount0, int256 amount1) = _getPool(params.tokenIn, params.tokenOut, params.fee)
-            .swap(
-                params.recipient,
-                zeroForOne,
-                SafeCast.toInt256(params.amountIn),
-                params.sqrtPriceLimitX96 == 0
-                    ? (zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
-                    : params.sqrtPriceLimitX96,
-                abi.encode(
-                    SwapCallbackData({
-                        tokenIn: params.tokenIn, tokenOut: params.tokenOut, fee: params.fee, payer: payer
-                    })
-                )
-            );
+        _checkV3SwapPrice(pool);
+        (int256 amount0, int256 amount1) = pool.swap(
+            params.recipient,
+            zeroForOne,
+            SafeCast.toInt256(params.amountIn),
+            params.sqrtPriceLimitX96 == 0
+                ? (zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
+                : params.sqrtPriceLimitX96,
+            abi.encode(
+                SwapCallbackData({tokenIn: params.tokenIn, tokenOut: params.tokenOut, fee: params.fee, payer: payer})
+            )
+        );
+        _checkV3SwapPrice(pool);
 
         amountOut = uint256(-(zeroForOne ? amount1 : amount0));
-        require(amountOut >= params.amountOutMinimum, "Too little received");
+        require(amountOut >= params.amountOutMinimum, TooLittleReceived());
     }
 
     /// @dev Body of {exactOutputSingle}, shared with {UniswapBatchSwapProxy-batchSwap}. Same contract
@@ -94,31 +97,37 @@ abstract contract UniswapV3SwapProxy is UniswapV3ProxyBase, IUniswapV3SwapCallba
         _checkDeadline(params.deadline);
 
         bool zeroForOne = params.tokenIn < params.tokenOut;
+        IUniswapV3PoolMinimal pool = _getPool(params.tokenIn, params.tokenOut, params.fee);
 
-        (int256 amount0, int256 amount1) = _getPool(params.tokenIn, params.tokenOut, params.fee)
-            .swap(
-                params.recipient,
-                zeroForOne,
-                -SafeCast.toInt256(params.amountOut),
-                params.sqrtPriceLimitX96 == 0
-                    ? (zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
-                    : params.sqrtPriceLimitX96,
-                abi.encode(
-                    SwapCallbackData({
-                        tokenIn: params.tokenIn, tokenOut: params.tokenOut, fee: params.fee, payer: payer
-                    })
-                )
-            );
+        _checkV3SwapPrice(pool);
+        (int256 amount0, int256 amount1) = pool.swap(
+            params.recipient,
+            zeroForOne,
+            -SafeCast.toInt256(params.amountOut),
+            params.sqrtPriceLimitX96 == 0
+                ? (zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
+                : params.sqrtPriceLimitX96,
+            abi.encode(
+                SwapCallbackData({tokenIn: params.tokenIn, tokenOut: params.tokenOut, fee: params.fee, payer: payer})
+            )
+        );
+        _checkV3SwapPrice(pool);
 
         amountIn = uint256(zeroForOne ? amount0 : amount1);
-        require(amountIn <= params.amountInMaximum, "Too much requested");
+        require(amountIn <= params.amountInMaximum, TooMuchRequested());
         // A swap can stop early, on the price limit or when the pool runs out of liquidity, and
         // deliver less than requested. When the caller did not ask for a limit, that outcome is
         // never intended, so reject it. Same rule as SwapRouter and as the V4 path.
         if (params.sqrtPriceLimitX96 == 0) {
-            require(uint256(-(zeroForOne ? amount1 : amount0)) == params.amountOut, "Too little received");
+            require(uint256(-(zeroForOne ? amount1 : amount0)) == params.amountOut, TooLittleReceived());
         }
     }
+
+    /// @dev Called with the pool right before and right after every swap, in the caller's frame
+    /// (msg.sender is the account swapping). No check here; {LobsterProxy} enforces the caller's
+    /// price band. A swap moves the price one way only, so a price inside the band at both ends means
+    /// the whole trade executed inside it.
+    function _checkV3SwapPrice(IUniswapV3PoolMinimal pool) internal view virtual {}
 
     /// @inheritdoc IUniswapV3SwapCallback
     function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata _data) external override {

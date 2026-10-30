@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity =0.8.26;
+pragma solidity =0.8.28;
 
 import "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -12,6 +12,7 @@ import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV
 import {PoolAddress} from "../../../src/libraries/uniswapV3/PoolAddress.sol";
 import {SwapType} from "../../../src/UniswapBatchSwapProxy.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {IProxyErrors} from "../../../src/interfaces/IProxyErrors.sol";
 
 /// @notice Authorisation tests for standing approvals.
 /// @dev Fixture: an account has granted this proxy `type(uint256).max` on four tokens and holds the
@@ -120,11 +121,11 @@ contract AuthorisationTest is ForkBase {
 
     function test_unlockCallback_fromNonManager_reverts() public {
         vm.prank(outsider);
-        vm.expectRevert("Not pool manager");
+        vm.expectRevert(IProxyErrors.NotPoolManager.selector);
         proxy.unlockCallback("");
 
         vm.prank(outsider);
-        vm.expectRevert("Not pool manager");
+        vm.expectRevert(IProxyErrors.NotPoolManager.selector);
         impersonator.callViaUnlockCallback("");
     }
 
@@ -180,14 +181,12 @@ contract AuthorisationTest is ForkBase {
     function test_outsiderMint_debitsOutsiderNotApprover() public {
         uint256[4] memory before = _approverHoldings();
         (int24 lower, int24 upper) = _rangeAroundSpot(USDC_WETH_500, 10);
-        (int24 minTick, int24 maxTick) = _bandAroundSpot(USDC_WETH_500, 1000);
 
         // Directing the resulting position elsewhere changes nothing about who pays: `mint` stamps
         // payer = msg.sender into the callback data.
         vm.startPrank(outsider);
         IERC20(USDC).approve(address(proxy), type(uint256).max);
         IERC20(WETH).approve(address(proxy), type(uint256).max);
-        proxy.setPriceBand(USDC_WETH_500, minTick, maxTick);
         proxy.mint(
             MintParams({
                 token0: USDC,
@@ -209,9 +208,10 @@ contract AuthorisationTest is ForkBase {
     }
 
     /// @dev A caller with no balance of its own must simply fail, rather than settling from any
-    /// other account's approval.
+    /// other account's approval. It has registered the pool, so it is the payment that fails.
     function test_callerWithNoBalance_cannotSwapAtAll() public {
         address brokeCaller = _actor("brokeCaller");
+        _allow(brokeCaller, proxy.v3Key(_poolFor(USDC, WETH, 500)), SWAP);
         uint256[4] memory before = _approverHoldings();
 
         vm.startPrank(brokeCaller);
@@ -234,11 +234,11 @@ contract AuthorisationTest is ForkBase {
         _assertApproverUntouched(before, "penniless outsider");
     }
 
-    /// @dev Fuzzed across callers, recipients, tokens, fees and amounts. No calldata combination
-    /// should ever settle from an account other than the caller.
+    /// @dev Fuzzed across callers, tokens, fees and amounts. No calldata combination should ever
+    /// settle from an account other than the caller. Each caller registers the pool it names, so the
+    /// call gets past the registry to where the payer is decided.
     function testFuzz_approverUntouchedByArbitraryCalls(
         address caller,
-        address dest,
         uint256 amountIn,
         uint8 tokenSel,
         uint8 feeSel
@@ -246,7 +246,6 @@ contract AuthorisationTest is ForkBase {
         public
     {
         vm.assume(caller != approver && caller != address(0) && caller != address(proxy));
-        vm.assume(dest != address(0));
         vm.assume(caller.code.length == 0);
 
         address[4] memory tokens = [USDC, WETH, USDT, DAI];
@@ -259,6 +258,8 @@ contract AuthorisationTest is ForkBase {
         // rate-limit the fork RPC.
         amountIn = bound(amountIn, 1, 1e9);
 
+        uint24 fee = fees[feeSel % 4];
+        _allow(caller, proxy.v3Key(_poolFor(tokenIn, tokenOut, fee)), SWAP);
         uint256[4] memory before = _approverHoldings();
 
         // Gas-capped: thin fee tiers can make a large order walk tens of thousands of ticks, which
@@ -269,8 +270,8 @@ contract AuthorisationTest is ForkBase {
             ExactInputSingleParams({
                 tokenIn: tokenIn,
                 tokenOut: tokenOut,
-                fee: fees[feeSel % 4],
-                recipient: dest,
+                fee: fee,
+                recipient: caller,
                 deadline: block.timestamp,
                 amountIn: amountIn,
                 amountOutMinimum: 0,
@@ -331,6 +332,8 @@ contract AuthorisationTest is ForkBase {
 
         // A real pool, created through the real factory.
         address pool = factory.createPool(address(reentrant), USDC, 3000);
+        _allow(outsider, proxy.v3Key(pool), MINT | SWAP);
+        _bandAroundSpot(outsider, pool, 1000);
         IUniswapV3PoolMinimal(pool).initialize(79228162514264337593543950336); // tick 0
         assertEq(pool, _poolFor(address(reentrant), USDC, 3000), "created pool is not the derived address");
 
@@ -343,12 +346,10 @@ contract AuthorisationTest is ForkBase {
             address(reentrant) < USDC ? (address(reentrant), USDC) : (USDC, address(reentrant));
 
         uint256[4] memory before = _approverHoldings();
-        (int24 minTick, int24 maxTick) = _bandAroundSpot(pool, 1000);
 
         vm.startPrank(outsider);
         IERC20(USDC).approve(address(proxy), type(uint256).max);
         reentrant.approve(address(proxy), type(uint256).max);
-        proxy.setPriceBand(pool, minTick, maxTick);
         proxy.mint(
             MintParams({
                 token0: token0,
@@ -385,18 +386,17 @@ contract AuthorisationTest is ForkBase {
         deal(USDC, outsider, 1_000_000e6);
 
         address pool = factory.createPool(address(reentrant), USDC, 3000);
+        _allow(outsider, proxy.v3Key(pool), MINT | SWAP);
+        _bandAroundSpot(outsider, pool, 1000);
         IUniswapV3PoolMinimal(pool).initialize(79228162514264337593543950336); // tick 0
         (int24 lower, int24 upper) = _rangeAroundSpot(pool, 10);
         (address token0, address token1) =
             address(reentrant) < USDC ? (address(reentrant), USDC) : (USDC, address(reentrant));
 
-        (int24 minTick, int24 maxTick) = _bandAroundSpot(pool, 1000);
-
         // Liquidity first, while the token is still inert
         vm.startPrank(outsider);
         IERC20(USDC).approve(address(proxy), type(uint256).max);
         reentrant.approve(address(proxy), type(uint256).max);
-        proxy.setPriceBand(pool, minTick, maxTick);
         proxy.mint(
             MintParams({
                 token0: token0,

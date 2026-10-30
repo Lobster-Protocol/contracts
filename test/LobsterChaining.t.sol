@@ -22,7 +22,11 @@ import {V4Leg, V4UnlockData} from "../src/interfaces/uniswapV4/IUnlockCallback.s
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
+import {PoolId} from "v4-core/src/types/PoolId.sol";
+import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
+import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
+import {IProxyErrors} from "../src/interfaces/IProxyErrors.sol";
 
 /// @notice A token that, the first time it is transferred to `target`, calls `target` with `attack`
 /// and records what happened.
@@ -52,7 +56,8 @@ contract ReentrantERC20 is MockERC20 {
     }
 }
 
-/// @notice Chaining inside `batchSwap`: a swap spending exactly what the previous one produced.
+/// @notice Chaining inside LobsterProxy's `batchSwap`: a swap spending exactly what the previous one
+/// produced. Every pool is registered for the user (the vault).
 /// @dev The reference for every route is the same legs made as separate direct calls, with each
 /// intermediate output delivered to the user and fed by hand into the next leg as its exact input. A
 /// chained route must match it to the wei, leg by leg, and leave the proxy holding nothing.
@@ -60,7 +65,7 @@ contract ReentrantERC20 is MockERC20 {
 /// Route graph (five pools, both versions, native ETH in the middle):
 ///   token0 --V3--  token1 --V3--  tokenC
 ///   token0 --V4--  token1 --V4--  ETH  --V4--  tokenC
-contract UniswapProxyChainingTest is BatchSwapFixture {
+contract LobsterChainingTest is BatchSwapFixture {
     uint8 constant E_V3_01 = 0; // V3 token0 <-> token1 (fixture pool)
     uint8 constant E_V3_1C = 1; // V3 token1 <-> tokenC
     uint8 constant E_V4_01 = 2; // V4 token0 <-> token1 (cleanKey)
@@ -105,6 +110,8 @@ contract UniswapProxyChainingTest is BatchSwapFixture {
         tokenC.mint(user, 10_000e18);
         vm.prank(user);
         tokenC.approve(address(proxy), type(uint256).max);
+        _allow(user, proxy.v3Key(address(_v3PoolFor(address(token1), address(tokenC)))), SWAP);
+        _allow(user, proxy.v4Key(nativeKeyC), SWAP);
     }
 
     // ---------------------------------------------------------------------------
@@ -119,10 +126,11 @@ contract UniswapProxyChainingTest is BatchSwapFixture {
         return IUniswapV3PoolMinimal(IUniswapV3FactoryMinimal(v3Factory).getPool(a, b, FEE));
     }
 
-    /// @dev Wide liquidity (1000 of each) in a V3 pool, paid by this contract
+    /// @dev Wide liquidity (1000 of each) in a V3 pool, paid by this contract, which registers the pool
+    /// for itself first
     function _mintV3(address a, address b) internal {
         (address t0, address t1) = _sorted(a, b);
-        _allowAnyMintPrice(address(_v3PoolFor(t0, t1)));
+        _allow(address(this), proxy.v3Key(address(_v3PoolFor(a, b))), MINT);
         proxy.mint(
             MintParams({
                 token0: t0,
@@ -429,6 +437,44 @@ contract UniswapProxyChainingTest is BatchSwapFixture {
         _assertNothingParked();
     }
 
+    /// @notice An exact-output V4 leg can open a chain: its exact output is parked as credit and spent
+    function test_v4Chain_openedByAnExactOutputLeg() public {
+        bytes memory exactOut = abi.encodePacked(
+            SwapType.V4_EXACT_OUTPUT,
+            abi.encode(
+                V4ExactOutputSingleParams({
+                    poolKey: cleanKey,
+                    zeroForOne: true, // token0 in, exactly 2 token1 out
+                    recipient: HERE,
+                    deadline: block.timestamp,
+                    amountOut: 2e18,
+                    amountInMaximum: type(uint128).max,
+                    sqrtPriceLimitX96: 0
+                })
+            )
+        );
+
+        uint256 snap = vm.snapshotState();
+        vm.startPrank(user);
+        V4ExactOutputSingleParams memory direct = abi.decode(_slice1(exactOut), (V4ExactOutputSingleParams));
+        direct.recipient = user;
+        uint256 paid = proxy.exactOutputSingleV4(direct);
+        uint256 out = proxy.exactInputSingleV4(
+            abi.decode(_slice1(_item(E_V4_E1, address(token1), 2e18, recipient)), (V4ExactInputSingleParams))
+        );
+        vm.stopPrank();
+        vm.revertToState(snap);
+
+        _expectUnlocks(1);
+        vm.prank(user);
+        uint256[] memory amounts =
+            proxy.batchSwap(_batch(exactOut, _item(E_V4_E1, address(token1), Chaining.HELD_BALANCE, recipient)));
+
+        assertEq(amounts[0], paid, "exact-output leg");
+        assertEq(amounts[1], out, "chained leg did not spend exactly the 2 parked token1");
+        _assertNothingParked();
+    }
+
     /// @dev Drops the leading SwapType byte, leaving the abi-encoded params
     function _slice1(bytes memory item) internal pure returns (bytes memory params) {
         params = new bytes(item.length - 1);
@@ -446,12 +492,12 @@ contract UniswapProxyChainingTest is BatchSwapFixture {
 
         // Parked, and nothing spends it
         vm.prank(user);
-        vm.expectRevert(bytes("Funds left in proxy"));
+        vm.expectRevert(IProxyErrors.FundsLeftInProxy.selector);
         proxy.batchSwap(_batch(_item(E_V3_01, address(token0), 1e18, HERE)));
 
         // Parked, but the next leg is paid by the caller instead of spending it
         vm.prank(user);
-        vm.expectRevert(bytes("Funds left in proxy"));
+        vm.expectRevert(IProxyErrors.FundsLeftInProxy.selector);
         proxy.batchSwap(
             _batch(_item(E_V3_01, address(token0), 1e18, HERE), _item(E_V3_1C, address(token1), 1e17, recipient))
         );
@@ -460,7 +506,7 @@ contract UniswapProxyChainingTest is BatchSwapFixture {
         bool zeroForOne = address(token1) < address(tokenC);
         uint160 oneTickAway = TickMath.getSqrtRatioAtTick(zeroForOne ? int24(-1) : int24(1));
         vm.prank(user);
-        vm.expectRevert(bytes("Funds left in proxy"));
+        vm.expectRevert(IProxyErrors.FundsLeftInProxy.selector);
         proxy.batchSwap(
             _batch(
                 _item(E_V3_01, address(token0), 1e18, HERE),
@@ -470,7 +516,7 @@ contract UniswapProxyChainingTest is BatchSwapFixture {
 
         // Parked ETH, never spent
         vm.prank(user);
-        vm.expectRevert(bytes("Funds left in proxy"));
+        vm.expectRevert(IProxyErrors.FundsLeftInProxy.selector);
         proxy.batchSwap(_batch(_item(E_V4_E1, address(token1), 1e18, HERE)));
 
         uint256[8] memory afterAll = _all();
@@ -482,11 +528,11 @@ contract UniswapProxyChainingTest is BatchSwapFixture {
 
     function test_heldBalanceWithNothingHeld_reverts() public {
         vm.prank(user);
-        vm.expectRevert(bytes("Nothing held"));
+        vm.expectRevert(IProxyErrors.NothingHeld.selector);
         proxy.batchSwap(_batch(_item(E_V3_1C, address(token1), Chaining.HELD_BALANCE, recipient)));
 
         vm.prank(user);
-        vm.expectRevert(bytes("Nothing held"));
+        vm.expectRevert(IProxyErrors.NothingHeld.selector);
         proxy.batchSwap(_batch(_item(E_V4_EC, ETH, Chaining.HELD_BALANCE, recipient)));
     }
 
@@ -497,26 +543,8 @@ contract UniswapProxyChainingTest is BatchSwapFixture {
     /// @notice In a batch, native input can only be ETH an earlier swap parked, spent via HELD_BALANCE
     function test_nativeInputMustComeFromAPreviousSwap() public {
         vm.prank(user);
-        vm.expectRevert(bytes("Native input must come from a previous swap"));
+        vm.expectRevert(IProxyErrors.NativeInputMustComeFromAPreviousSwap.selector);
         proxy.batchSwap(_batch(_item(E_V4_EC, ETH, 1e18, recipient)));
-
-        bytes memory exactOutNativeIn = abi.encodePacked(
-            SwapType.V4_EXACT_OUTPUT,
-            abi.encode(
-                V4ExactOutputSingleParams({
-                    poolKey: nativeKeyC,
-                    zeroForOne: true, // ETH in
-                    recipient: recipient,
-                    deadline: block.timestamp,
-                    amountOut: 1e17,
-                    amountInMaximum: type(uint128).max,
-                    sqrtPriceLimitX96: 0
-                })
-            )
-        );
-        vm.prank(user);
-        vm.expectRevert(bytes("Native input must come from a previous swap"));
-        proxy.batchSwap(_batch(exactOutNativeIn));
     }
 
     function test_receiveAcceptsEthOnlyFromThePoolManager() public {
@@ -537,17 +565,17 @@ contract UniswapProxyChainingTest is BatchSwapFixture {
     function test_addressThisIsRejectedOutsideABatch() public {
         vm.startPrank(user);
 
-        vm.expectRevert(bytes("Invalid recipient"));
+        vm.expectRevert(IProxyErrors.RecipientMustBeCaller.selector);
         proxy.exactInputSingle(
             abi.decode(_slice1(_item(E_V3_01, address(token0), 1e18, HERE)), (ExactInputSingleParams))
         );
 
-        vm.expectRevert(bytes("Invalid recipient"));
+        vm.expectRevert(IProxyErrors.RecipientMustBeCaller.selector);
         proxy.exactInputSingleV4(
             abi.decode(_slice1(_item(E_V4_01, address(token0), 1e18, HERE)), (V4ExactInputSingleParams))
         );
 
-        vm.expectRevert(bytes("Invalid recipient"));
+        vm.expectRevert(IProxyErrors.RecipientMustBeCaller.selector);
         proxy.mint(
             MintParams({
                 token0: address(token0),
@@ -582,6 +610,7 @@ contract UniswapProxyChainingTest is BatchSwapFixture {
         IUniswapV3FactoryMinimal(v3Factory).createPool(address(token0), address(evil), FEE);
         _v3PoolFor(address(token0), address(evil)).initialize(SQRT_PRICE_1_1);
         _mintV3(address(token0), address(evil));
+        _allow(user, proxy.v3Key(address(_v3PoolFor(address(token0), address(evil)))), SWAP);
 
         address attacker = makeAddr("attacker");
         evil.arm(
@@ -621,6 +650,7 @@ contract UniswapProxyChainingTest is BatchSwapFixture {
         IUniswapV3FactoryMinimal(v3Factory).createPool(address(token0), address(evil), FEE);
         _v3PoolFor(address(token0), address(evil)).initialize(SQRT_PRICE_1_1);
         _mintV3(address(token0), address(evil));
+        _allow(user, proxy.v3Key(address(_v3PoolFor(address(token0), address(evil)))), SWAP);
 
         evil.arm(
             address(proxy),
@@ -728,44 +758,6 @@ contract UniswapProxyChainingTest is BatchSwapFixture {
         _assertNothingParked();
     }
 
-    /// @notice An exact-output V4 leg can open a chain: its exact output is parked as credit and spent
-    function test_v4Chain_openedByAnExactOutputLeg() public {
-        bytes memory exactOut = abi.encodePacked(
-            SwapType.V4_EXACT_OUTPUT,
-            abi.encode(
-                V4ExactOutputSingleParams({
-                    poolKey: cleanKey,
-                    zeroForOne: true, // token0 in, exactly 2 token1 out
-                    recipient: HERE,
-                    deadline: block.timestamp,
-                    amountOut: 2e18,
-                    amountInMaximum: type(uint128).max,
-                    sqrtPriceLimitX96: 0
-                })
-            )
-        );
-
-        uint256 snap = vm.snapshotState();
-        vm.startPrank(user);
-        V4ExactOutputSingleParams memory direct = abi.decode(_slice1(exactOut), (V4ExactOutputSingleParams));
-        direct.recipient = user;
-        uint256 paid = proxy.exactOutputSingleV4(direct);
-        uint256 out = proxy.exactInputSingleV4(
-            abi.decode(_slice1(_item(E_V4_E1, address(token1), 2e18, recipient)), (V4ExactInputSingleParams))
-        );
-        vm.stopPrank();
-        vm.revertToState(snap);
-
-        _expectUnlocks(1);
-        vm.prank(user);
-        uint256[] memory amounts =
-            proxy.batchSwap(_batch(exactOut, _item(E_V4_E1, address(token1), Chaining.HELD_BALANCE, recipient)));
-
-        assertEq(amounts[0], paid, "exact-output leg");
-        assertEq(amounts[1], out, "chained leg did not spend exactly the 2 parked token1");
-        _assertNothingParked();
-    }
-
     /// @notice A chained leg that stops early leaves credit behind; it is moved into the proxy when the
     /// unlock ends, and the end-of-batch check refuses the batch
     function test_v4Chain_partlySpent_reverts() public {
@@ -777,7 +769,7 @@ contract UniswapProxyChainingTest is BatchSwapFixture {
 
         uint256[8] memory before = _all();
         vm.prank(user);
-        vm.expectRevert(bytes("Funds left in proxy"));
+        vm.expectRevert(IProxyErrors.FundsLeftInProxy.selector);
         proxy.batchSwap(
             _batch(
                 _item(E_V4_01, address(token0), 1e18, HERE),
@@ -809,7 +801,7 @@ contract UniswapProxyChainingTest is BatchSwapFixture {
         uint256[8] memory before = _all();
 
         vm.prank(makeAddr("attacker"));
-        vm.expectRevert(bytes("Not pool manager"));
+        vm.expectRevert(IProxyErrors.NotPoolManager.selector);
         proxy.unlockCallback(forged);
 
         uint256[8] memory afterAll = _all();
@@ -824,5 +816,50 @@ contract UniswapProxyChainingTest is BatchSwapFixture {
             out[i] = a[i];
         }
         out[a.length] = b;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Price bands inside a chain: every leg is checked inside the shared unlock
+    // ---------------------------------------------------------------------------
+
+    function _v4Tick(ProxyPoolKey memory key) internal view returns (int24 tick) {
+        (, tick,,) = StateLibrary.getSlot0(IPoolManager(address(manager)), PoolId.wrap(keccak256(abi.encode(key))));
+    }
+
+    /// @notice The second leg of a V4 chain would push its pool out of the caller's band: the whole
+    /// chain, and the batch, revert
+    function test_v4Chain_legLeavingItsBand_revertsTheBatch() public {
+        int24 tick = _v4Tick(nativeKey);
+        bytes32 key = proxy.v4Key(nativeKey);
+        vm.prank(user);
+        proxy.setPriceBand(key, tick - 10, tick + 10);
+
+        bytes[] memory swaps = new bytes[](2);
+        swaps[0] = _item(E_V4_01, address(token0), 50e18, HERE); // parks token1
+        swaps[1] = _item(E_V4_E1, address(token1), Chaining.HELD_BALANCE, recipient); // token1 -> ETH
+        uint256 before0 = token0.balanceOf(user);
+
+        vm.prank(user);
+        vm.expectRevert(IProxyErrors.PriceOutOfBand.selector);
+        proxy.batchSwap(swaps);
+
+        assertEq(token0.balanceOf(user), before0, "the first leg was not undone");
+        assertEq(_v4Tick(nativeKey), tick, "a refused leg moved the price");
+    }
+
+    /// @notice The same chain goes through once the band allows the move
+    function test_v4Chain_legInsideItsBand_succeeds() public {
+        bytes[] memory swaps = new bytes[](2);
+        swaps[0] = _item(E_V4_01, address(token0), 1e18, HERE);
+        swaps[1] = _item(E_V4_E1, address(token1), Chaining.HELD_BALANCE, recipient);
+        int24 tick = _v4Tick(nativeKey);
+        bytes32 key = proxy.v4Key(nativeKey);
+        vm.prank(user);
+        proxy.setPriceBand(key, tick - 1000, tick + 1000);
+
+        _expectUnlocks(1);
+        vm.prank(user);
+        proxy.batchSwap(swaps);
+        _assertNothingParked();
     }
 }

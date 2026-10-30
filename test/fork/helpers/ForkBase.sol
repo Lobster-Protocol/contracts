@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0
-// Pinned to match src/UniswapProxy.sol so these tests exercise the same artifact the deploy script
-// broadcasts. See the note at the top of UniswapProxy.sol.
-pragma solidity =0.8.26;
+// Pinned to match src/LobsterProxy.sol so these tests exercise the artifact that ships. See the
+// note at the top of LobsterProxy.sol.
+pragma solidity =0.8.28;
 
 import "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import {UniswapProxy} from "../../../src/UniswapProxy.sol";
+import {LobsterProxy} from "../../../src/LobsterProxy.sol";
+import {Currency, PoolKey, IHooks} from "../../../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {IUniswapV3FactoryMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
 import {PoolAddress} from "../../../src/libraries/uniswapV3/PoolAddress.sol";
 
-/// @notice Shared fixture for the fork suites. See test/fork/README.md for how to run them.
+/// @notice Shared fixture for the fork suites: LobsterProxy against live Uniswap deployments. See
+/// test/fork/README.md for how to run them.
 /// @dev Two environment variables control what is under test:
 /// - `FORK_RPC`  which chain to fork. Defaults to a local Anvil on 8545.
 /// - `PROXY`     attach to an already-deployed instance instead of deploying a fresh one, i.e.
@@ -56,12 +58,18 @@ abstract contract ForkBase is Test {
     uint256 internal fundUsdc; // starting wallet balance
     uint256 internal fundWeth; // starting wallet + ETH balance
 
-    UniswapProxy internal proxy;
+    LobsterProxy internal proxy;
     IUniswapV3FactoryMinimal internal factory;
 
+    /// @dev PoolRegistry's permission bits
+    uint8 internal constant MINT = 1;
+    uint8 internal constant SWAP = 2;
+
+    /// @dev Both are vaults in their own right: each registers the live pools below for itself, so the
+    /// registry never masks what a test is about. LobsterProxy only pays out to its caller, so
+    /// each is also the recipient of its own swaps.
     address internal approver;
     address internal outsider;
-    address internal recipient;
 
     function setUp() public virtual {
         vm.createSelectFork(vm.envOr("FORK_RPC", string("http://127.0.0.1:8545")));
@@ -71,10 +79,9 @@ abstract contract ForkBase is Test {
         // Assigned only after the fork is selected, because `_actor` has to see deployed code.
         approver = _actor("approver");
         outsider = _actor("outsider");
-        recipient = _actor("recipient");
 
         address deployed = vm.envOr("PROXY", address(0));
-        proxy = deployed == address(0) ? new UniswapProxy(V3_FACTORY, POOL_MANAGER) : UniswapProxy(payable(deployed));
+        proxy = deployed == address(0) ? new LobsterProxy(V3_FACTORY, POOL_MANAGER) : LobsterProxy(payable(deployed));
 
         // Sanity: attaching to a wrong/stale address would make every assertion below meaningless.
         require(address(proxy).code.length > 0, "no code at proxy");
@@ -103,11 +110,58 @@ abstract contract ForkBase is Test {
         // (It also reverts on a non-zero -> non-zero approve, so this is only ever set once.)
         _rawApprove(USDT, address(proxy), type(uint256).max);
         vm.stopPrank();
+
+        // The live pools these suites trade on, registered by each actor for itself. Also works
+        // against an attached deployment: registrations are per caller, written on the fork.
+        _registerLivePools(approver);
+        _registerLivePools(outsider);
     }
 
-    /// @dev Mirrors `getNetworkConfig` in script/DeployUniswapProxy.s.sol. Kept in sync by the
-    /// factory/manager assertions in setUp, which fail loudly if the proxy was deployed for a
-    /// different chain than the one being forked.
+    function _registerLivePools(address vault) internal {
+        _allow(vault, proxy.v3Key(_poolFor(USDC, WETH, 500)), MINT | SWAP);
+        _allow(vault, proxy.v3Key(_poolFor(USDC, WETH, 3000)), MINT | SWAP);
+        _allow(vault, proxy.v3Key(_poolFor(USDT, WETH, 500)), SWAP);
+        _allow(vault, proxy.v4Key(_v4EthUsdc()), SWAP);
+        // Pools the vault mints on also need a price band: about +-10% around the live price
+        _bandAroundSpot(vault, _poolFor(USDC, WETH, 500), 1000);
+        _bandAroundSpot(vault, _poolFor(USDC, WETH, 3000), 1000);
+    }
+
+    /// @dev Sets `vault`'s price band for the V3 `pool` to `halfWidth` ticks either side of its
+    /// current tick
+    function _bandAroundSpot(address vault, address pool, int24 halfWidth) internal {
+        (, int24 tick,,,,,) = IUniswapV3PoolMinimal(pool).slot0();
+        bytes32 key = proxy.v3Key(pool);
+        vm.prank(vault);
+        proxy.setPriceBand(key, tick - halfWidth, tick + halfWidth);
+    }
+
+    /// @dev Registers `key` with `permissions` in `vault`'s own registry entries, with a price band that
+    /// allows any price. Tests that are about bands, and the live mint pools above, set their own.
+    function _allow(address vault, bytes32 key, uint8 permissions) internal {
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = key;
+        uint8[] memory perms = new uint8[](1);
+        perms[0] = permissions;
+        vm.prank(vault);
+        proxy.setPools(keys, perms);
+        vm.prank(vault);
+        proxy.setPriceBand(key, -887272, 887272); // TickMath.MIN_TICK / MAX_TICK
+    }
+
+    /// @dev The live ETH/USDC V4 pool: native currency0, no hooks
+    function _v4EthUsdc() internal view returns (PoolKey memory) {
+        return PoolKey({
+            currency0: Currency.wrap(address(0)),
+            currency1: Currency.wrap(USDC),
+            fee: V4_FEE,
+            tickSpacing: V4_TICK_SPACING,
+            hooks: IHooks(address(0))
+        });
+    }
+
+    /// @dev Per-chain Uniswap deployments. The factory/manager assertions in setUp fail loudly if an
+    /// attached proxy was deployed for a different chain than the one being forked.
     function _loadNetwork() internal {
         if (block.chainid == 1 || block.chainid == 31337) {
             V3_FACTORY = 0x1F98431c8aD98523631AE4a59f267346ea31F984;
@@ -223,14 +277,6 @@ abstract contract ForkBase is Test {
         int24 centre = (tick / spacing) * spacing;
         lower = centre - widthInSpacings * spacing;
         upper = centre + widthInSpacings * spacing;
-    }
-
-    /// @dev A price band of `halfWidth` ticks either side of the pool's current tick, for `setPriceBand`.
-    /// Computed here and set by the caller, so a `vm.prank` lands on `setPriceBand` and not on `slot0`.
-    function _bandAroundSpot(address pool, int24 halfWidth) internal view returns (int24 minTick, int24 maxTick) {
-        (, int24 tick,,,,,) = IUniswapV3PoolMinimal(pool).slot0();
-        minTick = tick - halfWidth;
-        maxTick = tick + halfWidth;
     }
 
     function _poolFor(address tokenA, address tokenB, uint24 fee) internal view returns (address) {

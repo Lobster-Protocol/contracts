@@ -7,7 +7,7 @@ import {Guards} from "./Guards.sol";
 
 /// @title State shared by every Uniswap V3 mixin
 /// @notice Holds the factory address and derives pool addresses from it.
-/// @dev The constructor lives here rather than in the mixins so that {UniswapProxy} can inherit both
+/// @dev The constructor lives here rather than in the mixins so that {LobsterProxy} can inherit both
 /// {UniswapV3MintProxy} and {UniswapV3SwapProxy} without passing base constructor arguments twice.
 /// The factory is also what authenticates pool callbacks (see `CallbackValidation`), so a wrong
 /// value here breaks the whole v3 surface rather than degrading it.

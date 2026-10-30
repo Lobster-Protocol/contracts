@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity =0.8.26;
+pragma solidity =0.8.28;
 
-import {UniswapProxy} from "../../../src/UniswapProxy.sol";
+import {LobsterProxy} from "../../../src/LobsterProxy.sol";
 import {MintCallbackData} from "../../../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
 import {SwapCallbackData, ExactInputSingleParams} from "../../../src/interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
 import {PoolAddress} from "../../../src/libraries/uniswapV3/PoolAddress.sol";
@@ -12,9 +12,9 @@ import {SwapType} from "../../../src/UniswapBatchSwapProxy.sol";
 /// @dev The callbacks are `external` and take `payer` from decoded calldata, so `CallbackValidation`
 /// is the check that has to hold. This exists to assert that it does.
 contract PoolImpersonator {
-    UniswapProxy public immutable PROXY;
+    LobsterProxy public immutable PROXY;
 
-    constructor(UniswapProxy _proxy) {
+    constructor(LobsterProxy _proxy) {
         PROXY = _proxy;
     }
 
@@ -74,7 +74,7 @@ contract ReentrantToken {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
-    UniswapProxy public proxy;
+    LobsterProxy public proxy;
     address public approver;
     address public outsider;
     /// @dev A *different*, unlocked pool to re-enter through. Re-entering the pool we are currently
@@ -104,7 +104,7 @@ contract ReentrantToken {
     }
 
     function arm(
-        UniswapProxy _proxy,
+        LobsterProxy _proxy,
         address _approver,
         address _outsider,
         address _reenterTokenIn,

@@ -3,7 +3,7 @@ pragma solidity >=0.8.20;
 
 import "forge-std/Test.sol";
 
-import {UniswapProxy} from "../../src/UniswapProxy.sol";
+import {LobsterProxy} from "../../src/LobsterProxy.sol";
 import {UniswapBatchSwapProxy, SwapType} from "../../src/UniswapBatchSwapProxy.sol";
 import {
     ExactInputSingleParams,
@@ -28,8 +28,8 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 // with the real V4 PoolManager.
 import {FACTORY_BYTECODE} from "../Mocks/uniswapV3/bytecodes/factory.sol";
 
-import {PoolManager} from "v4-core/src/PoolManager.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
+import {PoolManagerDeployer} from "../Mocks/uniswapV4/PoolManagerDeployer.sol";
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
@@ -39,10 +39,10 @@ import {PoolModifyLiquidityTest} from "v4-core/src/test/PoolModifyLiquidityTest.
 // and the repo mock requires ^0.8.28, which makes the two impossible to compile together.
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 
-/// @notice Shared fixture for the `batchSwap` suites: a real V3 factory and a real V4 PoolManager side
-/// by side, two tokens with a V3 pool and a V4 pool between them, a native-ETH V4 pool, a funded user
-/// with standing approvals, and helpers to build batch items and compare a batch with the same swaps
-/// made one by one.
+/// @notice Shared fixture for the LobsterProxy swap suites: a real V3 factory and a real V4
+/// PoolManager side by side, two tokens with a V3 pool and a V4 pool between them, a native-ETH V4
+/// pool, a funded user (the vault) with standing approvals and every pool registered, and helpers to
+/// build batch items and compare a batch with the same swaps made one by one.
 /// @dev Abstract so suites inherit the setup without inheriting each other's tests.
 abstract contract BatchSwapFixture is Test {
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336; // 2**96, price = 1
@@ -50,10 +50,14 @@ abstract contract BatchSwapFixture is Test {
     int24 constant TICK_SPACING = 60;
     int24 constant TICK_RANGE = TICK_SPACING * 100;
     uint256 constant V4_LIQUIDITY = 1000e18;
+    uint8 constant MINT = 1; // PoolRegistry.PERMISSION_MINT
+    uint8 constant SWAP = 2; // PoolRegistry.PERMISSION_SWAP
 
-    PoolManager public manager;
+    /// @dev A real v4-core PoolManager, deployed from its committed 0.8.26 creation code (see
+    /// test/Mocks/uniswapV4/PoolManagerDeployer.sol) and used through its interface
+    IPoolManager public manager;
     PoolModifyLiquidityTest public lpRouter;
-    UniswapProxy public proxy;
+    LobsterProxy public proxy;
     address public v3Factory;
     IUniswapV3PoolMinimal public v3Pool;
 
@@ -64,13 +68,15 @@ abstract contract BatchSwapFixture is Test {
     ProxyPoolKey public nativeKey; // ETH / token1, no hook
 
     address public user = makeAddr("user");
-    address public recipient = makeAddr("recipient");
+    /// @notice Where outputs go. LobsterProxy only ever pays its caller, so this is the user
+    /// itself; the name keeps assertions reading as "delivered to the recipient".
+    address public recipient = user;
 
     function setUp() public virtual {
-        manager = new PoolManager(address(this));
+        manager = IPoolManager(PoolManagerDeployer.deploy(address(this)));
         lpRouter = new PoolModifyLiquidityTest(IPoolManager(address(manager)));
         v3Factory = _deployV3Factory();
-        proxy = new UniswapProxy(v3Factory, address(manager));
+        proxy = new LobsterProxy(v3Factory, address(manager));
 
         token0 = new MockERC20("Token A", "TKA", 18);
         token1 = new MockERC20("Token B", "TKB", 18);
@@ -88,7 +94,7 @@ abstract contract BatchSwapFixture is Test {
 
         token0.approve(address(proxy), type(uint256).max);
         token1.approve(address(proxy), type(uint256).max);
-        _allowAnyMintPrice(address(v3Pool));
+        _allow(address(this), proxy.v3Key(address(v3Pool)), MINT);
         proxy.mint(
             MintParams({
                 token0: address(token0),
@@ -127,17 +133,29 @@ abstract contract BatchSwapFixture is Test {
         token0.approve(address(proxy), type(uint256).max);
         token1.approve(address(proxy), type(uint256).max);
         vm.stopPrank();
+
+        // ...and every pool registered for swaps, so the suites exercise the swap logic itself
+        _allow(user, proxy.v3Key(address(v3Pool)), SWAP);
+        _allow(user, proxy.v4Key(cleanKey), SWAP);
+        _allow(user, proxy.v4Key(nativeKey), SWAP);
+    }
+
+    /// @dev Registers `key` with `permissions` in `who`'s own registry entries, with a price band that
+    /// allows any price: these suites test swapping and batching, not bands (see the band tests)
+    function _allow(address who, bytes32 key, uint8 permissions) internal {
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = key;
+        uint8[] memory perms = new uint8[](1);
+        perms[0] = permissions;
+        vm.prank(who);
+        proxy.setPools(keys, perms);
+        vm.prank(who);
+        proxy.setPriceBand(key, TickMath.MIN_TICK, TickMath.MAX_TICK);
     }
 
     // ---------------------------------------------------------------------------
     // Helpers: fixture
     // ---------------------------------------------------------------------------
-
-    /// @dev The caller's price band for `pool` set to the whole tick range: for mints that only seed
-    /// liquidity, where the band is not what is under test
-    function _allowAnyMintPrice(address pool) internal {
-        proxy.setPriceBand(pool, TickMath.MIN_TICK, TickMath.MAX_TICK);
-    }
 
     function _deployV3Factory() internal returns (address factory) {
         bytes memory code = FACTORY_BYTECODE;

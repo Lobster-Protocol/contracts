@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity >=0.8.24;
+pragma solidity >=0.8.27;
 
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {
@@ -40,14 +40,15 @@ import {Guards} from "./base/Guards.sol";
 ///   owes or is owed (flash accounting), so a parked output is not transferred at all: it stays as
 ///   credit and the next swap spends it. The chain's intermediate currencies never move.
 /// A chain's unlock data starts with `CHAIN_TAG`, a single swap's never can, and `unlockCallback`
-/// dispatches on that first byte.
+/// dispatches on that first byte. A third kind of unlock, V4 liquidity, starts with `LIQUIDITY_TAG`
+/// and is handed to {_liquidityCallback} (implemented by {UniswapV4LiquidityProxy}).
 ///
 /// HOOKED POOLS ARE NOT SUPPORTED. Only `poolKey.hooks == address(0)` is accepted. A hook executes
 /// third-party code during the swap and may adjust the caller's balance delta
 /// (`swapDelta = swapDelta - hookDelta`, see v4-core Hooks.sol). Restricting to hookless pools keeps
 /// the swap paths as predictable as their v3 equivalents.
 ///
-/// Abstract on purpose: this is a mixin combined into {UniswapProxy}. Deploy that rather than this.
+/// Abstract on purpose: this is a mixin combined into {LobsterProxy}. Deploy that rather than this.
 abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
     using BalanceDeltaLibrary for BalanceDelta;
     using CurrencySettler for Currency;
@@ -60,6 +61,8 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
     /// @dev First byte of a chain's unlock data. A single swap's data always starts with 0x00: its
     /// first word is `poolKey.currency0`, an address, whose top byte is zero.
     bytes1 private constant CHAIN_TAG = 0x01;
+    /// @dev First byte of a liquidity unlock, see {UniswapV4LiquidityProxy}
+    bytes1 internal constant LIQUIDITY_TAG = 0x02;
 
     IPoolManagerMinimal public immutable POOL_MANAGER;
 
@@ -81,6 +84,7 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
     function exactInputSingleV4(V4ExactInputSingleParams calldata params)
         external
         payable
+        virtual
         nonReentrant
         returns (uint256 amountOut)
     {
@@ -93,6 +97,7 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
     function exactOutputSingleV4(V4ExactOutputSingleParams calldata params)
         external
         payable
+        virtual
         nonReentrant
         returns (uint256 amountIn)
     {
@@ -107,7 +112,7 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
     /// `batchSwap` reverts unless everything it parked here is spent, so the proxy still holds no ETH
     /// between transactions.
     receive() external payable {
-        require(msg.sender == address(POOL_MANAGER), "Not pool manager");
+        require(msg.sender == address(POOL_MANAGER), NotPoolManager());
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -141,8 +146,8 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
 
         // Hookless pools consume at most the specified input, so this holds by construction. Kept as
         // a cheap assertion of the function's contract rather than as load-bearing protection.
-        require(amountIn <= params.amountIn, "Too much requested");
-        require(amountOut >= params.amountOutMinimum, "Too little received");
+        require(amountIn <= params.amountIn, TooMuchRequested());
+        require(amountOut >= params.amountOutMinimum, TooLittleReceived());
     }
 
     /// @dev Body of {exactOutputSingleV4}, shared with {UniswapBatchSwapProxy-batchSwap}. Same contract
@@ -167,10 +172,10 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
             params.recipient
         );
 
-        require(amountIn <= params.amountInMaximum, "Too much requested");
+        require(amountIn <= params.amountInMaximum, TooMuchRequested());
         // A swap can stop early on the price limit and deliver less than requested. When the caller
         // did not ask for a limit, that outcome is never intended, so reject it.
-        if (params.sqrtPriceLimitX96 == 0) require(amountOut == params.amountOut, "Too little received");
+        if (params.sqrtPriceLimitX96 == 0) require(amountOut == params.amountOut, TooLittleReceived());
     }
 
     /// @dev Opens an unlock for one swap and unpacks the result
@@ -186,6 +191,9 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
         returns (uint256 amountIn, uint256 amountOut)
     {
         _requireHookless(poolKey);
+        // The swap is the unlock's only action on this pool, so its price at both ends of the unlock
+        // is its price at both ends of the swap
+        _checkV4SwapPrice(msg.sender, poolKey);
 
         bytes memory result = POOL_MANAGER.unlock(
             abi.encode(
@@ -205,6 +213,7 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
         );
 
         (amountIn, amountOut) = abi.decode(result, (uint256, uint256));
+        _checkV4SwapPrice(msg.sender, poolKey);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -264,9 +273,10 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
     /// @dev The only entry point the PoolManager uses. Every currency delta must be back to zero by the
     /// end, or the manager reverts the whole unlock with `CurrencyNotSettled`.
     function unlockCallback(bytes calldata data) external override returns (bytes memory) {
-        require(msg.sender == address(POOL_MANAGER), "Not pool manager");
+        require(msg.sender == address(POOL_MANAGER), NotPoolManager());
 
         if (data[0] == CHAIN_TAG) return _chainCallback(abi.decode(data[1:], (V4UnlockData)));
+        if (data[0] == LIQUIDITY_TAG) return _liquidityCallback(data[1:]);
 
         V4SwapCallbackData memory decoded = abi.decode(data, (V4SwapCallbackData));
         (Currency inputCurrency, Currency outputCurrency) = _currencies(decoded.poolKey, decoded.swapParams.zeroForOne);
@@ -277,6 +287,9 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
 
         return abi.encode(amountIn, amountOut);
     }
+
+    /// @dev The body of a liquidity unlock; `data` is what follows `LIQUIDITY_TAG`
+    function _liquidityCallback(bytes calldata data) internal virtual returns (bytes memory);
 
     /// @dev Runs every leg of a chain, then moves any parked credit no leg spent into the proxy, where a
     /// later V3 swap of the batch can spend it and where the batch's end-of-batch check sees it.
@@ -300,7 +313,9 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
     }
 
     /// @dev One leg of a chain: swap, check its bounds, pay its input, deliver its output. The bounds
-    /// are the same as the single-swap path's.
+    /// are the same as the single-swap path's. `payer` is the account that opened the chain (a chain is
+    /// only ever run for `msg.sender` of `batchSwap`), so it is also whose price band applies: inside
+    /// the unlock msg.sender is the PoolManager.
     function _runLeg(V4Leg memory leg, address payer, Ledger memory ledger) private returns (uint256) {
         (Currency inputCurrency, Currency outputCurrency) = _currencies(leg.poolKey, leg.zeroForOne);
         uint256 inSlot = _slot(ledger, Currency.unwrap(inputCurrency));
@@ -310,9 +325,10 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
         uint256 amountIn = leg.amount;
         if (leg.fromHeld) {
             amountIn = ledger.credits[inSlot] + _heldBalance(Currency.unwrap(inputCurrency));
-            require(amountIn != 0, "Nothing held");
+            require(amountIn != 0, NothingHeld());
         }
 
+        _checkV4SwapPrice(payer, leg.poolKey);
         (uint256 paid, uint256 received) = _swap(
             leg.poolKey,
             SwapParams({
@@ -326,13 +342,14 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
                     : leg.sqrtPriceLimitX96
             })
         );
+        _checkV4SwapPrice(payer, leg.poolKey);
 
         if (leg.exactInput) {
-            require(paid <= amountIn, "Too much requested"); // holds by construction for hookless pools
-            require(received >= leg.bound, "Too little received");
+            require(paid <= amountIn, TooMuchRequested()); // holds by construction for hookless pools
+            require(received >= leg.bound, TooLittleReceived());
         } else {
-            require(paid <= leg.bound, "Too much requested");
-            if (leg.sqrtPriceLimitX96 == 0) require(received == leg.amount, "Too little received");
+            require(paid <= leg.bound, TooMuchRequested());
+            if (leg.sqrtPriceLimitX96 == 0) require(received == leg.amount, TooLittleReceived());
         }
 
         // Pay the input. A held leg spends parked credit first, which needs no transfer at all, then
@@ -360,10 +377,15 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
     // Shared pieces
     // ---------------------------------------------------------------------------------------------
 
+    /// @dev Called with the pool right before and right after every swap. `account` is the one swapping.
+    /// No check here; {LobsterProxy} enforces `account`'s price band. A swap moves the price one
+    /// way only, so a price inside the band at both ends means the whole trade executed inside it.
+    function _checkV4SwapPrice(address account, PoolKey memory poolKey) internal view virtual {}
+
     /// @dev Everything downstream assumes a plain constant-product pool, so hooked pools are refused
     /// before any unlock. Both paths route through here.
     function _requireHookless(PoolKey memory poolKey) private pure {
-        require(address(poolKey.hooks) == address(0), "Hooks not supported");
+        require(address(poolKey.hooks) == address(0), HooksNotSupported());
     }
 
     function _currencies(PoolKey memory key, bool zeroForOne) private pure returns (Currency input, Currency output) {
@@ -378,7 +400,7 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
             params.zeroForOne ? (delta.amount0(), delta.amount1()) : (delta.amount1(), delta.amount0());
         // A hookless pool always leaves us owing the input and owed the output. The casts below rely
         // on it, so assert rather than assume.
-        require(inputDelta <= 0 && outputDelta >= 0, "Unexpected delta");
+        require(inputDelta <= 0 && outputDelta >= 0, UnexpectedDelta());
         // forge-lint: disable-next-line(unsafe-typecast)
         paid = uint256(uint128(-inputDelta));
         // forge-lint: disable-next-line(unsafe-typecast)
@@ -403,7 +425,7 @@ abstract contract UniswapV4SwapProxy is Guards, IUnlockCallback {
     /// while a batch is in progress (`nonReentrant`), so this never sees a batch's parked ETH.
     /// {UniswapBatchSwapProxy-batchSwap} is also non-payable and never calls this. Revisit all three
     /// before changing any of them.
-    function _refundExcessNative() private {
+    function _refundExcessNative() internal {
         uint256 balance = address(this).balance;
         if (balance > 0) TransferHelper.safeTransferETH(msg.sender, balance);
     }

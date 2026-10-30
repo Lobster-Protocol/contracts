@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity =0.8.26;
+pragma solidity =0.8.28;
 
 import "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -9,17 +9,15 @@ import {BatchSwapCalls} from "../../helpers/BatchSwapCalls.sol";
 import {SwapType} from "../../../src/UniswapBatchSwapProxy.sol";
 import {Chaining} from "../../../src/libraries/Chaining.sol";
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
-import {
-    ExactInputSingleParams,
-    ExactOutputSingleParams
-} from "../../../src/interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
+import {ExactInputSingleParams} from "../../../src/interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
 import {Currency, PoolKey, IHooks} from "../../../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
 import {V4ExactInputSingleParams} from "../../../src/interfaces/uniswapV4/IUnlockCallback.sol";
+import {IProxyErrors} from "../../../src/interfaces/IProxyErrors.sol";
 
 /// @notice `batchSwap` against live pools: V3 and V4 swaps in one transaction.
-/// @dev The mock suite (test/UniswapProxyBatchSwap.t.sol) covers the batching rules in depth. This
-/// one confirms they hold against the canonical deployments, where a V3 callback and a V4 unlock
-/// really do happen inside the same transaction.
+/// @dev The mock suite (test/LobsterBatchSwap.t.sol) covers the batching rules in depth. This one
+/// confirms they hold against the canonical deployments, where a V3 callback and a V4 unlock really do
+/// happen inside the same transaction.
 contract BatchSwapTest is ForkBase {
     /// @dev The live ETH/USDC V4 pool: native currency0, no hooks.
     function _ethUsdcKey() internal view returns (PoolKey memory) {
@@ -32,9 +30,10 @@ contract BatchSwapTest is ForkBase {
         });
     }
 
-    /// @dev USDC -> WETH on V3 (0.05%), USDC -> ETH on V4, then an exact amount of USDC back out of
-    /// WETH on V3 (0.3%). Two V3 pools, one V4 pool, both swap directions, both exact-in and exact-out.
-    function _mixedBatch(uint128 v4MinOut) internal view returns (bytes[] memory swaps) {
+    /// @dev USDC -> WETH on V3 (0.05%), USDC -> ETH on V4, then WETH -> USDC on V3 (0.3%). Two V3
+    /// pools, one V4 pool, both swap directions.
+    /// Every output goes to `to`, which must be the caller.
+    function _mixedBatch(uint128 v4MinOut, address to) internal view returns (bytes[] memory swaps) {
         swaps = new bytes[](3);
         swaps[0] = abi.encodePacked(
             SwapType.V3_EXACT_INPUT,
@@ -43,7 +42,7 @@ contract BatchSwapTest is ForkBase {
                     tokenIn: USDC,
                     tokenOut: WETH,
                     fee: 500,
-                    recipient: recipient,
+                    recipient: to,
                     deadline: block.timestamp,
                     amountIn: tradeUsdc,
                     amountOutMinimum: 0,
@@ -57,7 +56,7 @@ contract BatchSwapTest is ForkBase {
                 V4ExactInputSingleParams({
                     poolKey: _ethUsdcKey(),
                     zeroForOne: false, // USDC in, native ETH out
-                    recipient: recipient,
+                    recipient: to,
                     deadline: block.timestamp,
                     amountIn: tradeUsdc,
                     amountOutMinimum: v4MinOut,
@@ -66,16 +65,16 @@ contract BatchSwapTest is ForkBase {
             )
         );
         swaps[2] = abi.encodePacked(
-            SwapType.V3_EXACT_OUTPUT,
+            SwapType.V3_EXACT_INPUT,
             abi.encode(
-                ExactOutputSingleParams({
+                ExactInputSingleParams({
                     tokenIn: WETH,
                     tokenOut: USDC,
                     fee: 3000,
-                    recipient: recipient,
+                    recipient: to,
                     deadline: block.timestamp,
-                    amountOut: tradeUsdc,
-                    amountInMaximum: type(uint256).max,
+                    amountIn: tradeWeth,
+                    amountOutMinimum: 0,
                     sqrtPriceLimitX96: 0
                 })
             )
@@ -87,7 +86,7 @@ contract BatchSwapTest is ForkBase {
     }
 
     function test_mixedV3AndV4Batch_matchesSameSwapsMadeOneByOne() public {
-        bytes[] memory swaps = _mixedBatch(0);
+        bytes[] memory swaps = _mixedBatch(0, approver);
 
         // Reference run: each swap as a direct call to its single-swap entry point, then rewind
         uint256 snap = vm.snapshotState();
@@ -101,9 +100,9 @@ contract BatchSwapTest is ForkBase {
         uint256[4] memory expectedHoldings = _approverHoldings();
         vm.revertToState(snap);
 
-        uint256 wethBefore = IERC20(WETH).balanceOf(recipient);
-        uint256 usdcBefore = IERC20(USDC).balanceOf(recipient);
-        uint256 ethBefore = recipient.balance;
+        uint256 wethBefore = IERC20(WETH).balanceOf(approver);
+        uint256 usdcBefore = IERC20(USDC).balanceOf(approver);
+        uint256 ethBefore = approver.balance;
 
         vm.prank(approver);
         uint256[] memory amounts = proxy.batchSwap(swaps);
@@ -116,9 +115,11 @@ contract BatchSwapTest is ForkBase {
             assertEq(holdings[i], expectedHoldings[i], "approver balances differ from one-by-one");
         }
 
-        assertEq(IERC20(WETH).balanceOf(recipient) - wethBefore, amounts[0], "V3 output");
-        assertEq(recipient.balance - ethBefore, amounts[1], "V4 native output");
-        assertEq(IERC20(USDC).balanceOf(recipient) - usdcBefore, tradeUsdc, "V3 exact output");
+        // The caller is also the recipient, so each net change is received minus paid:
+        // WETH: +first leg's output - third leg's input; ETH: +V4 output; USDC: -2 inputs + third leg's output
+        assertEq(IERC20(WETH).balanceOf(approver) + tradeWeth, wethBefore + amounts[0], "WETH: received minus paid");
+        assertEq(approver.balance - ethBefore, amounts[1], "V4 native output");
+        assertEq(IERC20(USDC).balanceOf(approver) + 2 * tradeUsdc, usdcBefore + amounts[2], "USDC: received minus paid");
         assertEq(IERC20(USDC).balanceOf(address(proxy)), 0, "proxy retained USDC");
         assertEq(IERC20(WETH).balanceOf(address(proxy)), 0, "proxy retained WETH");
         assertEq(address(proxy).balance, 0, "proxy retained ETH");
@@ -168,7 +169,7 @@ contract BatchSwapTest is ForkBase {
         swaps[1] = abi.encodePacked(
             SwapType.V4_EXACT_INPUT, abi.encode(_v4UsdcEth(true, uint128(Chaining.HELD_BALANCE), Chaining.ADDRESS_THIS))
         );
-        swaps[2] = abi.encodePacked(SwapType.V3_EXACT_INPUT, abi.encode(_v3UsdcWeth(Chaining.HELD_BALANCE, recipient)));
+        swaps[2] = abi.encodePacked(SwapType.V3_EXACT_INPUT, abi.encode(_v3UsdcWeth(Chaining.HELD_BALANCE, approver)));
 
         // Reference: three direct calls, each intermediate output delivered to the approver and
         // passed by hand (as msg.value for the ETH leg)
@@ -177,20 +178,20 @@ contract BatchSwapTest is ForkBase {
         uint256 a = proxy.exactInputSingleV4(_v4UsdcEth(false, tradeUsdc, approver));
         // forge-lint: disable-next-line(unsafe-typecast)
         uint256 b = proxy.exactInputSingleV4{value: a}(_v4UsdcEth(true, uint128(a), approver));
-        uint256 c = proxy.exactInputSingle(_v3UsdcWeth(b, recipient));
+        uint256 c = proxy.exactInputSingle(_v3UsdcWeth(b, approver));
         vm.stopPrank();
         uint256[4] memory expectedHoldings = _approverHoldings();
         uint256 expectedApproverEth = approver.balance;
         vm.revertToState(snap);
 
-        uint256 wethBefore = IERC20(WETH).balanceOf(recipient);
+        uint256 wethBefore = IERC20(WETH).balanceOf(approver);
         vm.prank(approver);
         uint256[] memory amounts = proxy.batchSwap(swaps);
 
         assertEq(amounts[0], a, "USDC -> ETH leg");
         assertEq(amounts[1], b, "ETH -> USDC leg did not spend exactly the parked ETH");
         assertEq(amounts[2], c, "USDC -> WETH leg did not spend exactly the parked USDC");
-        assertEq(IERC20(WETH).balanceOf(recipient) - wethBefore, c, "recipient did not get the WETH");
+        assertEq(IERC20(WETH).balanceOf(approver) - wethBefore, c, "the caller did not get the WETH");
 
         uint256[4] memory holdings = _approverHoldings();
         for (uint256 i = 0; i < 4; i++) {
@@ -207,26 +208,27 @@ contract BatchSwapTest is ForkBase {
         uint160 price500 = _price(USDC_WETH_500);
 
         vm.prank(approver);
-        vm.expectRevert(bytes("Too little received"));
-        proxy.batchSwap(_mixedBatch(type(uint128).max));
+        vm.expectRevert(IProxyErrors.TooLittleReceived.selector);
+        proxy.batchSwap(_mixedBatch(type(uint128).max, approver));
 
         _assertApproverUntouched(before, "reverted batch");
         assertEq(_price(USDC_WETH_500), price500, "V3 swap survived the revert");
     }
 
     /// @dev The Authorisation suite's invariant, restated for batches: `payer` is `msg.sender` for
-    /// every batched swap, so a batch can never reach someone else's standing approval.
+    /// every batched swap, so a batch can never reach someone else's standing approval. The outsider
+    /// has registered the same pools, so without an approval of its own only payment can stop it.
     function test_outsiderBatch_cannotSpendApproverAllowance() public {
         uint256[4] memory before = _approverHoldings();
 
         vm.prank(outsider);
         vm.expectRevert();
-        proxy.batchSwap(_mixedBatch(0));
+        proxy.batchSwap(_mixedBatch(0, outsider));
 
         vm.startPrank(outsider);
         IERC20(USDC).approve(address(proxy), type(uint256).max);
         IERC20(WETH).approve(address(proxy), type(uint256).max);
-        proxy.batchSwap(_mixedBatch(0));
+        proxy.batchSwap(_mixedBatch(0, outsider));
         vm.stopPrank();
 
         _assertApproverUntouched(before, "outsider batch");
