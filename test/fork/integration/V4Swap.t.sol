@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity =0.8.26;
+pragma solidity =0.8.28;
 
 import "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -11,6 +11,7 @@ import {
     V4ExactOutputSingleParams,
     V4SwapCallbackData
 } from "../../../src/interfaces/uniswapV4/IUnlockCallback.sol";
+import {IProxyErrors} from "../../../src/interfaces/IProxyErrors.sol";
 
 /// @notice The V4 surface, against the real mainnet PoolManager singleton.
 /// @dev V4 concentrates the risk differently from V3: one singleton instead of derived pool
@@ -33,7 +34,7 @@ contract V4SwapTest is ForkBase {
 
     function test_exactInputSingleV4_nativeForUsdc() public {
         uint128 amountIn = tradeWeth;
-        uint256 usdcBefore = IERC20(USDC).balanceOf(recipient);
+        uint256 usdcBefore = IERC20(USDC).balanceOf(approver);
         uint256 ethBefore = approver.balance;
 
         vm.prank(approver);
@@ -41,7 +42,7 @@ contract V4SwapTest is ForkBase {
             V4ExactInputSingleParams({
                 poolKey: _ethUsdcKey(),
                 zeroForOne: true,
-                recipient: recipient,
+                recipient: approver,
                 deadline: block.timestamp,
                 amountIn: amountIn,
                 amountOutMinimum: 0,
@@ -50,21 +51,21 @@ contract V4SwapTest is ForkBase {
         );
 
         assertGt(amountOut, 0, "no output");
-        assertEq(IERC20(USDC).balanceOf(recipient), usdcBefore + amountOut, "output not delivered");
+        assertEq(IERC20(USDC).balanceOf(approver), usdcBefore + amountOut, "output not delivered");
         assertEq(approver.balance, ethBefore - amountIn, "ETH debit does not match amountIn");
         assertEq(address(proxy).balance, 0, "proxy retained ETH");
     }
 
     function test_exactInputSingleV4_usdcForNative() public {
         uint128 amountIn = tradeUsdc;
-        uint256 ethBefore = recipient.balance;
+        uint256 ethBefore = approver.balance;
 
         vm.prank(approver);
         uint256 amountOut = proxy.exactInputSingleV4(
             V4ExactInputSingleParams({
                 poolKey: _ethUsdcKey(),
                 zeroForOne: false,
-                recipient: recipient,
+                recipient: approver,
                 deadline: block.timestamp,
                 amountIn: amountIn,
                 amountOutMinimum: 0,
@@ -73,47 +74,25 @@ contract V4SwapTest is ForkBase {
         );
 
         assertGt(amountOut, 0, "no output");
-        assertEq(recipient.balance, ethBefore + amountOut, "native output not delivered to recipient");
+        assertEq(approver.balance, ethBefore + amountOut, "native output not delivered to the caller");
         assertEq(address(proxy).balance, 0, "proxy retained ETH");
-    }
-
-    function test_exactOutputSingleV4_deliversExactly() public {
-        uint128 amountOut = tradeUsdc;
-        uint256 usdcBefore = IERC20(USDC).balanceOf(recipient);
-
-        vm.prank(approver);
-        uint256 amountIn = proxy.exactOutputSingleV4{value: uint256(tradeWeth) * 20}(
-            V4ExactOutputSingleParams({
-                poolKey: _ethUsdcKey(),
-                zeroForOne: true,
-                recipient: recipient,
-                deadline: block.timestamp,
-                amountOut: amountOut,
-                amountInMaximum: type(uint128).max,
-                sqrtPriceLimitX96: 0
-            })
-        );
-
-        assertEq(IERC20(USDC).balanceOf(recipient), usdcBefore + amountOut, "exact output not exact");
-        assertGt(amountIn, 0, "no input consumed");
-        assertEq(address(proxy).balance, 0, "proxy retained ETH after refund");
     }
 
     /// @dev The overpayment path: send far more ETH than the swap needs and confirm the remainder
     /// comes back rather than sitting in the proxy for the next caller to sweep.
     function test_excessNativeIsRefundedToCaller() public {
-        uint128 amountOut = tradeUsdc;
+        uint128 amountIn = tradeWeth;
         uint256 ethBefore = approver.balance;
 
         vm.prank(approver);
-        uint256 amountIn = proxy.exactOutputSingleV4{value: uint256(tradeWeth) * 50}(
-            V4ExactOutputSingleParams({
+        proxy.exactInputSingleV4{value: uint256(tradeWeth) * 50}(
+            V4ExactInputSingleParams({
                 poolKey: _ethUsdcKey(),
                 zeroForOne: true,
                 recipient: approver,
                 deadline: block.timestamp,
-                amountOut: amountOut,
-                amountInMaximum: type(uint128).max,
+                amountIn: amountIn,
+                amountOutMinimum: 0,
                 sqrtPriceLimitX96: 0
             })
         );
@@ -128,15 +107,16 @@ contract V4SwapTest is ForkBase {
 
     /// @dev The load-bearing V4 restriction. A hook runs outsider code inside the swap and can
     /// rewrite the caller's balance delta, which would make it reachable code behind every standing
-    /// allowance this contract holds. Rejection must happen before the unlock, on both entry points.
+    /// allowance this contract holds. Rejection must happen before the unlock.
     function test_hookedPoolIsRejected() public {
         PoolKey memory hooked = _ethUsdcKey();
         hooked.hooks = IHooks(makeAddr("someHook"));
+        _allow(approver, proxy.v4Key(hooked), SWAP); // registered: the hook rule is what must refuse it
 
         uint256[4] memory before = _approverHoldings();
 
         vm.prank(approver);
-        vm.expectRevert("Hooks not supported");
+        vm.expectRevert(IProxyErrors.HooksNotSupported.selector);
         proxy.exactInputSingleV4{value: uint256(tradeWeth)}(
             V4ExactInputSingleParams({
                 poolKey: hooked,
@@ -149,20 +129,6 @@ contract V4SwapTest is ForkBase {
             })
         );
 
-        vm.prank(approver);
-        vm.expectRevert("Hooks not supported");
-        proxy.exactOutputSingleV4{value: uint256(tradeWeth)}(
-            V4ExactOutputSingleParams({
-                poolKey: hooked,
-                zeroForOne: true,
-                recipient: approver,
-                deadline: block.timestamp,
-                amountOut: tradeUsdc,
-                amountInMaximum: type(uint128).max,
-                sqrtPriceLimitX96: 0
-            })
-        );
-
         _assertApproverUntouched(before, "hooked pool");
     }
 
@@ -170,9 +136,10 @@ contract V4SwapTest is ForkBase {
         vm.assume(hook != address(0));
         PoolKey memory hooked = _ethUsdcKey();
         hooked.hooks = IHooks(hook);
+        _allow(approver, proxy.v4Key(hooked), SWAP);
 
         vm.prank(approver);
-        vm.expectRevert("Hooks not supported");
+        vm.expectRevert(IProxyErrors.HooksNotSupported.selector);
         proxy.exactInputSingleV4(
             V4ExactInputSingleParams({
                 poolKey: hooked,
@@ -205,7 +172,7 @@ contract V4SwapTest is ForkBase {
         });
 
         vm.prank(outsider);
-        vm.expectRevert("Not pool manager");
+        vm.expectRevert(IProxyErrors.NotPoolManager.selector);
         proxy.unlockCallback(abi.encode(payload));
 
         // Even impersonating the manager only works with a cheat code, i.e. not on a real chain.
@@ -257,11 +224,11 @@ contract V4SwapTest is ForkBase {
 
         vm.startPrank(outsider);
         IERC20(USDC).approve(address(proxy), type(uint256).max);
-        proxy.exactInputSingleV4(
+        uint256 amountOut = proxy.exactInputSingleV4(
             V4ExactInputSingleParams({
                 poolKey: _ethUsdcKey(),
-                zeroForOne: false,
-                recipient: recipient, // output goes elsewhere; only the sweep credits the caller
+                zeroForOne: false, // USDC in, ETH out, to the caller
+                recipient: outsider,
                 deadline: block.timestamp,
                 amountIn: tradeUsdc,
                 amountOutMinimum: 0,
@@ -270,9 +237,10 @@ contract V4SwapTest is ForkBase {
         );
         vm.stopPrank();
 
-        // The caller receives ETH it did not deposit. This is why the `_refundExcessNative`
-        // invariant (no receive, no multicall, one payable path per transaction) is load-bearing.
-        assertEq(outsider.balance, outsiderBefore + sweepable, "stray ETH was not swept by the caller");
+        // The caller receives ETH it did not deposit, on top of the swap's own ETH output. This is
+        // why the `_refundExcessNative` invariant (no receive, exactly one payable path per
+        // transaction) is load-bearing.
+        assertEq(outsider.balance, outsiderBefore + amountOut + sweepable, "stray ETH was not swept by the caller");
         assertEq(address(proxy).balance, 0, "proxy still holds ETH");
     }
 
@@ -304,5 +272,27 @@ contract V4SwapTest is ForkBase {
         // No ETH was contributed by the caller, and the remainder is returned on the way out.
         assertGt(outsider.balance, outsiderEthBefore, "outsider did not profit");
         assertEq(address(proxy).balance, 0, "proxy still holds ETH");
+    }
+
+    function test_exactOutputSingleV4_deliversExactly() public {
+        uint128 amountOut = tradeUsdc;
+        uint256 usdcBefore = IERC20(USDC).balanceOf(approver);
+
+        vm.prank(approver);
+        uint256 amountIn = proxy.exactOutputSingleV4{value: uint256(tradeWeth) * 20}(
+            V4ExactOutputSingleParams({
+                poolKey: _ethUsdcKey(),
+                zeroForOne: true,
+                recipient: approver,
+                deadline: block.timestamp,
+                amountOut: amountOut,
+                amountInMaximum: type(uint128).max,
+                sqrtPriceLimitX96: 0
+            })
+        );
+
+        assertEq(IERC20(USDC).balanceOf(approver), usdcBefore + amountOut, "exact output not exact");
+        assertGt(amountIn, 0, "no input consumed");
+        assertEq(address(proxy).balance, 0, "proxy retained ETH after refund");
     }
 }

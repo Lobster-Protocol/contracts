@@ -3,15 +3,44 @@ pragma solidity >=0.8.20;
 
 import {PoolKey, SwapParams} from "./IPoolManagerMinimal.sol";
 
-/// @notice Encoded and passed through `IPoolManager#unlock`, decoded again in `unlockCallback`.
+/// @notice Unlock data for a single swap: the common case, and the cheapest to encode and decode.
 /// @dev The PoolManager does not forward the original caller, so the payer has to be carried here.
-/// @dev No `hookData` field: {UniswapProxy} only accepts pools with `hooks == address(0)`, so there
-/// is never a hook to pass data to.
+/// No `hookData` field: {LobsterProxy} only accepts pools with `hooks == address(0)`, so there is
+/// never a hook to pass data to. Its encoding always starts with a zero byte (the first word is
+/// `poolKey.currency0`, an address), which is how `unlockCallback` tells it from a chain.
 struct V4SwapCallbackData {
     PoolKey poolKey;
     SwapParams swapParams;
     address payer;
     address recipient;
+}
+
+/// @notice One swap of a chain. Built only by the proxy, from validated params.
+struct V4Leg {
+    PoolKey poolKey;
+    bool zeroForOne;
+    bool exactInput;
+    /// @dev Exact input only: spend everything the proxy holds of the input currency (credit left
+    /// by earlier legs of the same unlock, plus its own balance), paid by the proxy. `amount` is
+    /// then ignored. Set only by `batchSwap`, for `amountIn == Chaining.HELD_BALANCE`.
+    bool fromHeld;
+    /// @dev amountIn for exact input, amountOut for exact output
+    uint128 amount;
+    /// @dev amountOutMinimum for exact input, amountInMaximum for exact output
+    uint128 bound;
+    /// @dev 0 means no limit
+    uint160 sqrtPriceLimitX96;
+    /// @dev Already validated. `address(this)` means park: keep the output as credit in the
+    /// PoolManager for a later leg, and move whatever is left into the proxy when the unlock ends.
+    address recipient;
+}
+
+/// @notice Unlock data for a chain of swaps run in one unlock, each spending what the previous parked.
+/// @dev Passed through `IPoolManager#unlock` behind a leading tag byte. The payer pays every leg that
+/// is not `fromHeld`.
+struct V4UnlockData {
+    address payer;
+    V4Leg[] legs;
 }
 
 struct V4ExactInputSingleParams {

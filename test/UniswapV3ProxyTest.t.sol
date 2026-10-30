@@ -15,6 +15,8 @@ import {IWETH} from "../src/interfaces/IWETH.sol";
 import {LiquidityAmounts} from "../src/libraries/uniswapV3/LiquidityAmounts.sol";
 import {TickMath} from "../src/libraries/uniswapV3/TickMath.sol";
 import {PoolAddress} from "../src/libraries/uniswapV3/PoolAddress.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {IProxyErrors} from "../src/interfaces/IProxyErrors.sol";
 
 contract UniswapV3ProxyTest is Test {
     UniswapV3ProxyHarness public proxy;
@@ -365,7 +367,7 @@ contract UniswapV3ProxyTest is Test {
         });
 
         vm.prank(user);
-        vm.expectRevert("Transaction too old");
+        vm.expectRevert(IProxyErrors.TransactionTooOld.selector);
         proxy.mint(params);
     }
 
@@ -385,7 +387,7 @@ contract UniswapV3ProxyTest is Test {
         });
 
         vm.prank(user);
-        vm.expectRevert("Price slippage check");
+        vm.expectRevert(IProxyErrors.PriceSlippageCheck.selector);
         proxy.mint(params);
     }
 
@@ -721,7 +723,7 @@ contract UniswapV3ProxyTest is Test {
         });
 
         vm.prank(user);
-        vm.expectRevert("Transaction too old");
+        vm.expectRevert(IProxyErrors.TransactionTooOld.selector);
         proxy.exactInputSingle(params);
     }
 
@@ -740,7 +742,7 @@ contract UniswapV3ProxyTest is Test {
         });
 
         vm.prank(user);
-        vm.expectRevert("Too little received");
+        vm.expectRevert(IProxyErrors.TooLittleReceived.selector);
         proxy.exactInputSingle(params);
     }
 
@@ -761,7 +763,7 @@ contract UniswapV3ProxyTest is Test {
         });
 
         vm.prank(user);
-        vm.expectRevert("Too little received");
+        vm.expectRevert(IProxyErrors.TooLittleReceived.selector);
         proxy.exactInputSingle(params);
     }
 
@@ -854,253 +856,9 @@ contract UniswapV3ProxyTest is Test {
     // EXACT OUTPUT SINGLE -- happy paths
     // ===========================================================================
 
-    function testExactOutputSingleZeroForOne() public {
-        _mintDefaultLiquidity();
-
-        uint256 desiredOut = 5e18;
-        uint256 expectedIn = _probeExactOutput(address(token0), address(token1), desiredOut);
-
-        uint256 userT0Before = token0.balanceOf(user);
-        uint256 recipientT1Before = token1.balanceOf(recipient);
-        uint256 poolT0Before = token0.balanceOf(address(pool));
-        uint256 poolT1Before = token1.balanceOf(address(pool));
-
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountOut: desiredOut,
-            amountInMaximum: SWAP_AMOUNT,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        uint256 amountIn = proxy.exactOutputSingle(params);
-
-        // Input matches probed expectation
-        assertEq(amountIn, expectedIn, "amountIn should match probed value");
-
-        // The fee + price impact cost is exactly amountIn - desiredOut
-        uint256 totalCost = amountIn - desiredOut;
-        assertEq(totalCost, expectedIn - desiredOut, "total cost should match probed expectation");
-
-        // Recipient received exactly the desired output
-        assertEq(token1.balanceOf(recipient), recipientT1Before + desiredOut);
-
-        // Exact balance accounting
-        assertEq(token0.balanceOf(user), userT0Before - amountIn);
-        assertEq(token0.balanceOf(address(pool)), poolT0Before + amountIn);
-        assertEq(token1.balanceOf(address(pool)), poolT1Before - desiredOut);
-    }
-
-    function testExactOutputSingleOneForZero() public {
-        _mintDefaultLiquidity();
-
-        uint256 desiredOut = 5e18;
-        uint256 expectedIn = _probeExactOutput(address(token1), address(token0), desiredOut);
-
-        uint256 userT1Before = token1.balanceOf(user);
-        uint256 recipientT0Before = token0.balanceOf(recipient);
-        uint256 poolT0Before = token0.balanceOf(address(pool));
-        uint256 poolT1Before = token1.balanceOf(address(pool));
-
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token1),
-            tokenOut: address(token0),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountOut: desiredOut,
-            amountInMaximum: SWAP_AMOUNT,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        uint256 amountIn = proxy.exactOutputSingle(params);
-
-        assertEq(amountIn, expectedIn);
-        assertEq(token0.balanceOf(recipient), recipientT0Before + desiredOut);
-        assertEq(token1.balanceOf(user), userT1Before - amountIn);
-        assertEq(token1.balanceOf(address(pool)), poolT1Before + amountIn);
-        assertEq(token0.balanceOf(address(pool)), poolT0Before - desiredOut);
-    }
-
-    function testExactOutputSingleRecipientIsSelf() public {
-        _mintDefaultLiquidity();
-
-        uint256 desiredOut = 5e18;
-        uint256 expectedIn = _probeExactOutput(address(token0), address(token1), desiredOut);
-        uint256 userT0Before = token0.balanceOf(user);
-        uint256 userT1Before = token1.balanceOf(user);
-
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: user,
-            deadline: block.timestamp + 3600,
-            amountOut: desiredOut,
-            amountInMaximum: SWAP_AMOUNT,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        uint256 amountIn = proxy.exactOutputSingle(params);
-
-        assertEq(amountIn, expectedIn);
-        assertEq(token0.balanceOf(user), userT0Before - amountIn);
-        assertEq(token1.balanceOf(user), userT1Before + desiredOut);
-    }
-
-    function testExactOutputSingleMaximumInputExactlyMet() public {
-        _mintDefaultLiquidity();
-
-        uint256 desiredOut = 5e18;
-        uint256 exactRequired = _probeExactOutput(address(token0), address(token1), desiredOut);
-
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountOut: desiredOut,
-            amountInMaximum: exactRequired, // exactly enough
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        uint256 amountIn = proxy.exactOutputSingle(params);
-
-        assertEq(amountIn, exactRequired, "amountIn should equal the exact required amount");
-        assertEq(token1.balanceOf(recipient), desiredOut);
-    }
-
     // ===========================================================================
     // EXACT OUTPUT SINGLE -- revert cases
     // ===========================================================================
-
-    function testExactOutputSingleRevertsOnExpiredDeadline() public {
-        _mintDefaultLiquidity();
-
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp - 1,
-            amountOut: 5e18,
-            amountInMaximum: SWAP_AMOUNT,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        vm.expectRevert("Transaction too old");
-        proxy.exactOutputSingle(params);
-    }
-
-    function testExactOutputSingleRevertsOnSlippageExceeded() public {
-        _mintDefaultLiquidity();
-
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountOut: 5e18,
-            amountInMaximum: 1, // impossibly small
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        vm.expectRevert("Too much requested");
-        proxy.exactOutputSingle(params);
-    }
-
-    function testExactOutputSingleRevertsSlippageByOneWei() public {
-        _mintDefaultLiquidity();
-
-        uint256 desiredOut = 5e18;
-        uint256 exactRequired = _probeExactOutput(address(token0), address(token1), desiredOut);
-
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountOut: desiredOut,
-            amountInMaximum: exactRequired - 1, // one wei below required -- must revert
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        vm.expectRevert("Too much requested");
-        proxy.exactOutputSingle(params);
-    }
-
-    function testExactOutputSingleRevertsOnZeroRecipient() public {
-        _mintDefaultLiquidity();
-
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: address(0),
-            deadline: block.timestamp + 3600,
-            amountOut: 5e18,
-            amountInMaximum: SWAP_AMOUNT,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        vm.expectRevert();
-        proxy.exactOutputSingle(params);
-    }
-
-    function testExactOutputSingleRevertsWithoutApproval() public {
-        _mintDefaultLiquidity();
-
-        address noApproval = makeAddr("noApproval");
-        token0.mint(noApproval, SWAP_AMOUNT);
-
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountOut: 5e18,
-            amountInMaximum: SWAP_AMOUNT,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(noApproval);
-        vm.expectRevert();
-        proxy.exactOutputSingle(params);
-    }
-
-    function testExactOutputSingleRevertsOnNonExistentPool() public {
-        MockERC20 rogue = new MockERC20();
-
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(rogue),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountOut: 5e18,
-            amountInMaximum: SWAP_AMOUNT,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        vm.expectRevert();
-        proxy.exactOutputSingle(params);
-    }
 
     // ===========================================================================
     // ROUNDTRIP -- swap and swap back, verify fee accounting
@@ -1156,25 +914,6 @@ contract UniswapV3ProxyTest is Test {
         // token0: lost exactly SWAP_AMOUNT - gotBack
         uint256 totalLoss = SWAP_AMOUNT - gotBack;
         assertEq(token0.balanceOf(user), userT0Start - totalLoss);
-    }
-
-    // ===========================================================================
-    // SWAP CONSISTENCY -- exactInput and exactOutput produce matching results
-    // ===========================================================================
-
-    function testExactInputAndOutputConsistency() public {
-        _mintDefaultLiquidity();
-
-        // Probe: exactInput of SWAP_AMOUNT -> how much output?
-        uint256 outputForInput = _probeExactInput(address(token0), address(token1), SWAP_AMOUNT);
-
-        // Probe: how much input to get exactly that output?
-        uint256 inputForOutput = _probeExactOutput(address(token0), address(token1), outputForInput);
-
-        // They should agree within 1 wei rounding
-        assertApproxEqAbs(
-            inputForOutput, SWAP_AMOUNT, 1, "exactOutput input should match the original exactInput amount"
-        );
     }
 
     // ===========================================================================
@@ -1429,5 +1168,570 @@ contract UniswapV3ProxyTest is Test {
 
         assertEq(token0.balanceOf(address(proxy)), 0, "proxy should hold zero token0");
         assertEq(token1.balanceOf(address(proxy)), 0, "proxy should hold zero token1");
+    }
+
+    // ===========================================================================
+    // RECIPIENT CANNOT BE THE PROXY -- nothing sent there could ever leave
+    // ===========================================================================
+
+    function testSwapsRejectTheProxyAsRecipient() public {
+        _mintDefaultLiquidity();
+        uint256 userBefore = token0.balanceOf(user);
+
+        vm.startPrank(user);
+        vm.expectRevert(IProxyErrors.InvalidRecipient.selector);
+        proxy.exactInputSingle(
+            ExactInputSingleParams({
+                tokenIn: address(token0),
+                tokenOut: address(token1),
+                fee: FEE,
+                recipient: address(proxy),
+                deadline: block.timestamp + 3600,
+                amountIn: SWAP_AMOUNT,
+                amountOutMinimum: 0,
+                sqrtPriceLimitX96: 0
+            })
+        );
+        vm.stopPrank();
+
+        assertEq(token0.balanceOf(user), userBefore, "caller paid");
+        assertEq(token1.balanceOf(address(proxy)), 0, "tokens reached the proxy");
+    }
+
+    /// @dev A position minted to the proxy would be owned by it in the pool, and the proxy has no
+    /// burn/collect, so the liquidity could never be withdrawn.
+    function testMintRejectsTheProxyAsRecipient() public {
+        uint256 userBefore = token0.balanceOf(user);
+
+        vm.prank(user);
+        vm.expectRevert(IProxyErrors.InvalidRecipient.selector);
+        proxy.mint(
+            MintParams({
+                token0: address(token0),
+                token1: address(token1),
+                fee: FEE,
+                tickLower: TICK_LOWER,
+                tickUpper: TICK_UPPER,
+                amount0Desired: AMOUNT_DESIRED,
+                amount1Desired: AMOUNT_DESIRED,
+                amount0Min: 0,
+                amount1Min: 0,
+                recipient: address(proxy),
+                deadline: block.timestamp + 3600
+            })
+        );
+
+        assertEq(token0.balanceOf(user), userBefore, "caller paid");
+        (uint128 liquidity,,,,) = pool.positions(keccak256(abi.encodePacked(address(proxy), TICK_LOWER, TICK_UPPER)));
+        assertEq(liquidity, 0, "a position was minted to the proxy");
+    }
+
+    /// @notice The exit path the `mint` docs describe: only the recipient can withdraw a position,
+    /// with two direct calls on the pool. Not even the account that paid for it can.
+    function testOnlyTheRecipientCanExitAPositionDirectlyOnThePool() public {
+        vm.prank(user);
+        (uint256 paid0, uint256 paid1) = proxy.mint(
+            MintParams({
+                token0: address(token0),
+                token1: address(token1),
+                fee: FEE,
+                tickLower: TICK_LOWER,
+                tickUpper: TICK_UPPER,
+                amount0Desired: AMOUNT_DESIRED,
+                amount1Desired: AMOUNT_DESIRED,
+                amount0Min: 0,
+                amount1Min: 0,
+                recipient: recipient,
+                deadline: block.timestamp + 3600
+            })
+        );
+        bytes32 posKey = keccak256(abi.encodePacked(recipient, TICK_LOWER, TICK_UPPER));
+        (uint128 liquidity,,,,) = pool.positions(posKey);
+        assertGt(liquidity, 0, "no position minted");
+
+        // The payer is not the owner: the pool has no position of theirs to burn
+        vm.prank(user);
+        vm.expectRevert();
+        pool.burn(TICK_LOWER, TICK_UPPER, liquidity);
+
+        // The recipient exits with the two documented calls
+        uint256 r0 = token0.balanceOf(recipient);
+        uint256 r1 = token1.balanceOf(recipient);
+        vm.startPrank(recipient);
+        pool.burn(TICK_LOWER, TICK_UPPER, liquidity);
+        pool.collect(recipient, TICK_LOWER, TICK_UPPER, type(uint128).max, type(uint128).max);
+        vm.stopPrank();
+
+        // Burning rounds down by at most a wei per token
+        assertApproxEqAbs(token0.balanceOf(recipient) - r0, paid0, 1, "token0 principal not returned");
+        assertApproxEqAbs(token1.balanceOf(recipient) - r1, paid1, 1, "token1 principal not returned");
+        (liquidity,,,,) = pool.positions(posKey);
+        assertEq(liquidity, 0, "position not fully withdrawn");
+    }
+
+    // ===========================================================================
+    // AMOUNTS CANNOT WRAP -- uint256 -> int256 is checked
+    // ===========================================================================
+
+    /// @dev 2**255 is where a plain cast wraps negative, turning exact-input into exact-output of
+    /// ~2**255 (buys out the pool, passes any amountOutMinimum). Also UniversalRouter's
+    /// CONTRACT_BALANCE sentinel.
+    function testExactInputSingleRejectsAmountsThatWouldWrap() public {
+        _mintDefaultLiquidity();
+        uint256[3] memory amounts = [uint256(2 ** 255), 2 ** 255 + 1, type(uint256).max];
+        uint256 userBefore = token0.balanceOf(user);
+
+        for (uint256 i = 0; i < amounts.length; i++) {
+            vm.prank(user);
+            vm.expectRevert(abi.encodeWithSelector(SafeCast.SafeCastOverflowedUintToInt.selector, amounts[i]));
+            proxy.exactInputSingle(
+                ExactInputSingleParams({
+                    tokenIn: address(token0),
+                    tokenOut: address(token1),
+                    fee: FEE,
+                    recipient: recipient,
+                    deadline: block.timestamp + 3600,
+                    amountIn: amounts[i],
+                    amountOutMinimum: 1e18,
+                    sqrtPriceLimitX96: 0
+                })
+            );
+        }
+
+        assertEq(token0.balanceOf(user), userBefore, "caller paid");
+    }
+
+    // ===========================================================================
+    // EXACT OUTPUT SINGLE -- happy paths
+    // ===========================================================================
+
+    function testExactOutputSingleZeroForOne() public {
+        _mintDefaultLiquidity();
+
+        uint256 desiredOut = 5e18;
+        uint256 expectedIn = _probeExactOutput(address(token0), address(token1), desiredOut);
+
+        uint256 userT0Before = token0.balanceOf(user);
+        uint256 recipientT1Before = token1.balanceOf(recipient);
+        uint256 poolT0Before = token0.balanceOf(address(pool));
+        uint256 poolT1Before = token1.balanceOf(address(pool));
+
+        ExactOutputSingleParams memory params = ExactOutputSingleParams({
+            tokenIn: address(token0),
+            tokenOut: address(token1),
+            fee: FEE,
+            recipient: recipient,
+            deadline: block.timestamp + 3600,
+            amountOut: desiredOut,
+            amountInMaximum: SWAP_AMOUNT,
+            sqrtPriceLimitX96: 0
+        });
+
+        vm.prank(user);
+        uint256 amountIn = proxy.exactOutputSingle(params);
+
+        // Input matches probed expectation
+        assertEq(amountIn, expectedIn, "amountIn should match probed value");
+
+        // The fee + price impact cost is exactly amountIn - desiredOut
+        uint256 totalCost = amountIn - desiredOut;
+        assertEq(totalCost, expectedIn - desiredOut, "total cost should match probed expectation");
+
+        // Recipient received exactly the desired output
+        assertEq(token1.balanceOf(recipient), recipientT1Before + desiredOut);
+
+        // Exact balance accounting
+        assertEq(token0.balanceOf(user), userT0Before - amountIn);
+        assertEq(token0.balanceOf(address(pool)), poolT0Before + amountIn);
+        assertEq(token1.balanceOf(address(pool)), poolT1Before - desiredOut);
+    }
+
+    function testExactOutputSingleOneForZero() public {
+        _mintDefaultLiquidity();
+
+        uint256 desiredOut = 5e18;
+        uint256 expectedIn = _probeExactOutput(address(token1), address(token0), desiredOut);
+
+        uint256 userT1Before = token1.balanceOf(user);
+        uint256 recipientT0Before = token0.balanceOf(recipient);
+        uint256 poolT0Before = token0.balanceOf(address(pool));
+        uint256 poolT1Before = token1.balanceOf(address(pool));
+
+        ExactOutputSingleParams memory params = ExactOutputSingleParams({
+            tokenIn: address(token1),
+            tokenOut: address(token0),
+            fee: FEE,
+            recipient: recipient,
+            deadline: block.timestamp + 3600,
+            amountOut: desiredOut,
+            amountInMaximum: SWAP_AMOUNT,
+            sqrtPriceLimitX96: 0
+        });
+
+        vm.prank(user);
+        uint256 amountIn = proxy.exactOutputSingle(params);
+
+        assertEq(amountIn, expectedIn);
+        assertEq(token0.balanceOf(recipient), recipientT0Before + desiredOut);
+        assertEq(token1.balanceOf(user), userT1Before - amountIn);
+        assertEq(token1.balanceOf(address(pool)), poolT1Before + amountIn);
+        assertEq(token0.balanceOf(address(pool)), poolT0Before - desiredOut);
+    }
+
+    function testExactOutputSingleRecipientIsSelf() public {
+        _mintDefaultLiquidity();
+
+        uint256 desiredOut = 5e18;
+        uint256 expectedIn = _probeExactOutput(address(token0), address(token1), desiredOut);
+        uint256 userT0Before = token0.balanceOf(user);
+        uint256 userT1Before = token1.balanceOf(user);
+
+        ExactOutputSingleParams memory params = ExactOutputSingleParams({
+            tokenIn: address(token0),
+            tokenOut: address(token1),
+            fee: FEE,
+            recipient: user,
+            deadline: block.timestamp + 3600,
+            amountOut: desiredOut,
+            amountInMaximum: SWAP_AMOUNT,
+            sqrtPriceLimitX96: 0
+        });
+
+        vm.prank(user);
+        uint256 amountIn = proxy.exactOutputSingle(params);
+
+        assertEq(amountIn, expectedIn);
+        assertEq(token0.balanceOf(user), userT0Before - amountIn);
+        assertEq(token1.balanceOf(user), userT1Before + desiredOut);
+    }
+
+    function testExactOutputSingleMaximumInputExactlyMet() public {
+        _mintDefaultLiquidity();
+
+        uint256 desiredOut = 5e18;
+        uint256 exactRequired = _probeExactOutput(address(token0), address(token1), desiredOut);
+
+        ExactOutputSingleParams memory params = ExactOutputSingleParams({
+            tokenIn: address(token0),
+            tokenOut: address(token1),
+            fee: FEE,
+            recipient: recipient,
+            deadline: block.timestamp + 3600,
+            amountOut: desiredOut,
+            amountInMaximum: exactRequired, // exactly enough
+            sqrtPriceLimitX96: 0
+        });
+
+        vm.prank(user);
+        uint256 amountIn = proxy.exactOutputSingle(params);
+
+        assertEq(amountIn, exactRequired, "amountIn should equal the exact required amount");
+        assertEq(token1.balanceOf(recipient), desiredOut);
+    }
+
+    // ===========================================================================
+    // EXACT OUTPUT SINGLE -- revert cases
+    // ===========================================================================
+
+    function testExactOutputSingleRevertsOnExpiredDeadline() public {
+        _mintDefaultLiquidity();
+
+        ExactOutputSingleParams memory params = ExactOutputSingleParams({
+            tokenIn: address(token0),
+            tokenOut: address(token1),
+            fee: FEE,
+            recipient: recipient,
+            deadline: block.timestamp - 1,
+            amountOut: 5e18,
+            amountInMaximum: SWAP_AMOUNT,
+            sqrtPriceLimitX96: 0
+        });
+
+        vm.prank(user);
+        vm.expectRevert(IProxyErrors.TransactionTooOld.selector);
+        proxy.exactOutputSingle(params);
+    }
+
+    function testExactOutputSingleRevertsOnSlippageExceeded() public {
+        _mintDefaultLiquidity();
+
+        ExactOutputSingleParams memory params = ExactOutputSingleParams({
+            tokenIn: address(token0),
+            tokenOut: address(token1),
+            fee: FEE,
+            recipient: recipient,
+            deadline: block.timestamp + 3600,
+            amountOut: 5e18,
+            amountInMaximum: 1, // impossibly small
+            sqrtPriceLimitX96: 0
+        });
+
+        vm.prank(user);
+        vm.expectRevert(IProxyErrors.TooMuchRequested.selector);
+        proxy.exactOutputSingle(params);
+    }
+
+    function testExactOutputSingleRevertsSlippageByOneWei() public {
+        _mintDefaultLiquidity();
+
+        uint256 desiredOut = 5e18;
+        uint256 exactRequired = _probeExactOutput(address(token0), address(token1), desiredOut);
+
+        ExactOutputSingleParams memory params = ExactOutputSingleParams({
+            tokenIn: address(token0),
+            tokenOut: address(token1),
+            fee: FEE,
+            recipient: recipient,
+            deadline: block.timestamp + 3600,
+            amountOut: desiredOut,
+            amountInMaximum: exactRequired - 1, // one wei below required -- must revert
+            sqrtPriceLimitX96: 0
+        });
+
+        vm.prank(user);
+        vm.expectRevert(IProxyErrors.TooMuchRequested.selector);
+        proxy.exactOutputSingle(params);
+    }
+
+    function testExactOutputSingleRevertsOnZeroRecipient() public {
+        _mintDefaultLiquidity();
+
+        ExactOutputSingleParams memory params = ExactOutputSingleParams({
+            tokenIn: address(token0),
+            tokenOut: address(token1),
+            fee: FEE,
+            recipient: address(0),
+            deadline: block.timestamp + 3600,
+            amountOut: 5e18,
+            amountInMaximum: SWAP_AMOUNT,
+            sqrtPriceLimitX96: 0
+        });
+
+        vm.prank(user);
+        vm.expectRevert();
+        proxy.exactOutputSingle(params);
+    }
+
+    function testExactOutputSingleRevertsWithoutApproval() public {
+        _mintDefaultLiquidity();
+
+        address noApproval = makeAddr("noApproval");
+        token0.mint(noApproval, SWAP_AMOUNT);
+
+        ExactOutputSingleParams memory params = ExactOutputSingleParams({
+            tokenIn: address(token0),
+            tokenOut: address(token1),
+            fee: FEE,
+            recipient: recipient,
+            deadline: block.timestamp + 3600,
+            amountOut: 5e18,
+            amountInMaximum: SWAP_AMOUNT,
+            sqrtPriceLimitX96: 0
+        });
+
+        vm.prank(noApproval);
+        vm.expectRevert();
+        proxy.exactOutputSingle(params);
+    }
+
+    function testExactOutputSingleRevertsOnNonExistentPool() public {
+        MockERC20 rogue = new MockERC20();
+
+        ExactOutputSingleParams memory params = ExactOutputSingleParams({
+            tokenIn: address(token0),
+            tokenOut: address(rogue),
+            fee: FEE,
+            recipient: recipient,
+            deadline: block.timestamp + 3600,
+            amountOut: 5e18,
+            amountInMaximum: SWAP_AMOUNT,
+            sqrtPriceLimitX96: 0
+        });
+
+        vm.prank(user);
+        vm.expectRevert();
+        proxy.exactOutputSingle(params);
+    }
+
+    function testExactOutputSingleRejectsAmountsThatWouldWrap() public {
+        _mintDefaultLiquidity();
+        uint256[3] memory amounts = [uint256(2 ** 255), 2 ** 255 + 1, type(uint256).max];
+        uint256 userBefore = token0.balanceOf(user);
+
+        for (uint256 i = 0; i < amounts.length; i++) {
+            vm.prank(user);
+            vm.expectRevert(abi.encodeWithSelector(SafeCast.SafeCastOverflowedUintToInt.selector, amounts[i]));
+            proxy.exactOutputSingle(
+                ExactOutputSingleParams({
+                    tokenIn: address(token0),
+                    tokenOut: address(token1),
+                    fee: FEE,
+                    recipient: recipient,
+                    deadline: block.timestamp + 3600,
+                    amountOut: amounts[i],
+                    amountInMaximum: type(uint256).max,
+                    sqrtPriceLimitX96: 0
+                })
+            );
+        }
+
+        assertEq(token0.balanceOf(user), userBefore, "caller paid");
+    }
+
+    // ===========================================================================
+    // SWAP CONSISTENCY -- exactInput and exactOutput produce matching results
+    // ===========================================================================
+
+    function testExactInputAndOutputConsistency() public {
+        _mintDefaultLiquidity();
+
+        // Probe: exactInput of SWAP_AMOUNT -> how much output?
+        uint256 outputForInput = _probeExactInput(address(token0), address(token1), SWAP_AMOUNT);
+
+        // Probe: how much input to get exactly that output?
+        uint256 inputForOutput = _probeExactOutput(address(token0), address(token1), outputForInput);
+
+        // They should agree within 1 wei rounding
+        assertApproxEqAbs(
+            inputForOutput, SWAP_AMOUNT, 1, "exactOutput input should match the original exactInput amount"
+        );
+    }
+
+    // ===========================================================================
+    // EXACT OUTPUT MEANS EXACT -- no silent partial fills without a price limit
+    // ===========================================================================
+
+    uint24 constant THIN_FEE = 500;
+
+    /// @dev A second, deliberately thin pool: 20 of each token around price 1, so it can run dry
+    function _createThinPool() internal returns (IUniswapV3PoolMinimal thin) {
+        thin = IUniswapV3PoolMinimal(factory.createPool(address(token0), address(token1), THIN_FEE));
+        thin.initialize(2 ** 96);
+
+        address lp = makeAddr("lp");
+        token0.mint(lp, 20e18);
+        token1.mint(lp, 20e18);
+        vm.startPrank(lp);
+        token0.approve(address(proxy), type(uint256).max);
+        token1.approve(address(proxy), type(uint256).max);
+        proxy.mint(_thinMintParams(-6000, 6000, 20e18, 20e18, lp));
+        vm.stopPrank();
+    }
+
+    function _thinMintParams(
+        int24 lower,
+        int24 upper,
+        uint256 amount0,
+        uint256 amount1,
+        address to
+    )
+        internal
+        view
+        returns (MintParams memory)
+    {
+        return MintParams({
+            token0: address(token0),
+            token1: address(token1),
+            fee: THIN_FEE,
+            tickLower: lower,
+            tickUpper: upper,
+            amount0Desired: amount0,
+            amount1Desired: amount1,
+            amount0Min: 0,
+            amount1Min: 0,
+            recipient: to,
+            deadline: block.timestamp + 3600
+        });
+    }
+
+    /// @dev token0 in, token1 out, on the thin pool
+    function _thinExactOut(
+        uint256 amountOut,
+        uint256 maxIn,
+        uint160 limit
+    )
+        internal
+        view
+        returns (ExactOutputSingleParams memory)
+    {
+        return ExactOutputSingleParams({
+            tokenIn: address(token0),
+            tokenOut: address(token1),
+            fee: THIN_FEE,
+            recipient: recipient,
+            deadline: block.timestamp + 3600,
+            amountOut: amountOut,
+            amountInMaximum: maxIn,
+            sqrtPriceLimitX96: limit
+        });
+    }
+
+    function testExactOutputSingleRevertsOnShortFill() public {
+        _createThinPool();
+        uint256 userBefore = token0.balanceOf(user);
+        uint256 recipientBefore = token1.balanceOf(recipient);
+
+        vm.prank(user);
+        vm.expectRevert(IProxyErrors.TooLittleReceived.selector);
+        proxy.exactOutputSingle(_thinExactOut(100e18, type(uint256).max, 0)); // pool holds ~20
+
+        assertEq(token0.balanceOf(user), userBefore, "caller paid for a partial fill");
+        assertEq(token1.balanceOf(recipient), recipientBefore, "a partial fill was delivered");
+    }
+
+    /// @dev With an explicit price limit the caller has bounded the price, so a partial fill is a
+    /// legitimate outcome and still succeeds.
+    function testExactOutputSingleWithPriceLimitMayFillPartially() public {
+        _createThinPool();
+        uint256 recipientBefore = token1.balanceOf(recipient);
+
+        vm.prank(user);
+        uint256 amountIn =
+            proxy.exactOutputSingle(_thinExactOut(100e18, type(uint256).max, TickMath.getSqrtRatioAtTick(-600)));
+
+        uint256 delivered = token1.balanceOf(recipient) - recipientBefore;
+        assertGt(amountIn, 0, "nothing was paid");
+        assertGt(delivered, 0, "nothing was delivered");
+        assertLt(delivered, 100e18, "expected a partial fill up to the price limit");
+    }
+
+    /// @notice The audit's sandwich, end to end. The attacker buys out the honest liquidity and parks
+    /// a tiny position at a price ~20x worse than fair. Before the fix the victim's "exactly 2, for at
+    /// most 2.2" order filled 0.1 of the 2 against it for ~1.95 and reported success. Now it reverts.
+    function testExactOutputSingleSandwichAgainstShortFillReverts() public {
+        _createThinPool();
+
+        address attacker = makeAddr("attacker");
+        token0.mint(attacker, 1000e18);
+        token1.mint(attacker, 10e18);
+        vm.startPrank(attacker);
+        token0.approve(address(proxy), type(uint256).max);
+        token1.approve(address(proxy), type(uint256).max);
+        // Front-run 1: buy out all honest token1, stopping just past the honest range
+        proxy.exactInputSingle(
+            ExactInputSingleParams({
+                tokenIn: address(token0),
+                tokenOut: address(token1),
+                fee: THIN_FEE,
+                recipient: attacker,
+                deadline: block.timestamp + 3600,
+                amountIn: 1000e18,
+                amountOutMinimum: 0,
+                sqrtPriceLimitX96: TickMath.getSqrtRatioAtTick(-6010)
+            })
+        );
+        // Front-run 2: a tiny token1-only position far below fair price
+        proxy.mint(_thinMintParams(-30000, -29400, 0, 0.1e18, attacker));
+        vm.stopPrank();
+
+        uint256 victimBefore = token0.balanceOf(user);
+        uint256 recipientBefore = token1.balanceOf(recipient);
+
+        vm.prank(user);
+        vm.expectRevert(IProxyErrors.TooLittleReceived.selector);
+        proxy.exactOutputSingle(_thinExactOut(2e18, 2.2e18, 0));
+
+        assertEq(token0.balanceOf(user), victimBefore, "victim paid");
+        assertEq(token1.balanceOf(recipient), recipientBefore, "victim received a partial fill");
     }
 }

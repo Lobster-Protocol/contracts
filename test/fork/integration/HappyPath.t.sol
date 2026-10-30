@@ -1,16 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity =0.8.26;
+pragma solidity =0.8.28;
 
 import "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {ForkBase} from "../helpers/ForkBase.sol";
 import {MintParams} from "../../../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
-import {
-    ExactInputSingleParams,
-    ExactOutputSingleParams
-} from "../../../src/interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
+import {ExactInputSingleParams} from "../../../src/interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
+import {IProxyErrors} from "../../../src/interfaces/IProxyErrors.sol";
 
 /// @notice Baseline: the proxy actually works against real mainnet pools.
 /// @dev The positive control for the negative tests in security/. A revert there only means the
@@ -20,7 +18,7 @@ contract HappyPathTest is ForkBase {
         uint256 amountIn = tradeUsdc;
 
         uint256 usdcBefore = IERC20(USDC).balanceOf(approver);
-        uint256 wethBefore = IERC20(WETH).balanceOf(recipient);
+        uint256 wethBefore = IERC20(WETH).balanceOf(approver);
 
         vm.prank(approver);
         uint256 amountOut = proxy.exactInputSingle(
@@ -28,7 +26,7 @@ contract HappyPathTest is ForkBase {
                 tokenIn: USDC,
                 tokenOut: WETH,
                 fee: 500,
-                recipient: recipient,
+                recipient: approver,
                 deadline: block.timestamp,
                 amountIn: amountIn,
                 amountOutMinimum: 0,
@@ -38,38 +36,10 @@ contract HappyPathTest is ForkBase {
 
         assertGt(amountOut, 0, "no output");
         assertEq(IERC20(USDC).balanceOf(approver), usdcBefore - amountIn, "exact input not debited exactly");
-        assertEq(IERC20(WETH).balanceOf(recipient), wethBefore + amountOut, "output not delivered to recipient");
+        assertEq(IERC20(WETH).balanceOf(approver), wethBefore + amountOut, "output not delivered to the caller");
         // The proxy must never end a call holding funds; that is what makes the standing allowance safe.
         assertEq(IERC20(USDC).balanceOf(address(proxy)), 0, "proxy retained USDC");
         assertEq(IERC20(WETH).balanceOf(address(proxy)), 0, "proxy retained WETH");
-    }
-
-    function test_exactOutputSingle_usdcForWeth() public {
-        uint256 amountOut = tradeWeth;
-
-        uint256 usdcBefore = IERC20(USDC).balanceOf(approver);
-        uint256 wethBefore = IERC20(WETH).balanceOf(recipient);
-
-        vm.prank(approver);
-        uint256 amountIn = proxy.exactOutputSingle(
-            ExactOutputSingleParams({
-                tokenIn: USDC,
-                tokenOut: WETH,
-                fee: 500,
-                recipient: recipient,
-                deadline: block.timestamp,
-                amountOut: amountOut,
-                amountInMaximum: type(uint256).max,
-                sqrtPriceLimitX96: 0
-            })
-        );
-
-        assertGt(amountIn, 0, "no input consumed");
-        assertEq(IERC20(WETH).balanceOf(recipient), wethBefore + amountOut, "exact output not delivered exactly");
-        assertEq(
-            IERC20(USDC).balanceOf(approver), usdcBefore - amountIn, "input debit does not match reported amountIn"
-        );
-        assertEq(IERC20(USDC).balanceOf(address(proxy)), 0, "proxy retained USDC");
     }
 
     function test_mint_usdcWethPosition() public {
@@ -90,7 +60,7 @@ contract HappyPathTest is ForkBase {
                 amount1Desired: lpWeth,
                 amount0Min: 0,
                 amount1Min: 0,
-                recipient: recipient,
+                recipient: approver,
                 deadline: block.timestamp
             })
         );
@@ -103,28 +73,94 @@ contract HappyPathTest is ForkBase {
         assertEq(IERC20(USDC).balanceOf(approver), usdcBefore - amount0, "token0 debit mismatch");
         assertEq(IERC20(WETH).balanceOf(approver), wethBefore - amount1, "token1 debit mismatch");
 
-        // Position must belong to `recipient`, not to the proxy.
-        bytes32 key = keccak256(abi.encodePacked(recipient, lower, upper));
+        // Position must belong to the caller, not to the proxy.
+        bytes32 key = keccak256(abi.encodePacked(approver, lower, upper));
         (uint128 liquidity,,,,) = IUniswapV3PoolMinimal(USDC_WETH_500).positions(key);
-        assertGt(liquidity, 0, "recipient holds no liquidity");
+        assertGt(liquidity, 0, "the caller holds no liquidity");
+    }
+
+    /// @notice On the real pool, a mint is refused when the live price is outside the caller's band,
+    /// and nothing is spent
+    function test_mint_refusedWhenSpotOutsideBand() public {
+        (int24 lower, int24 upper) = _rangeAroundSpot(USDC_WETH_500, 10);
+        (, int24 tick,,,,,) = IUniswapV3PoolMinimal(USDC_WETH_500).slot0();
+
+        // a band entirely above today's price, as if it had been set before the price dropped
+        bytes32 key = proxy.v3Key(USDC_WETH_500);
+        vm.prank(approver);
+        proxy.setPriceBand(key, tick + 100, tick + 2000);
+
+        uint256 usdcBefore = IERC20(USDC).balanceOf(approver);
+        uint256 wethBefore = IERC20(WETH).balanceOf(approver);
+
+        vm.prank(approver);
+        vm.expectRevert(IProxyErrors.PriceOutOfBand.selector);
+        proxy.mint(
+            MintParams({
+                token0: USDC,
+                token1: WETH,
+                fee: 500,
+                tickLower: lower,
+                tickUpper: upper,
+                amount0Desired: lpUsdc,
+                amount1Desired: lpWeth,
+                amount0Min: 0,
+                amount1Min: 0,
+                recipient: approver,
+                deadline: block.timestamp
+            })
+        );
+
+        assertEq(IERC20(USDC).balanceOf(approver), usdcBefore, "USDC spent on a refused mint");
+        assertEq(IERC20(WETH).balanceOf(approver), wethBefore, "WETH spent on a refused mint");
     }
 
     function test_deadlineIsEnforced() public {
         vm.warp(block.timestamp + 1000);
 
         vm.prank(approver);
-        vm.expectRevert("Transaction too old");
+        vm.expectRevert(IProxyErrors.TransactionTooOld.selector);
         proxy.exactInputSingle(
             ExactInputSingleParams({
                 tokenIn: USDC,
                 tokenOut: WETH,
                 fee: 500,
-                recipient: recipient,
+                recipient: approver,
                 deadline: block.timestamp - 1,
                 amountIn: tradeUsdc,
                 amountOutMinimum: 0,
                 sqrtPriceLimitX96: 0
             })
         );
+    }
+
+    /// @notice On the real pool, a swap is refused when the live price is outside the caller's band,
+    /// and nothing is spent
+    function test_swap_refusedWhenSpotOutsideBand() public {
+        (, int24 tick,,,,,) = IUniswapV3PoolMinimal(USDC_WETH_500).slot0();
+        bytes32 key = proxy.v3Key(USDC_WETH_500);
+        vm.prank(approver);
+        proxy.setPriceBand(key, tick + 100, tick + 2000);
+
+        uint256 usdcBefore = IERC20(USDC).balanceOf(approver);
+        uint256 wethBefore = IERC20(WETH).balanceOf(approver);
+
+        vm.prank(approver);
+        vm.expectRevert(IProxyErrors.PriceOutOfBand.selector);
+        proxy.exactInputSingle(
+            ExactInputSingleParams({
+                tokenIn: USDC,
+                tokenOut: WETH,
+                fee: 500,
+                recipient: approver,
+                deadline: block.timestamp,
+                amountIn: tradeUsdc,
+                amountOutMinimum: 0,
+                sqrtPriceLimitX96: 0
+            })
+        );
+
+        assertEq(IERC20(USDC).balanceOf(approver), usdcBefore, "USDC spent on a refused swap");
+        assertEq(IERC20(WETH).balanceOf(approver), wethBefore, "WETH moved on a refused swap");
     }
 }
