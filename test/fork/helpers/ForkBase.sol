@@ -7,10 +7,16 @@ import "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {LobsterProxy} from "../../../src/LobsterProxy.sol";
-import {Currency, PoolKey, IHooks} from "../../../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
+import {
+    Currency,
+    PoolKey,
+    IHooks,
+    IPoolManagerMinimal
+} from "../../../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {IUniswapV3FactoryMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
 import {PoolAddress} from "../../../src/libraries/uniswapV3/PoolAddress.sol";
+import {SwapCalldata} from "../../helpers/SwapCalldata.sol";
 
 /// @notice Shared fixture for the fork suites: LobsterProxy against live Uniswap deployments. See
 /// test/fork/README.md for how to run them.
@@ -20,11 +26,16 @@ import {PoolAddress} from "../../../src/libraries/uniswapV3/PoolAddress.sol";
 ///               test what actually shipped rather than what is in src/.
 ///
 /// Supports mainnet (or a fork of it) and Sepolia; addresses and trade sizes resolve per chain.
+///
+/// Every swap goes through the proxy's one entry point, `swap(bytes data)`, whose `data` packs one or
+/// more legs ({SwapFlags}); the leg builders below produce it with test/helpers/SwapCalldata.sol. A
+/// leg has no recipient (its output goes to the caller, or with PARK stays for a later HELD leg of the
+/// same call) and no hooks (a V4 leg always targets the hookless pool).
 abstract contract ForkBase is Test {
     // --- Network addresses -----------------------------------------------------
     // Resolved per chain in `_loadNetwork`, not `constant`, so the same suite can run against a
     // mainnet fork and against Sepolia. `PoolAddress.POOL_INIT_CODE_HASH` is identical on both
-    // (verified by deriving live pool addresses on each), so the v3 callback checks port unchanged.
+    // (verified by deriving live pool addresses on each), so the v3 pool derivation ports unchanged.
     address internal V3_FACTORY;
     address internal POOL_MANAGER;
 
@@ -50,7 +61,7 @@ abstract contract ForkBase is Test {
     // Sepolia's pools are real and usable but orders of magnitude thinner than mainnet's. The fix
     // is to size orders to the venue, not to skip the test: a swap that moves the price 1% proves
     // exactly as much about who pays as one that moves it 0.0001%.
-    // uint128 because the v4 entry points take uint128 amounts; it widens implicitly for v3.
+    // uint128 because every swap amount is a uint128 field of the packed calldata, V3 and V4 alike.
     uint128 internal tradeUsdc; // a routine swap, in USDC units
     uint128 internal tradeWeth; // the same swap, in WETH units
     uint128 internal lpUsdc; // a position-sized amount of USDC
@@ -64,6 +75,9 @@ abstract contract ForkBase is Test {
     /// @dev PoolRegistry's permission bits
     uint8 internal constant MINT = 1;
     uint8 internal constant SWAP = 2;
+
+    /// @dev v4-core `StateLibrary.POOLS_SLOT`: the PoolManager's `pools` mapping
+    uint256 internal constant V4_POOLS_SLOT = 6;
 
     /// @dev Both are vaults in their own right: each registers the live pools below for itself, so the
     /// registry never masks what a test is about. LobsterProxy only pays out to its caller, so
@@ -81,7 +95,7 @@ abstract contract ForkBase is Test {
         outsider = _actor("outsider");
 
         address deployed = vm.envOr("PROXY", address(0));
-        proxy = deployed == address(0) ? new LobsterProxy(V3_FACTORY, POOL_MANAGER) : LobsterProxy(payable(deployed));
+        proxy = deployed == address(0) ? new LobsterProxy(V3_FACTORY, POOL_MANAGER) : LobsterProxy(deployed);
 
         // Sanity: attaching to a wrong/stale address would make every assertion below meaningless.
         require(address(proxy).code.length > 0, "no code at proxy");
@@ -104,9 +118,9 @@ abstract contract ForkBase is Test {
         IERC20(USDC).approve(address(proxy), type(uint256).max);
         IERC20(WETH).approve(address(proxy), type(uint256).max);
         IERC20(DAI).approve(address(proxy), type(uint256).max);
-        // USDT is the reason TransferHelper exists: its approve/transferFrom return NOTHING, so an
-        // IERC20 call here reverts trying to ABI-decode a bool from empty returndata. Approving it
-        // raw keeps the fixture honest about what a real integrator faces.
+        // USDT is the reason the proxy's transfers accept empty returndata: its approve/transferFrom
+        // return NOTHING, so an IERC20 call here reverts trying to ABI-decode a bool from empty
+        // returndata. Approving it raw keeps the fixture honest about what a real integrator faces.
         // (It also reverts on a non-zero -> non-zero approve, so this is only ever set once.)
         _rawApprove(USDT, address(proxy), type(uint256).max);
         vm.stopPrank();
@@ -147,6 +161,15 @@ abstract contract ForkBase is Test {
         proxy.setPools(keys, perms);
         vm.prank(vault);
         proxy.setPriceBand(key, -887272, 887272); // TickMath.MIN_TICK / MAX_TICK
+    }
+
+    /// @dev Removes `key` from `vault`'s registry entries (its band stays, as `setPools` documents)
+    function _deny(address vault, bytes32 key) internal {
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = key;
+        uint8[] memory perms = new uint8[](1);
+        vm.prank(vault);
+        proxy.setPools(keys, perms);
     }
 
     /// @dev The live ETH/USDC V4 pool: native currency0, no hooks
@@ -281,5 +304,131 @@ abstract contract ForkBase is Test {
 
     function _poolFor(address tokenA, address tokenB, uint24 fee) internal view returns (address) {
         return PoolAddress.computeAddress(V3_FACTORY, PoolAddress.getPoolKey(tokenA, tokenB, fee));
+    }
+
+    /// @dev A V4 pool's Slot0 word in the PoolManager (sqrtPriceX96 in the low 160 bits, then the
+    /// tick); 0 for a pool that was never initialised
+    function _v4Slot0(bytes32 poolId) internal view returns (uint256) {
+        return uint256(IPoolManagerMinimal(POOL_MANAGER).extsload(keccak256(abi.encode(poolId, V4_POOLS_SLOT))));
+    }
+
+    /// @dev Expects exactly `count` PoolManager unlocks from here to the end of the test
+    function _expectUnlocks(uint64 count) internal {
+        vm.expectCall(POOL_MANAGER, abi.encodeWithSelector(IPoolManagerMinimal.unlock.selector), count);
+    }
+
+    /// @dev Expects `pool.swap` never to be called from here to the end of the test
+    function _expectNoSwapOn(address pool) internal {
+        vm.expectCall(pool, abi.encodeWithSelector(IUniswapV3PoolMinimal.swap.selector), 0);
+    }
+
+    // --- Swap legs ---------------------------------------------------------------
+    // Each builder returns one leg of a `swap` call ({SwapCalldata}); `_one`/`_swapData`/`_swapCall`
+    // wrap legs into a call, valid until the end of the current block.
+
+    /// @dev Exact input on the V3 pool of (tokenIn, tokenOut, fee); the output goes to the caller
+    function _v3In(
+        address tokenIn,
+        address tokenOut,
+        uint24 fee,
+        uint128 amountIn,
+        uint128 minOut
+    )
+        internal
+        pure
+        returns (SwapCalldata.Leg memory leg)
+    {
+        leg.tokenIn = tokenIn;
+        leg.tokenOut = tokenOut;
+        leg.fee = fee;
+        leg.amount = amountIn;
+        leg.bound = minOut;
+    }
+
+    /// @dev Exact output on the V3 pool of (tokenIn, tokenOut, fee)
+    function _v3Out(
+        address tokenIn,
+        address tokenOut,
+        uint24 fee,
+        uint128 amountOut,
+        uint128 maxIn
+    )
+        internal
+        pure
+        returns (SwapCalldata.Leg memory leg)
+    {
+        leg = _v3In(tokenIn, tokenOut, fee, amountOut, maxIn);
+        leg.exactOut = true;
+    }
+
+    /// @dev Exact input on the live V4 ETH/USDC pool. `zeroForOne`: native ETH in, USDC out.
+    function _v4In(
+        bool zeroForOne,
+        uint128 amountIn,
+        uint128 minOut
+    )
+        internal
+        view
+        returns (SwapCalldata.Leg memory leg)
+    {
+        leg.v4 = true;
+        (leg.tokenIn, leg.tokenOut) = zeroForOne ? (address(0), USDC) : (USDC, address(0));
+        leg.fee = V4_FEE;
+        leg.tickSpacing = V4_TICK_SPACING;
+        leg.amount = amountIn;
+        leg.bound = minOut;
+    }
+
+    /// @dev Exact output on the live V4 ETH/USDC pool
+    function _v4Out(
+        bool zeroForOne,
+        uint128 amountOut,
+        uint128 maxIn
+    )
+        internal
+        view
+        returns (SwapCalldata.Leg memory leg)
+    {
+        leg = _v4In(zeroForOne, amountOut, maxIn);
+        leg.exactOut = true;
+    }
+
+    /// @dev `leg`, its output parked for a later HELD leg of the same call
+    function _parked(SwapCalldata.Leg memory leg) internal pure returns (SwapCalldata.Leg memory) {
+        leg.park = true;
+        return leg;
+    }
+
+    /// @dev `leg`, spending everything earlier legs of the call parked of its input (no amount field)
+    function _held(SwapCalldata.Leg memory leg) internal pure returns (SwapCalldata.Leg memory) {
+        leg.held = true;
+        leg.amount = 0;
+        return leg;
+    }
+
+    function _one(SwapCalldata.Leg memory leg) internal pure returns (SwapCalldata.Leg[] memory legs) {
+        legs = new SwapCalldata.Leg[](1);
+        legs[0] = leg;
+    }
+
+    /// @dev The `data` argument of a `swap` call running `legs`. The deadline is read with
+    /// `vm.getBlockTimestamp()`: under via-IR a `block.timestamp` read may be reused across cheatcodes
+    /// that change the environment (`vm.warp`, `vm.revertToState`). Build calldata before `vm.prank`.
+    function _swapData(SwapCalldata.Leg[] memory legs) internal view returns (bytes memory) {
+        return SwapCalldata.encode(vm.getBlockTimestamp(), legs);
+    }
+
+    /// @dev Full calldata of a `swap` call running `legs`, for low-level calls
+    function _swapCall(SwapCalldata.Leg[] memory legs) internal view returns (bytes memory) {
+        return SwapCalldata.call(vm.getBlockTimestamp(), legs);
+    }
+
+    /// @dev `who` runs `leg` as a one-leg `swap` call, sending `value`; returns the leg's amount
+    function _swapOne(address who, SwapCalldata.Leg memory leg, uint256 value) internal returns (uint256) {
+        bytes memory data = _swapData(_one(leg));
+        vm.prank(who);
+        uint256[] memory amounts = proxy.swap{value: value}(data);
+        assertEq(amounts.length, 1, "a one-leg call returns one amount");
+        return amounts[0];
     }
 }

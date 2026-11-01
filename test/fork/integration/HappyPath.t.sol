@@ -5,8 +5,8 @@ import "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {ForkBase} from "../helpers/ForkBase.sol";
+import {SwapCalldata} from "../../helpers/SwapCalldata.sol";
 import {MintParams} from "../../../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
-import {ExactInputSingleParams} from "../../../src/interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {IProxyErrors} from "../../../src/interfaces/IProxyErrors.sol";
 
@@ -14,25 +14,17 @@ import {IProxyErrors} from "../../../src/interfaces/IProxyErrors.sol";
 /// @dev The positive control for the negative tests in security/. A revert there only means the
 /// guard fired if the same fixture can complete a normal call, which is what this asserts.
 contract HappyPathTest is ForkBase {
-    function test_exactInputSingle_usdcForWeth() public {
-        uint256 amountIn = tradeUsdc;
+    /// @notice A one-leg V3 exact-input swap spends exactly `amountIn`, delivers its output to the
+    /// caller, opens no PoolManager unlock and leaves the proxy holding nothing
+    function test_swap_v3ExactInput_usdcForWeth() public {
+        uint128 amountIn = tradeUsdc;
 
         uint256 usdcBefore = IERC20(USDC).balanceOf(approver);
         uint256 wethBefore = IERC20(WETH).balanceOf(approver);
 
-        vm.prank(approver);
-        uint256 amountOut = proxy.exactInputSingle(
-            ExactInputSingleParams({
-                tokenIn: USDC,
-                tokenOut: WETH,
-                fee: 500,
-                recipient: approver,
-                deadline: block.timestamp,
-                amountIn: amountIn,
-                amountOutMinimum: 0,
-                sqrtPriceLimitX96: 0
-            })
-        );
+        // A call without a V4 leg never involves the PoolManager
+        _expectUnlocks(0);
+        uint256 amountOut = _swapOne(approver, _v3In(USDC, WETH, 500, amountIn, 0), 0);
 
         assertGt(amountOut, 0, "no output");
         assertEq(IERC20(USDC).balanceOf(approver), usdcBefore - amountIn, "exact input not debited exactly");
@@ -42,6 +34,8 @@ contract HappyPathTest is ForkBase {
         assertEq(IERC20(WETH).balanceOf(address(proxy)), 0, "proxy retained WETH");
     }
 
+    /// @notice A mint on the live pool spends at most the desired amounts, from the caller, and the
+    /// position belongs to the caller
     function test_mint_usdcWethPosition() public {
         (int24 lower, int24 upper) = _rangeAroundSpot(USDC_WETH_500, 10);
 
@@ -115,23 +109,14 @@ contract HappyPathTest is ForkBase {
         assertEq(IERC20(WETH).balanceOf(approver), wethBefore, "WETH spent on a refused mint");
     }
 
+    /// @notice A `swap` call past its deadline (one uint32 per call) is refused
     function test_deadlineIsEnforced() public {
-        vm.warp(block.timestamp + 1000);
+        vm.warp(vm.getBlockTimestamp() + 1000);
+        bytes memory data = SwapCalldata.encode(vm.getBlockTimestamp() - 1, _one(_v3In(USDC, WETH, 500, tradeUsdc, 0)));
 
         vm.prank(approver);
         vm.expectRevert(IProxyErrors.TransactionTooOld.selector);
-        proxy.exactInputSingle(
-            ExactInputSingleParams({
-                tokenIn: USDC,
-                tokenOut: WETH,
-                fee: 500,
-                recipient: approver,
-                deadline: block.timestamp - 1,
-                amountIn: tradeUsdc,
-                amountOutMinimum: 0,
-                sqrtPriceLimitX96: 0
-            })
-        );
+        proxy.swap(data);
     }
 
     /// @notice On the real pool, a swap is refused when the live price is outside the caller's band,
@@ -144,21 +129,11 @@ contract HappyPathTest is ForkBase {
 
         uint256 usdcBefore = IERC20(USDC).balanceOf(approver);
         uint256 wethBefore = IERC20(WETH).balanceOf(approver);
+        bytes memory data = _swapData(_one(_v3In(USDC, WETH, 500, tradeUsdc, 0)));
 
         vm.prank(approver);
         vm.expectRevert(IProxyErrors.PriceOutOfBand.selector);
-        proxy.exactInputSingle(
-            ExactInputSingleParams({
-                tokenIn: USDC,
-                tokenOut: WETH,
-                fee: 500,
-                recipient: approver,
-                deadline: block.timestamp,
-                amountIn: tradeUsdc,
-                amountOutMinimum: 0,
-                sqrtPriceLimitX96: 0
-            })
-        );
+        proxy.swap(data);
 
         assertEq(IERC20(USDC).balanceOf(approver), usdcBefore, "USDC spent on a refused swap");
         assertEq(IERC20(WETH).balanceOf(approver), wethBefore, "WETH moved on a refused swap");

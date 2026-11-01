@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.27;
 
-import {UniswapV4SwapProxy} from "./UniswapV4SwapProxy.sol";
+import {PoolManagerBase} from "./base/PoolManagerBase.sol";
 import {PoolRegistry} from "./base/PoolRegistry.sol";
 import {
     IPoolManagerMinimal,
@@ -76,7 +76,7 @@ struct V4LiquidityOp {
 ///       approval above) and `settleFor`.
 ///
 /// Abstract on purpose: this is a mixin combined into {LobsterProxy}. Deploy that rather than this.
-abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, ICustomCondition {
+abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, ICustomCondition {
     using BalanceDeltaLibrary for BalanceDelta;
 
     /// @dev Transient context of the operation in progress: keccak256("lobster.V4LiquidityProxy.context")
@@ -146,10 +146,10 @@ abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, I
             require(address(ops[i].key.hooks) == address(0), HooksNotSupported());
             if (ops[i].liquidityDelta > 0) {
                 bytes32 poolId = keccak256(abi.encode(ops[i].key));
-                require(_canAdd(msg.sender, poolId), PoolNotAllowed());
+                (int24 minTick, int24 maxTick) = _requireAllowed(msg.sender, poolId, PERMISSION_MINT);
                 // Checked once, up front: the unlock below only modifies liquidity, which never moves
                 // a pool's price, so the tick read here is the one every operation runs at
-                _requireInPriceBand(msg.sender, poolId, _currentTick(poolId));
+                _requireInBand(_currentTick(poolId), minTick, maxTick);
             }
         }
 
@@ -160,7 +160,7 @@ abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, I
         (amounts0, amounts1) = abi.decode(result, (int256[], int256[]));
 
         // Unspent ETH is the caller's change: the PoolManager pays what the vault is owed to the
-        // vault directly, never to the proxy (see {UniswapV4SwapProxy-_refundExcessNative})
+        // vault directly, never to the proxy (see {PoolManagerBase-_refundExcessNative})
         _refundExcessNative();
     }
 
@@ -168,8 +168,8 @@ abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, I
     // The callback
     // ---------------------------------------------------------------------------------------------
 
-    /// @inheritdoc UniswapV4SwapProxy
-    /// @dev {UniswapV4SwapProxy-unlockCallback} has checked that the PoolManager is the caller and that
+    /// @inheritdoc PoolManagerBase
+    /// @dev {PoolManagerBase-unlockCallback} has checked that the PoolManager is the caller and that
     /// the data carries `LIQUIDITY_TAG`; `data` is what follows the tag.
     function _liquidityCallback(bytes calldata data) internal override returns (bytes memory) {
         (address vault, address rolesModifier, bytes32 roleKey, uint256 value) = _context();
@@ -312,18 +312,6 @@ abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, I
         );
     }
 
-    /// @dev The pool's current tick, read from its Slot0 in the PoolManager (v4-core `StateLibrary`:
-    /// `pools` is storage slot 6, the tick sits at bits 160-183 of Slot0)
-    function _currentTick(bytes32 poolId) internal view returns (int24) {
-        bytes32 slot0 = POOL_MANAGER.extsload(keccak256(abi.encodePacked(poolId, uint256(6))));
-        // forge-lint: disable-next-line(unsafe-typecast)
-        return int24(uint24(uint256(slot0) >> 160));
-    }
-
-    function _canAdd(address vault, bytes32 poolId) private view returns (bool) {
-        return _hasPermission(vault, poolId, PERMISSION_MINT);
-    }
-
     function _setContext(address vault, address rolesModifier, bytes32 roleKey, uint256 value) private {
         assembly ("memory-safe") {
             tstore(CONTEXT_SLOT, vault)
@@ -389,7 +377,7 @@ abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, I
             (bool ok, address vault) = _avatarOfCaller();
             if (!ok) return (false, "No avatar");
             // The PoolId: keccak256 of the five key words, validated above, hence canonical
-            if (!_canAdd(vault, keccak256(data[4:164]))) return (false, "Pool not allowed");
+            if (!_hasPermission(vault, keccak256(data[4:164]), PERMISSION_MINT)) return (false, "Pool not allowed");
         }
         return (true, bytes32(0));
     }

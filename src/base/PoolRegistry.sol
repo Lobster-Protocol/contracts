@@ -26,7 +26,7 @@ import {TickMath} from "../libraries/uniswapV3/TickMath.sol";
 ///
 /// PRICE BANDS. Per (vault, key), the vault also sets the price range, as pool ticks, inside which
 /// it allows adding liquidity (V3 `mint`, V4 `modifyLiquidityV4` with a positive delta) and swapping
-/// (every swap, single or batch leg, checked before and after it runs). Both are refused when no band
+/// (every swap leg, checked before and after it runs). Both are refused when no band
 /// is set or the pool's current tick is outside it, so a vault cannot be made to deposit or trade at
 /// a manipulated price. Removing liquidity and collecting fees ignore bands.
 abstract contract PoolRegistry is Guards {
@@ -120,35 +120,34 @@ abstract contract PoolRegistry is Guards {
 
     /// @notice The registry key of a V4 pool: its PoolId, as the PoolManager computes it
     function v4Key(PoolKey calldata key) external pure returns (bytes32) {
-        return _v4Key(key);
-    }
-
-    function _v4Key(PoolKey memory key) internal pure returns (bytes32) {
         return keccak256(abi.encode(key));
     }
 
-    /// @dev Reverts unless the caller has registered `key` with `permission`
-    function _requirePermission(bytes32 key, uint8 permission) internal view {
-        require(_hasPermission(msg.sender, key, permission), PoolNotAllowed());
+    /// @dev Reverts unless `vault` registered `key` with `permission` and set a price band for it, and
+    /// returns the band: one SLOAD
+    function _requireAllowed(
+        address vault,
+        bytes32 key,
+        uint8 permission
+    )
+        internal
+        view
+        returns (int24 minTick, int24 maxTick)
+    {
+        Entry memory entry = _entries[vault][key];
+        require(entry.permissions & permission != 0, PoolNotAllowed());
+        // a set band always has minTick < maxTick, the default (0, 0) does not
+        require(entry.minTick < entry.maxTick, PriceBandNotSet());
+        return (entry.minTick, entry.maxTick);
     }
 
     function _hasPermission(address vault, bytes32 key, uint8 permission) internal view returns (bool) {
         return _entries[vault][key].permissions & permission != 0;
     }
 
-    /// @dev Reverts unless `vault` has a price band for `key` and `tick` is inside it
-    function _requireInPriceBand(address vault, bytes32 key, int24 tick) internal view {
-        Entry memory entry = _entries[vault][key];
-        // a set band always has minTick < maxTick, the default (0, 0) does not
-        require(entry.minTick < entry.maxTick, PriceBandNotSet());
-        require(tick >= entry.minTick && tick <= entry.maxTick, PriceOutOfBand());
-    }
-
-    /// @dev Stricter than {Guards-_checkRecipient}: a vault may only mint to itself and receive swap
-    /// output itself. This also rules out address(0), the proxy and `Chaining.ADDRESS_THIS`, since
-    /// none of them can be `msg.sender`.
-    function _requireRecipientIsCaller(address recipient) internal view {
-        require(recipient == msg.sender, RecipientMustBeCaller());
+    /// @dev Reverts unless `tick` is inside the band
+    function _requireInBand(int24 tick, int24 minTick, int24 maxTick) internal pure {
+        require(tick >= minTick && tick <= maxTick, PriceOutOfBand());
     }
 
     /// @dev Field by field, so that each write keeps the entry's other fields (a key's band survives

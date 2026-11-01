@@ -16,7 +16,9 @@ import {UniswapV3ProxyBase} from "./base/UniswapV3ProxyBase.sol";
 /// @dev Abstract on purpose: this is a mixin combined into {LobsterProxy}, which owns the
 /// constructor. Deploy {LobsterProxy} rather than this.
 abstract contract UniswapV3MintProxy is UniswapV3ProxyBase, IUniswapV3MintCallback {
-    /// @notice Mints liquidity to a Uniswap V3 pool, owned by `params.recipient`
+    /// @notice Mints liquidity to a Uniswap V3 pool, owned by `params.recipient`. Body of {LobsterProxy-mint}, which has
+    /// already checked the registry, the price band, the deadline and that the recipient is the caller.
+    /// The position is paid for by `msg.sender`.
     /// @dev READ BEFORE CHOOSING A RECIPIENT. Unlike Uniswap's NonfungiblePositionManager, no NFT
     /// is minted and nothing about the position is recorded here. It lives in the pool, keyed by
     /// (recipient, tickLower, tickUpper), and the pool lets only that owner act on it: `burn` and
@@ -35,19 +37,6 @@ abstract contract UniswapV3MintProxy is UniswapV3ProxyBase, IUniswapV3MintCallba
     ///   pool.burn(tickLower, tickUpper, liquidity);
     ///   pool.collect(to, tickLower, tickUpper, type(uint128).max, type(uint128).max);
     /// Fees alone can be claimed the same way with `burn(tickLower, tickUpper, 0)` first.
-    function mint(MintParams calldata params)
-        external
-        virtual
-        nonReentrant
-        checkDeadline(params.deadline)
-        returns (uint256 amount0, uint256 amount1)
-    {
-        _checkRecipient(params.recipient);
-        return _mint(params);
-    }
-
-    /// @dev Body of {mint}, shared with {LobsterProxy-mint}. The caller of this body has already
-    /// checked the deadline and validated `params.recipient`. The position is paid for by `msg.sender`.
     function _mint(MintParams calldata params) internal returns (uint256 amount0, uint256 amount1) {
         PoolAddress.PoolKey memory poolKey =
             PoolAddress.PoolKey({token0: params.token0, token1: params.token1, fee: params.fee});

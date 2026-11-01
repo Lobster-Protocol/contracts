@@ -2,15 +2,11 @@
 pragma solidity >=0.8.20;
 
 import {BatchSwapFixture} from "./helpers/BatchSwapFixture.sol";
-import {BatchSwapCalls} from "./helpers/BatchSwapCalls.sol";
-import {UniswapBatchSwapProxy, SwapType} from "../src/UniswapBatchSwapProxy.sol";
-import {Chaining} from "../src/libraries/Chaining.sol";
-import {ExactInputSingleParams, ExactOutputSingleParams} from "../src/interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
+import {SwapCalldata} from "./helpers/SwapCalldata.sol";
 import {MintParams} from "../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
-import {V4ExactInputSingleParams, V4ExactOutputSingleParams} from "../src/interfaces/uniswapV4/IUnlockCallback.sol";
 import {IUniswapV3FactoryMinimal} from "../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
-import {PoolKey as ProxyPoolKey} from "../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
+import {PoolKey as ProxyPoolKey, Currency as ProxyCurrency} from "../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
@@ -24,7 +20,9 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 /// `<name>_refund`, so the gross cost (what `--gas-report` and traces show) is the sum of the two.
 ///
 /// Scenarios are written against a version-neutral {Leg} description; only the `_encode*` helpers
-/// know the proxy's calldata format, so the same swaps can be measured across interface changes.
+/// know the proxy's calldata format, so the same swaps can be measured across interface changes
+/// (they targeted the five single-swap functions and `batchSwap(bytes[])` until those were replaced
+/// by `swap(bytes)`).
 ///
 /// Route graph (five pools, both versions, native ETH in the middle):
 ///   token0 --V3--  token1 --V3--  tokenC
@@ -306,87 +304,38 @@ contract LobsterProxyGasTest is BatchSwapFixture {
     // ---------------------------------------------------------------------------------------------
 
     function _encodeSingle(Leg memory leg) internal view returns (bytes memory) {
-        return BatchSwapCalls.toDirectCall(_item(leg));
+        Leg[] memory legs = new Leg[](1);
+        legs[0] = leg;
+        return _encodeBatch(legs);
     }
 
+    /// @dev `swap(data)`, with data as {SwapCalldata} packs it
     function _encodeBatch(Leg[] memory legs) internal view returns (bytes memory) {
-        bytes[] memory items = new bytes[](legs.length);
+        SwapCalldata.Leg[] memory packed = new SwapCalldata.Leg[](legs.length);
         for (uint256 i = 0; i < legs.length; i++) {
-            items[i] = _item(legs[i]);
+            packed[i] = _packed(legs[i]);
         }
-        return abi.encodeCall(UniswapBatchSwapProxy.batchSwap, (items));
+        return SwapCalldata.call(block.timestamp, packed);
     }
 
-    /// @dev `abi.encodePacked(uint8 swapType, abi.encode(params))`
-    function _item(Leg memory leg) internal view returns (bytes memory) {
-        address tokenOut = _tokenOut(leg);
-        address to = leg.park ? Chaining.ADDRESS_THIS : user;
-        uint256 amount = leg.held ? Chaining.HELD_BALANCE : leg.amount;
-        if (_isV3(leg.edge)) {
-            if (!leg.exactOut) {
-                return abi.encodePacked(
-                    SwapType.V3_EXACT_INPUT,
-                    abi.encode(
-                        ExactInputSingleParams({
-                            tokenIn: leg.tokenIn,
-                            tokenOut: tokenOut,
-                            fee: FEE,
-                            recipient: to,
-                            deadline: block.timestamp,
-                            amountIn: amount,
-                            amountOutMinimum: leg.bound,
-                            sqrtPriceLimitX96: 0
-                        })
-                    )
-                );
-            }
-            return abi.encodePacked(
-                SwapType.V3_EXACT_OUTPUT,
-                abi.encode(
-                    ExactOutputSingleParams({
-                        tokenIn: leg.tokenIn,
-                        tokenOut: tokenOut,
-                        fee: FEE,
-                        recipient: to,
-                        deadline: block.timestamp,
-                        amountOut: amount,
-                        amountInMaximum: leg.bound,
-                        sqrtPriceLimitX96: 0
-                    })
-                )
+    function _packed(Leg memory leg) internal view returns (SwapCalldata.Leg memory p) {
+        p.tokenIn = leg.tokenIn;
+        p.tokenOut = _tokenOut(leg);
+        p.exactOut = leg.exactOut;
+        p.park = leg.park;
+        p.held = leg.held;
+        p.amount = SafeCast.toUint128(leg.amount);
+        p.bound = SafeCast.toUint128(leg.bound);
+        p.fee = FEE;
+        if (!_isV3(leg.edge)) {
+            ProxyPoolKey memory key = _v4KeyOf(leg.edge);
+            p.v4 = true;
+            p.fee = key.fee;
+            p.tickSpacing = key.tickSpacing;
+            require(
+                p.tokenIn == ProxyCurrency.unwrap(key.currency0) || p.tokenIn == ProxyCurrency.unwrap(key.currency1),
+                "leg: token not in pool"
             );
         }
-        ProxyPoolKey memory key = _v4KeyOf(leg.edge);
-        bool zeroForOne = leg.tokenIn < tokenOut;
-        if (!leg.exactOut) {
-            return abi.encodePacked(
-                SwapType.V4_EXACT_INPUT,
-                abi.encode(
-                    V4ExactInputSingleParams({
-                        poolKey: key,
-                        zeroForOne: zeroForOne,
-                        recipient: to,
-                        deadline: block.timestamp,
-                        amountIn: SafeCast.toUint128(amount),
-                        amountOutMinimum: SafeCast.toUint128(leg.bound),
-                        sqrtPriceLimitX96: 0
-                    })
-                )
-            );
-        }
-        return abi.encodePacked(
-            SwapType.V4_EXACT_OUTPUT,
-            abi.encode(
-                V4ExactOutputSingleParams({
-                    poolKey: key,
-                    zeroForOne: zeroForOne,
-                    recipient: to,
-                    deadline: block.timestamp,
-                    amountOut: SafeCast.toUint128(amount),
-                    amountInMaximum: SafeCast.toUint128(leg.bound),
-                    sqrtPriceLimitX96: 0
-                })
-            )
-        );
     }
 }

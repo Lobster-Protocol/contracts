@@ -2,10 +2,10 @@
 pragma solidity >=0.8.24;
 
 import {BatchSwapFixture} from "./helpers/BatchSwapFixture.sol";
+import {SwapCalldata} from "./helpers/SwapCalldata.sol";
 import {LobsterProxy} from "../src/LobsterProxy.sol";
 import {UniswapV4LiquidityProxy, V4LiquidityOp} from "../src/UniswapV4LiquidityProxy.sol";
 import {Operation} from "../src/interfaces/zodiac/IRoles.sol";
-import {V4ExactInputSingleParams} from "../src/interfaces/uniswapV4/IUnlockCallback.sol";
 import {
     PoolKey as ProxyPoolKey,
     Currency as ProxyCurrency,
@@ -14,10 +14,9 @@ import {
     ModifyLiquidityParams
 } from "../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
 import {MockSafe} from "./Mocks/zodiac/MockSafe.sol";
-import {SwapType} from "../src/UniswapBatchSwapProxy.sol";
-import {Chaining} from "../src/libraries/Chaining.sol";
 import {TickMath} from "../src/libraries/uniswapV3/TickMath.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {MockRoles} from "./Mocks/zodiac/MockRoles.sol";
 
@@ -30,7 +29,7 @@ import {TransientStateLibrary} from "v4-core/src/libraries/TransientStateLibrary
 import {IProxyErrors} from "../src/interfaces/IProxyErrors.sol";
 
 /// @notice A token that, the first time it is pulled with `transferFrom`, calls `target` with `attack`
-/// and records the outcome
+/// and records the outcome. It accepts ETH, so whatever an attack would sweep to its caller reaches it.
 contract ReenterOnTransferFrom is MockERC20 {
     address public target;
     bytes public attack;
@@ -53,6 +52,8 @@ contract ReenterOnTransferFrom is MockERC20 {
         }
         return super.transferFrom(from, to, amount);
     }
+
+    receive() external payable {}
 }
 
 /// @notice LobsterProxy's V4 liquidity (modifyLiquidityV4) against a real V4 PoolManager, with a mock Safe and a mock Roles v2
@@ -172,7 +173,7 @@ contract LobsterV4LiquidityTest is BatchSwapFixture {
     }
 
     function _call(V4LiquidityOp[] memory ops) internal view returns (bytes memory) {
-        return abi.encodeCall(UniswapV4LiquidityProxy.modifyLiquidityV4, (ops, block.timestamp));
+        return abi.encodeCall(UniswapV4LiquidityProxy.modifyLiquidityV4, (ops, vm.getBlockTimestamp()));
     }
 
     /// @dev The production path: the executor, through the vault's Roles modifier
@@ -193,7 +194,7 @@ contract LobsterV4LiquidityTest is BatchSwapFixture {
     /// @dev The vault calling directly, so revert reasons from the proxy surface unmasked
     function _asVault(Vault memory v, V4LiquidityOp[] memory ops) internal {
         vm.prank(address(v.safe));
-        liq.modifyLiquidityV4(ops, block.timestamp);
+        liq.modifyLiquidityV4(ops, vm.getBlockTimestamp());
     }
 
     function _liquidity(
@@ -241,27 +242,30 @@ contract LobsterV4LiquidityTest is BatchSwapFixture {
 
     /// @dev `after - before == delta` for one balance
     function _assertMoved(uint256 before, uint256 afterwards, int256 delta, string memory what) internal pure {
-        // forge-lint: disable-next-line(unsafe-typecast)
-        assertEq(int256(afterwards) - int256(before), delta, what); // test balances are far below 2**255
+        assertEq(SafeCast.toInt256(afterwards) - SafeCast.toInt256(before), delta, what);
     }
 
-    /// @dev Some swaps through the pool in both directions, so LPs earn fees
+    /// @dev Some swaps through the pool in both directions, one-leg `swap` calls, so LPs earn fees
     function _generateFees(ProxyPoolKey memory key) internal {
         vm.startPrank(user);
         for (uint256 i = 0; i < 2; i++) {
             bool zeroForOne = i == 0;
-            proxy.exactInputSingleV4{value: zeroForOne && ProxyCurrency.unwrap(key.currency0) == ETH ? 5e18 : 0}(
-                V4ExactInputSingleParams({
-                    poolKey: key,
-                    zeroForOne: zeroForOne,
-                    recipient: user,
-                    deadline: block.timestamp,
-                    amountIn: 5e18,
-                    amountOutMinimum: 0,
-                    sqrtPriceLimitX96: 0
-                })
+            proxy.swap{value: zeroForOne && ProxyCurrency.unwrap(key.currency0) == ETH ? 5e18 : 0}(
+                SwapCalldata.encode(block.timestamp, _batch(_v4In(key, zeroForOne, 5e18, 0)))
             );
         }
+        vm.stopPrank();
+    }
+
+    /// @dev Registers `key` on `lobster` for `who`, with `permissions` and a band that allows any price
+    function _registerOnLobster(address who, bytes32 key, uint8 permissions) internal {
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = key;
+        uint8[] memory perms = new uint8[](1);
+        perms[0] = permissions;
+        vm.startPrank(who);
+        lobster.setPools(keys, perms);
+        lobster.setPriceBand(key, TickMath.MIN_TICK, TickMath.MAX_TICK);
         vm.stopPrank();
     }
 
@@ -639,8 +643,8 @@ contract LobsterV4LiquidityTest is BatchSwapFixture {
         // Exactly at the limits passes
         (int256[] memory r0, int256[] memory r1) = _quoteThenRevert(_ops(_op(cleanKey, -10e18)));
         remove = _op(cleanKey, -10e18);
-        // forge-lint: disable-next-line(unsafe-typecast)
-        (remove.amount0Limit, remove.amount1Limit) = (uint128(uint256(r0[0])), uint128(uint256(r1[0])));
+        (remove.amount0Limit, remove.amount1Limit) =
+        (SafeCast.toUint128(SafeCast.toUint256(r0[0])), SafeCast.toUint128(SafeCast.toUint256(r1[0])));
         _asVault(a, _ops(remove));
         _assertClean(a);
     }
@@ -648,13 +652,13 @@ contract LobsterV4LiquidityTest is BatchSwapFixture {
     function _quoteThenRevert(V4LiquidityOp[] memory ops) internal returns (int256[] memory a0, int256[] memory a1) {
         uint256 snap = vm.snapshotState();
         vm.prank(address(a.safe));
-        (a0, a1) = liq.modifyLiquidityV4(ops, block.timestamp);
+        (a0, a1) = liq.modifyLiquidityV4(ops, vm.getBlockTimestamp());
         vm.revertToState(snap);
     }
 
     function test_deadline() public {
         _viaExecutor(a, _ops(_op(cleanKey, 10e18)), 0);
-        vm.warp(block.timestamp + 1);
+        vm.warp(vm.getBlockTimestamp() + 1);
         vm.prank(address(a.safe));
         vm.expectRevert(IProxyErrors.TransactionTooOld.selector);
         liq.modifyLiquidityV4(_ops(_op(cleanKey, -10e18)), block.timestamp - 1);
@@ -686,69 +690,112 @@ contract LobsterV4LiquidityTest is BatchSwapFixture {
         liq.unlockCallback(data);
     }
 
+    /// @notice The proxy has no `receive`: every plain ETH transfer reverts, the PoolManager's included
+    /// (what the vault is owed is taken straight to the vault, never through the proxy)
     function test_proxyAcceptsNoETH() public {
         vm.deal(attacker, 1 ether);
         vm.prank(attacker);
         (bool ok,) = address(liq).call{value: 1 ether}("");
-        assertFalse(ok);
+        assertFalse(ok, "accepted ETH from an outsider");
+
+        vm.deal(address(manager), address(manager).balance + 1 ether);
+        vm.prank(address(manager));
+        (ok,) = address(liq).call{value: 1 ether}("");
+        assertFalse(ok, "accepted ETH from the PoolManager");
     }
 
-    /// @notice Liquidity and swaps share one contract, so while an operation runs the proxy holds the
-    /// vault's msg.value. A token pulled mid-operation tries to spend it with a HELD_BALANCE batch leg
-    /// (the ETH would go to the token's own swap). The reentrancy lock refuses it, and the vault pays
-    /// exactly what its position cost. (Without the lock this particular leg would still fail, with the
-    /// PoolManager's AlreadyUnlocked, a second layer; the test pins the first.)
-    function test_reentryDuringALiquidityOperation_cannotSpendTheVaultsEth() public {
-        ReenterOnTransferFrom evil = new ReenterOnTransferFrom();
+    /// @dev A pool, ETH / a token that re-enters the proxy when the vault's payment pulls it, that vault
+    /// `a` may add to
+    function _reentrantTokenPool() internal returns (ReenterOnTransferFrom evil, ProxyPoolKey memory evilKey) {
+        evil = new ReenterOnTransferFrom();
         evil.mint(address(this), 1000e18);
         evil.approve(address(lpRouter), type(uint256).max);
         PoolKey memory k = _v4CoreKey(ETH, address(evil));
         manager.initialize(k, SQRT_PRICE_1_1);
         _addV4Liquidity(k, 1000e18);
-        ProxyPoolKey memory evilKey = _toProxyKey(k);
+        evilKey = _toProxyKey(k);
 
         evil.mint(address(a.safe), 100e18);
         vm.prank(address(a.safe));
         evil.approve(address(liq), type(uint256).max);
-        bytes32[] memory keys = new bytes32[](1);
-        keys[0] = lobster.v4Key(evilKey);
-        uint8[] memory perms = new uint8[](1);
-        perms[0] = MINT | SWAP;
-        vm.prank(address(a.safe));
-        lobster.setPools(keys, perms);
-        vm.prank(address(a.safe));
-        lobster.setPriceBand(keys[0], TickMath.MIN_TICK, TickMath.MAX_TICK);
+        _registerOnLobster(address(a.safe), lobster.v4Key(evilKey), MINT | SWAP);
+    }
 
-        bytes[] memory steal = new bytes[](1);
-        steal[0] = abi.encodePacked(
-            SwapType.V4_EXACT_INPUT,
-            abi.encode(
-                V4ExactInputSingleParams({
-                    poolKey: evilKey,
-                    zeroForOne: true, // ETH in: everything the proxy holds
-                    recipient: address(evil),
-                    deadline: block.timestamp,
-                    amountIn: uint128(Chaining.HELD_BALANCE),
-                    amountOutMinimum: 0,
-                    sqrtPriceLimitX96: 0
-                })
-            )
-        );
-        // The token is a caller in its own right, with the pool registered: only the lock can stop it
-        perms[0] = SWAP;
-        vm.prank(address(evil));
-        lobster.setPools(keys, perms);
-        evil.arm(address(liq), abi.encodeCall(lobster.batchSwap, (steal)));
+    /// @dev The attack is real: run by `evil` on its own while the proxy holds `held` wei (force-fed here,
+    /// as the vault's msg.value would be mid-operation), `steal` succeeds and the proxy's ETH ends up with
+    /// `evil`, but for `spent` paid into a pool. State is rewound afterwards.
+    function _assertStealsOutsideAnOperation(address evil, bytes memory steal, uint256 held, uint256 spent) internal {
+        uint256 snap = vm.snapshotState();
+        vm.deal(address(liq), held);
+        uint256 before = evil.balance;
+        vm.prank(evil);
+        (bool ok,) = address(liq).call(steal);
+        assertTrue(ok, "the attack fails even outside an operation; test proves nothing");
+        assertEq(evil.balance - before, held - spent, "the attack did not take the proxy's ETH");
+        assertEq(address(liq).balance, 0, "the attack left ETH in the proxy");
+        vm.revertToState(snap);
+    }
+
+    /// @notice Liquidity and swaps share one contract, so while an operation runs the proxy holds the
+    /// vault's msg.value. A token pulled mid-operation tries to spend it with a `swap` whose native-input
+    /// leg is paid from the proxy's balance (no msg.value; the ETH would go to the token's own pool and
+    /// the end-of-call refund would sweep the rest to the token). The reentrancy lock refuses it, with
+    /// OpenZeppelin's selector, and the vault pays exactly what its position cost. (Without the lock this
+    /// particular leg would still fail, with the PoolManager's AlreadyUnlocked, a second layer; the test
+    /// pins the first.)
+    function test_reentryDuringALiquidityOperation_cannotSpendTheVaultsEth() public {
+        (ReenterOnTransferFrom evil, ProxyPoolKey memory evilKey) = _reentrantTokenPool();
+        // ETH in, paid from whatever the proxy holds; the token out, to the token
+        bytes memory steal = SwapCalldata.call(vm.getBlockTimestamp(), _batch(_v4In(evilKey, true, 1e18, 0)));
+        // The token is a caller in its own right, with the pool registered and a band: only the lock can
+        // stop it
+        _registerOnLobster(address(evil), lobster.v4Key(evilKey), SWAP);
+        _assertStealsOutsideAnOperation(address(evil), steal, 50 ether, 1e18);
+        evil.arm(address(liq), steal);
 
         uint256 ethBefore = address(a.safe).balance;
         (int256[] memory a0,) = _viaExecutor(a, _ops(_op(evilKey, 10e18)), 50 ether);
 
         assertEq(evil.attempts(), 1, "the token never re-entered; test proves nothing");
-        assertFalse(evil.attackSucceeded(), "re-entrant batch succeeded");
+        assertFalse(evil.attackSucceeded(), "re-entrant swap succeeded");
         assertEq(
             evil.attackRevertData(),
-            abi.encodeWithSelector(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector),
-            "re-entrant batch failed for an unexpected reason"
+            abi.encodeWithSelector(IProxyErrors.ReentrancyGuardReentrantCall.selector),
+            "re-entrant swap failed for an unexpected reason"
+        );
+        assertEq(
+            IProxyErrors.ReentrancyGuardReentrantCall.selector,
+            ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector,
+            "the lock no longer reverts with OpenZeppelin's selector"
+        );
+        _assertMoved(ethBefore, address(a.safe).balance, a0[0], "vault paid more ETH than its position cost");
+        assertEq(address(liq).balance, 0, "proxy kept ETH");
+    }
+
+    /// @notice The same attack with no V4 leg at all: a V3-only `swap` opens no unlock, so no
+    /// AlreadyUnlocked stands behind the lock, and its end-of-call refund would hand the token all of the
+    /// vault's in-flight ETH. The lock alone refuses it, and the vault pays exactly what its position cost.
+    function test_reentryWithAV3OnlySwap_cannotSweepTheVaultsEth() public {
+        (ReenterOnTransferFrom evil, ProxyPoolKey memory evilKey) = _reentrantTokenPool();
+        // A plain V3 swap the token pays for itself, on a pool it registered with a band
+        token0.mint(address(evil), 10e18);
+        vm.prank(address(evil));
+        token0.approve(address(liq), type(uint256).max);
+        _registerOnLobster(address(evil), lobster.v3Key(address(v3Pool)), SWAP);
+        bytes memory steal =
+            SwapCalldata.call(vm.getBlockTimestamp(), _batch(_v3In(address(token0), address(token1), 1e18, 0)));
+        _assertStealsOutsideAnOperation(address(evil), steal, 50 ether, 0);
+        evil.arm(address(liq), steal);
+
+        uint256 ethBefore = address(a.safe).balance;
+        (int256[] memory a0,) = _viaExecutor(a, _ops(_op(evilKey, 10e18)), 50 ether);
+
+        assertEq(evil.attempts(), 1, "the token never re-entered; test proves nothing");
+        assertFalse(evil.attackSucceeded(), "re-entrant swap succeeded");
+        assertEq(
+            evil.attackRevertData(),
+            abi.encodeWithSelector(IProxyErrors.ReentrancyGuardReentrantCall.selector),
+            "re-entrant swap failed for an unexpected reason"
         );
         _assertMoved(ethBefore, address(a.safe).balance, a0[0], "vault paid more ETH than its position cost");
         assertEq(address(liq).balance, 0, "proxy kept ETH");
@@ -900,15 +947,13 @@ contract LobsterV4LiquidityTest is BatchSwapFixture {
                 if (next[pool] == 0) kind = 0;
                 int256 delta;
                 if (kind == 0) {
-                    delta = int256(bound(ri >> 16, 1e9, 20e18));
-                    // forge-lint: disable-next-line(unsafe-typecast)
-                    next[pool] += uint128(uint256(delta)); // bounded to 20e18 just above
+                    uint256 amount = bound(ri >> 16, 1e9, 20e18);
+                    delta = SafeCast.toInt256(amount);
+                    next[pool] += SafeCast.toUint128(amount);
                 } else if (kind == 1) {
-                    uint256 amount = bound(ri >> 16, 1, next[pool]);
-                    // forge-lint: disable-next-line(unsafe-typecast)
-                    delta = -int256(amount); // at most the position's liquidity, a uint128
-                    // forge-lint: disable-next-line(unsafe-typecast)
-                    next[pool] -= uint128(amount);
+                    uint256 amount = bound(ri >> 16, 1, next[pool]); // at most the position's liquidity
+                    delta = -SafeCast.toInt256(amount);
+                    next[pool] -= SafeCast.toUint128(amount);
                 }
                 ops[i] = _op(key, delta);
             }
@@ -1009,18 +1054,7 @@ contract LobsterV4LiquidityTest is BatchSwapFixture {
         int24 start = _v4Tick(cleanKey);
         _setBand(a, cleanKey, start - 100, start + 100);
 
-        vm.prank(user);
-        proxy.exactInputSingleV4(
-            V4ExactInputSingleParams({
-                poolKey: cleanKey,
-                zeroForOne: true,
-                recipient: user,
-                deadline: block.timestamp,
-                amountIn: 50e18,
-                amountOutMinimum: 0,
-                sqrtPriceLimitX96: 0
-            })
-        );
+        _swapAs(user, _batch(_v4In(cleanKey, true, 50e18, 0)));
         int24 moved = _v4Tick(cleanKey);
         assertLt(moved, start - 100, "swap did not leave the band");
 

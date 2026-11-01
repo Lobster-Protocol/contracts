@@ -4,13 +4,7 @@ pragma solidity >=0.8.20;
 import "forge-std/Test.sol";
 
 import {LobsterProxy} from "../../src/LobsterProxy.sol";
-import {UniswapBatchSwapProxy, SwapType} from "../../src/UniswapBatchSwapProxy.sol";
-import {
-    ExactInputSingleParams,
-    ExactOutputSingleParams
-} from "../../src/interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
 import {MintParams} from "../../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
-import {V4ExactInputSingleParams, V4ExactOutputSingleParams} from "../../src/interfaces/uniswapV4/IUnlockCallback.sol";
 import {IUniswapV3FactoryMinimal} from "../../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 // The proxy deliberately uses its own vendored types, so they are distinct from v4-core's even
@@ -20,8 +14,7 @@ import {
     Currency as ProxyCurrency,
     IHooks as ProxyIHooks
 } from "../../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
-import {BatchSwapCalls} from "./BatchSwapCalls.sol";
-import {Chaining} from "../../src/libraries/Chaining.sol";
+import {SwapCalldata} from "./SwapCalldata.sol";
 import {TickMath} from "../../src/libraries/uniswapV3/TickMath.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 // `^0.8.0`, unlike UniswapV3Infra (`^0.8.28`), so a real V3 factory can share this 0.8.26 unit
@@ -42,7 +35,7 @@ import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 /// @notice Shared fixture for the LobsterProxy swap suites: a real V3 factory and a real V4
 /// PoolManager side by side, two tokens with a V3 pool and a V4 pool between them, a native-ETH V4
 /// pool, a funded user (the vault) with standing approvals and every pool registered, and helpers to
-/// build batch items and compare a batch with the same swaps made one by one.
+/// build swap legs ({SwapCalldata}) and compare a multi-leg call with the same legs made one by one.
 /// @dev Abstract so suites inherit the setup without inheriting each other's tests.
 abstract contract BatchSwapFixture is Test {
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336; // 2**96, price = 1
@@ -68,8 +61,9 @@ abstract contract BatchSwapFixture is Test {
     ProxyPoolKey public nativeKey; // ETH / token1, no hook
 
     address public user = makeAddr("user");
-    /// @notice Where outputs go. LobsterProxy only ever pays its caller, so this is the user
-    /// itself; the name keeps assertions reading as "delivered to the recipient".
+    /// @notice Where outputs go. LobsterProxy only ever pays its caller (a leg has no recipient
+    /// field), so this is the user itself; the name keeps assertions reading as "delivered to the
+    /// recipient".
     address public recipient = user;
 
     function setUp() public virtual {
@@ -181,8 +175,7 @@ abstract contract BatchSwapFixture is Test {
             IPoolManager.ModifyLiquidityParams({
                 tickLower: -TICK_RANGE,
                 tickUpper: TICK_RANGE,
-                // forge-lint: disable-next-line(unsafe-typecast)
-                liquidityDelta: int256(V4_LIQUIDITY),
+                liquidityDelta: SafeCast.toInt256(V4_LIQUIDITY),
                 salt: bytes32(0)
             }),
             ""
@@ -201,7 +194,7 @@ abstract contract BatchSwapFixture is Test {
     }
 
     // ---------------------------------------------------------------------------
-    // Helpers: batch items, i.e. `abi.encodePacked(uint8 swapType, abi.encode(params))`
+    // Helpers: swap legs (see SwapCalldata) and the calldata of a `swap` call
     // ---------------------------------------------------------------------------
 
     function _v3In(
@@ -211,24 +204,14 @@ abstract contract BatchSwapFixture is Test {
         uint256 minOut
     )
         internal
-        view
-        returns (bytes memory)
+        pure
+        returns (SwapCalldata.Leg memory leg)
     {
-        return abi.encodePacked(
-            SwapType.V3_EXACT_INPUT,
-            abi.encode(
-                ExactInputSingleParams({
-                    tokenIn: tokenIn,
-                    tokenOut: tokenOut,
-                    fee: FEE,
-                    recipient: recipient,
-                    deadline: block.timestamp,
-                    amountIn: amountIn,
-                    amountOutMinimum: minOut,
-                    sqrtPriceLimitX96: 0
-                })
-            )
-        );
+        leg.tokenIn = tokenIn;
+        leg.tokenOut = tokenOut;
+        leg.fee = FEE;
+        leg.amount = _u128(amountIn);
+        leg.bound = _u128(minOut);
     }
 
     function _v3Out(
@@ -238,24 +221,11 @@ abstract contract BatchSwapFixture is Test {
         uint256 maxIn
     )
         internal
-        view
-        returns (bytes memory)
+        pure
+        returns (SwapCalldata.Leg memory leg)
     {
-        return abi.encodePacked(
-            SwapType.V3_EXACT_OUTPUT,
-            abi.encode(
-                ExactOutputSingleParams({
-                    tokenIn: tokenIn,
-                    tokenOut: tokenOut,
-                    fee: FEE,
-                    recipient: recipient,
-                    deadline: block.timestamp,
-                    amountOut: amountOut,
-                    amountInMaximum: maxIn,
-                    sqrtPriceLimitX96: 0
-                })
-            )
-        );
+        leg = _v3In(tokenIn, tokenOut, amountOut, maxIn);
+        leg.exactOut = true;
     }
 
     function _v4In(
@@ -265,23 +235,16 @@ abstract contract BatchSwapFixture is Test {
         uint128 minOut
     )
         internal
-        view
-        returns (bytes memory)
+        pure
+        returns (SwapCalldata.Leg memory leg)
     {
-        return abi.encodePacked(
-            SwapType.V4_EXACT_INPUT,
-            abi.encode(
-                V4ExactInputSingleParams({
-                    poolKey: key,
-                    zeroForOne: zeroForOne,
-                    recipient: recipient,
-                    deadline: block.timestamp,
-                    amountIn: amountIn,
-                    amountOutMinimum: minOut,
-                    sqrtPriceLimitX96: 0
-                })
-            )
-        );
+        (address c0, address c1) = (ProxyCurrency.unwrap(key.currency0), ProxyCurrency.unwrap(key.currency1));
+        leg.v4 = true;
+        (leg.tokenIn, leg.tokenOut) = zeroForOne ? (c0, c1) : (c1, c0);
+        leg.fee = key.fee;
+        leg.tickSpacing = key.tickSpacing;
+        leg.amount = amountIn;
+        leg.bound = minOut;
     }
 
     function _v4Out(
@@ -291,41 +254,52 @@ abstract contract BatchSwapFixture is Test {
         uint128 maxIn
     )
         internal
-        view
-        returns (bytes memory)
+        pure
+        returns (SwapCalldata.Leg memory leg)
     {
-        return abi.encodePacked(
-            SwapType.V4_EXACT_OUTPUT,
-            abi.encode(
-                V4ExactOutputSingleParams({
-                    poolKey: key,
-                    zeroForOne: zeroForOne,
-                    recipient: recipient,
-                    deadline: block.timestamp,
-                    amountOut: amountOut,
-                    amountInMaximum: maxIn,
-                    sqrtPriceLimitX96: 0
-                })
-            )
-        );
+        leg = _v4In(key, zeroForOne, amountOut, maxIn);
+        leg.exactOut = true;
     }
 
-    function _batch(bytes memory a) internal pure returns (bytes[] memory swaps) {
-        swaps = new bytes[](1);
-        swaps[0] = a;
+    /// @dev An amount for a uint128 field; anything larger means "no bound", the field's maximum
+    function _u128(uint256 amount) internal pure returns (uint128) {
+        return SafeCast.toUint128(amount > type(uint128).max ? type(uint128).max : amount);
     }
 
-    function _batch(bytes memory a, bytes memory b) internal pure returns (bytes[] memory swaps) {
-        swaps = new bytes[](2);
-        swaps[0] = a;
-        swaps[1] = b;
+    function _batch(SwapCalldata.Leg memory a) internal pure returns (SwapCalldata.Leg[] memory legs) {
+        legs = new SwapCalldata.Leg[](1);
+        legs[0] = a;
     }
 
-    /// @dev One of the four swap types, on a random pool, direction and size. Sizes stay well inside
+    function _batch(
+        SwapCalldata.Leg memory a,
+        SwapCalldata.Leg memory b
+    )
+        internal
+        pure
+        returns (SwapCalldata.Leg[] memory legs)
+    {
+        legs = new SwapCalldata.Leg[](2);
+        legs[0] = a;
+        legs[1] = b;
+    }
+
+    /// @dev The calldata of `swap` running `legs`, with the current block as deadline
+    function _call(SwapCalldata.Leg[] memory legs) internal view returns (bytes memory) {
+        return SwapCalldata.call(vm.getBlockTimestamp(), legs);
+    }
+
+    /// @dev `swap` running `legs`, called by `who`
+    function _swapAs(address who, SwapCalldata.Leg[] memory legs) internal returns (uint256[] memory) {
+        vm.prank(who);
+        return proxy.swap(SwapCalldata.encode(block.timestamp, legs));
+    }
+
+    /// @dev One of the four swap kinds, on a random pool, direction and size. Sizes stay well inside
     /// every pool's liquidity even when six swaps in a row push the same way, so failures would come
     /// from the batching, not from running a pool dry. On the native V4 pool ETH is only ever the
-    /// output, because a batch cannot pay ETH in.
-    function _randomSwap(uint256 r) internal view returns (bytes memory) {
+    /// output, so the same legs can run without msg.value.
+    function _randomSwap(uint256 r) internal view returns (SwapCalldata.Leg memory) {
         uint256 kind = r % 4;
         bool zeroForOne = (r >> 8) & 1 == 1;
         uint128 amount = uint128(bound(r >> 16, 1e6, 10e18));
@@ -373,12 +347,12 @@ abstract contract BatchSwapFixture is Test {
         (sqrtPriceX96,,,,,,) = v3Pool.slot0();
     }
 
-    /// @dev The central property, as a reusable check. Runs each swap as a direct call to its
-    /// single-swap entry point from `user`, rewinds, runs them again as one batch, and requires the
-    /// two to agree:
-    /// - every swap succeeds alone => the batch succeeds, with the same amounts and balances;
-    /// - some swap fails alone     => the batch fails with that swap's revert data and changes nothing.
-    function _assertBatchMatchesOneByOne(bytes[] memory swaps)
+    /// @dev The central property, as a reusable check. Runs each leg as a one-leg `swap` call from
+    /// `user`, rewinds, runs them again as one call, and requires the two to agree:
+    /// - every leg succeeds alone => the call succeeds, with the same amounts and balances;
+    /// - some leg fails alone     => the call fails with that leg's revert data and changes nothing.
+    /// The legs must be independent (no PARK or HELD), since a parked output cannot outlive its call.
+    function _assertBatchMatchesOneByOne(SwapCalldata.Leg[] memory swaps)
         internal
         returns (bool succeeded, uint256[] memory amounts)
     {
@@ -389,13 +363,13 @@ abstract contract BatchSwapFixture is Test {
         succeeded = true;
         for (uint256 i = 0; i < swaps.length; i++) {
             vm.prank(user);
-            (bool ok, bytes memory ret) = address(proxy).call(BatchSwapCalls.toDirectCall(swaps[i]));
+            (bool ok, bytes memory ret) = address(proxy).call(_call(_batch(swaps[i])));
             if (!ok) {
                 succeeded = false;
                 firstError = ret;
                 break;
             }
-            expected[i] = abi.decode(ret, (uint256));
+            expected[i] = abi.decode(ret, (uint256[]))[0];
         }
         uint256[6] memory expectedAfter = _holdings();
         uint256 expectedProxyEth = address(proxy).balance;
@@ -404,8 +378,7 @@ abstract contract BatchSwapFixture is Test {
         // Batched run
         uint256[6] memory before = _holdings();
         vm.prank(user);
-        (bool batchOk, bytes memory batchRet) =
-            address(proxy).call(abi.encodeCall(UniswapBatchSwapProxy.batchSwap, (swaps)));
+        (bool batchOk, bytes memory batchRet) = address(proxy).call(_call(swaps));
 
         if (!succeeded) {
             assertFalse(batchOk, "batch succeeded although one of its swaps fails alone");

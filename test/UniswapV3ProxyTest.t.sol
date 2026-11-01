@@ -3,31 +3,110 @@ pragma solidity >=0.8.20;
 
 import "forge-std/Test.sol";
 import {UniswapV3ProxyHarness} from "./Mocks/UniswapV3ProxyHarness.sol";
-import {MintParams} from "../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
-import {ExactInputSingleParams, ExactOutputSingleParams} from "../src/interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
-import {MintCallbackData} from "../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
-import {SwapCallbackData} from "../src/interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
+import {LobsterProxy} from "../src/LobsterProxy.sol";
+import {SwapCalldata} from "./helpers/SwapCalldata.sol";
+import {SwapFlags} from "../src/libraries/SwapFlags.sol";
+import {MintParams, MintCallbackData} from "../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
+import {IUniswapV3SwapCallback} from "../src/interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
 import {MockERC20} from "./Mocks/MockERC20.sol";
 import {IUniswapV3PoolMinimal} from "../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {UniswapV3Infra} from "./Mocks/uniswapV3/UniswapV3Infra.sol";
 import {IUniswapV3FactoryMinimal} from "../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
-import {IWETH} from "../src/interfaces/IWETH.sol";
+import {IPoolManagerMinimal} from "../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
+import {PoolManagerDeployer} from "./Mocks/uniswapV4/PoolManagerDeployer.sol";
 import {LiquidityAmounts} from "../src/libraries/uniswapV3/LiquidityAmounts.sol";
 import {TickMath} from "../src/libraries/uniswapV3/TickMath.sol";
 import {PoolAddress} from "../src/libraries/uniswapV3/PoolAddress.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {IProxyErrors} from "../src/interfaces/IProxyErrors.sol";
 
+/// @notice A token that, the first time a pool pays it out, calls `target` with `forgedCall` before
+/// transferring: mid-swap, while the proxy waits for the pool's callback. Optionally it makes the
+/// call as `impersonating` (through the cheatcode), to stand for any other address.
+contract CallbackForgingToken is MockERC20 {
+    Vm private constant VM = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+
+    address public target;
+    address public impersonating;
+    bytes public forgedCall;
+    bool public attempted;
+    bool public forgerySucceeded;
+    bytes public forgeryRevertData;
+
+    function arm(address target_, bytes calldata forgedCall_, address impersonating_) external {
+        target = target_;
+        forgedCall = forgedCall_;
+        impersonating = impersonating_;
+    }
+
+    function transfer(address to, uint256 value) public override returns (bool) {
+        if (target != address(0) && !attempted) {
+            attempted = true;
+            if (impersonating != address(0)) VM.prank(impersonating);
+            (bool ok, bytes memory ret) = target.call(forgedCall);
+            forgerySucceeded = ok;
+            forgeryRevertData = ret;
+        }
+        return super.transfer(to, value);
+    }
+}
+
+/// @notice Stands in (through `vm.etch`) for a pool that calls the swap callback a second time during
+/// the same swap, which no pool deployed by the canonical factory does. It takes exact input only and
+/// pays nothing out, and records how the second callback went.
+contract DoubleCallbackPool {
+    bool public secondCallbackSucceeded;
+    bytes public secondCallbackRevertData;
+
+    function slot0() external pure returns (uint160, int24, uint16, uint16, uint16, uint8, bool) {
+        return (2 ** 96, 0, 0, 1, 1, 0, true);
+    }
+
+    function swap(
+        address,
+        bool,
+        int256 amountSpecified,
+        uint160,
+        bytes calldata data
+    )
+        external
+        returns (int256 amount0, int256 amount1)
+    {
+        IUniswapV3SwapCallback(msg.sender).uniswapV3SwapCallback(amountSpecified, 0, data);
+        try IUniswapV3SwapCallback(msg.sender).uniswapV3SwapCallback(amountSpecified, 0, data) {
+            secondCallbackSucceeded = true;
+        } catch (bytes memory reason) {
+            secondCallbackRevertData = reason;
+        }
+        return (amountSpecified, 0);
+    }
+}
+
+/// @notice The Uniswap V3 mechanics of the proxy, against a real V3 factory and real pools.
+/// @dev Two contracts under test, split the way the code is:
+/// - mints go through {UniswapV3ProxyHarness}: the mint body and callback without the registry, so any
+///   pool and any recipient but address(0) and the harness itself;
+/// - swaps go through {LobsterProxy-swap}, as one-leg calls built with {SwapCalldata} (two legs where a
+///   property needs PARK and HELD). The swapping accounts register every pool they use with
+///   PERMISSION_SWAP and a band that allows any price: registry and band rules have their own suite
+///   (LobsterProxy.t.sol), this one tests what a V3 leg does. The proxy is deployed on the same factory
+///   and on a real PoolManager, which V3 legs never use.
+/// The old single-swap entry points took a recipient, uint256 amounts and a uint256 deadline. A leg has
+/// no recipient (the output goes to the caller), its amounts are 128-bit fields and the deadline is a
+/// uint32 in the call's header: the recipient and amount-wrapping tests are replaced by tests of the
+/// guarantees that took their place.
 contract UniswapV3ProxyTest is Test {
     UniswapV3ProxyHarness public proxy;
+    LobsterProxy public lobster;
+    address public manager;
     IUniswapV3FactoryMinimal public factory;
-    IWETH public weth;
     MockERC20 public token0;
     MockERC20 public token1;
     IUniswapV3PoolMinimal public pool;
-    IUniswapV3PoolMinimal public poolWithWeth;
 
     address public user = makeAddr("user");
+    /// @notice An outsider: the recipient of the mint tests' positions, and the address the old swap
+    /// tests sent outputs to. A swap leg cannot name it, so the swap tests check it never receives.
     address public recipient = makeAddr("recipient");
 
     uint24 constant FEE = 3000;
@@ -38,6 +117,12 @@ contract UniswapV3ProxyTest is Test {
     uint256 constant AMOUNT_DESIRED = 1000e18;
     uint256 constant AMOUNT_MIN = 900e18;
     uint256 constant SWAP_AMOUNT = 10e18;
+    /// @dev PoolRegistry.PERMISSION_SWAP
+    uint8 constant SWAP = 2;
+    /// @dev No token0 / token1 pool was ever created at this fee
+    uint24 constant UNCREATED_FEE = 10000;
+    /// @dev What a forged swap callback claims the pool is owed
+    int256 constant FORGED_AMOUNT = 1e18;
 
     function setUp() public {
         token0 = new MockERC20();
@@ -48,17 +133,16 @@ contract UniswapV3ProxyTest is Test {
         }
 
         UniswapV3Infra uniswapV3 = new UniswapV3Infra();
-        (IUniswapV3FactoryMinimal factory_, IWETH weth_,,) = uniswapV3.deploy();
+        (IUniswapV3FactoryMinimal factory_,,,) = uniswapV3.deploy();
         factory = factory_;
-        weth = weth_;
 
         uint160 initialSqrtPriceX96 = 2 ** 96; // 1:1 price
 
         pool = uniswapV3.createPoolAndInitialize(factory, address(token0), address(token1), FEE, initialSqrtPriceX96);
-        poolWithWeth =
-            uniswapV3.createPoolAndInitialize(factory, address(weth), address(token1), FEE, initialSqrtPriceX96);
 
         proxy = new UniswapV3ProxyHarness(address(factory));
+        manager = PoolManagerDeployer.deploy(address(this));
+        lobster = new LobsterProxy(address(factory), manager);
 
         vm.deal(user, 10_000 ether);
         token0.mint(user, AMOUNT_DESIRED * 10);
@@ -67,8 +151,11 @@ contract UniswapV3ProxyTest is Test {
         vm.startPrank(user);
         token0.approve(address(proxy), type(uint256).max);
         token1.approve(address(proxy), type(uint256).max);
-        weth.approve(address(proxy), type(uint256).max);
+        token0.approve(address(lobster), type(uint256).max);
+        token1.approve(address(lobster), type(uint256).max);
         vm.stopPrank();
+
+        _allow(user, address(pool));
     }
 
     // ---------------------------------------------------------------------------
@@ -111,35 +198,183 @@ contract UniswapV3ProxyTest is Test {
             amount0Min: 0,
             amount1Min: 0,
             recipient: user,
-            deadline: block.timestamp + 3600
+            deadline: vm.getBlockTimestamp() + 3600
         });
 
         vm.prank(user);
         (amount0, amount1) = proxy.mint(params);
     }
 
-    /// @dev Executes an exactInputSingle via snapshot, returns the result without persisting state
+    /// @dev Registers the V3 pool at `v3Pool` (deployed or not) for `who`'s swaps, with a price band
+    /// that allows any price
+    function _allow(address who, address v3Pool) internal {
+        bytes32 key = lobster.v3Key(v3Pool);
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = key;
+        uint8[] memory permissions = new uint8[](1);
+        permissions[0] = SWAP;
+        vm.prank(who);
+        lobster.setPools(keys, permissions);
+        vm.prank(who);
+        lobster.setPriceBand(key, TickMath.MIN_TICK, TickMath.MAX_TICK);
+    }
+
+    /// @dev The CREATE2 address of the V3 pool of `tokenA`, `tokenB` and `fee`, deployed or not
+    function _v3PoolAddress(address tokenA, address tokenB, uint24 fee) internal view returns (address) {
+        return PoolAddress.computeAddress(address(factory), PoolAddress.getPoolKey(tokenA, tokenB, fee));
+    }
+
+    /// @dev An exact-input V3 leg on the FEE pool, without a price limit
+    function _exactIn(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMinimum
+    )
+        internal
+        pure
+        returns (SwapCalldata.Leg memory leg)
+    {
+        leg.tokenIn = tokenIn;
+        leg.tokenOut = tokenOut;
+        leg.fee = FEE;
+        leg.amount = SafeCast.toUint128(amountIn);
+        leg.bound = SafeCast.toUint128(amountOutMinimum);
+    }
+
+    /// @dev An exact-output V3 leg on the FEE pool, without a price limit
+    function _exactOut(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountOut,
+        uint256 amountInMaximum
+    )
+        internal
+        pure
+        returns (SwapCalldata.Leg memory leg)
+    {
+        leg = _exactIn(tokenIn, tokenOut, amountOut, amountInMaximum);
+        leg.exactOut = true;
+    }
+
+    /// @dev `leg` with a price limit (the PRICE_LIMIT flag)
+    function _limited(
+        SwapCalldata.Leg memory leg,
+        uint160 sqrtPriceLimitX96
+    )
+        internal
+        pure
+        returns (SwapCalldata.Leg memory)
+    {
+        leg.sqrtPriceLimitX96 = sqrtPriceLimitX96;
+        return leg;
+    }
+
+    function _one(SwapCalldata.Leg memory leg) internal pure returns (SwapCalldata.Leg[] memory legs) {
+        legs = new SwapCalldata.Leg[](1);
+        legs[0] = leg;
+    }
+
+    function _two(
+        SwapCalldata.Leg memory a,
+        SwapCalldata.Leg memory b
+    )
+        internal
+        pure
+        returns (SwapCalldata.Leg[] memory legs)
+    {
+        legs = new SwapCalldata.Leg[](2);
+        legs[0] = a;
+        legs[1] = b;
+    }
+
+    /// @dev The `data` of a one-leg `swap`, valid for an hour
+    function _data(SwapCalldata.Leg memory leg) internal view returns (bytes memory) {
+        return SwapCalldata.encode(vm.getBlockTimestamp() + 3600, _one(leg));
+    }
+
+    /// @dev Hand-written `data`: the header (valid for an hour, two tokens), the token table
+    /// [token0, token1] and then `legs`, byte for byte
+    function _rawData(bytes memory legs) internal view returns (bytes memory) {
+        return bytes.concat(
+            bytes4(SafeCast.toUint32(vm.getBlockTimestamp() + 3600)),
+            bytes1(0x02),
+            bytes20(address(token0)),
+            bytes20(address(token1)),
+            legs
+        );
+    }
+
+    /// @dev `who` runs `leg` as a one-leg `swap`; returns its single amount
+    function _swap(address who, SwapCalldata.Leg memory leg) internal returns (uint256) {
+        return _swapData(who, _data(leg));
+    }
+
+    /// @dev `who` calls `swap(data)` for a one-leg call; returns its single amount
+    function _swapData(address who, bytes memory data) internal returns (uint256) {
+        vm.prank(who);
+        uint256[] memory amounts = lobster.swap(data);
+        assertEq(amounts.length, 1, "a one-leg swap returns one amount");
+        return amounts[0];
+    }
+
+    /// @dev `who` calls `swap(data)`, which must revert with exactly `reason`
+    function _expectSwapRevert(address who, bytes memory data, bytes memory reason) internal {
+        vm.prank(who);
+        vm.expectRevert(reason);
+        lobster.swap(data);
+    }
+
+    function _proxyError(bytes4 selector) internal pure returns (bytes memory) {
+        return abi.encodeWithSelector(selector);
+    }
+
+    /// @dev A `require(..., reason)` revert: TransferHelper's ("STF"), the V3 pool's ("SPL", "AS")
+    function _stringError(string memory reason) internal pure returns (bytes memory) {
+        return abi.encodeWithSignature("Error(string)", reason);
+    }
+
+    /// @dev Swap callback data in the proxy's own format (tokenIn | mode | credit), asking it to pay
+    /// `tokenIn` from the account holding its lock, as a plain leg does
+    function _callbackData(address tokenIn) internal pure returns (bytes memory) {
+        return abi.encodePacked(tokenIn, bytes1(0), uint256(0));
+    }
+
+    /// @dev The head of the `pool.swap` call a leg must make: recipient, direction, amountSpecified
+    /// (V3: positive is exact input), sqrtPriceLimitX96. A prefix, for `vm.expectCall`.
+    function _poolSwapCall(
+        address to,
+        bool zeroForOne,
+        int256 amountSpecified,
+        uint160 sqrtPriceLimitX96
+    )
+        internal
+        pure
+        returns (bytes memory)
+    {
+        return
+            abi.encodeWithSelector(
+                IUniswapV3PoolMinimal.swap.selector, to, zeroForOne, amountSpecified, sqrtPriceLimitX96
+            );
+    }
+
+    function _assertProxyHoldsNothing() internal view {
+        assertEq(token0.balanceOf(address(lobster)), 0, "proxy holds token0");
+        assertEq(token1.balanceOf(address(lobster)), 0, "proxy holds token1");
+        assertEq(address(lobster).balance, 0, "proxy holds ETH");
+    }
+
+    /// @dev Executes a one-leg exact-input swap via snapshot, returns the result without persisting state
     function _probeExactInput(address tokenIn, address tokenOut, uint256 amountIn)
         internal
         returns (uint256 amountOut)
     {
         uint256 snap = vm.snapshotState();
-        ExactInputSingleParams memory p = ExactInputSingleParams({
-            tokenIn: tokenIn,
-            tokenOut: tokenOut,
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountIn: amountIn,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
-        vm.prank(user);
-        amountOut = proxy.exactInputSingle(p);
+        amountOut = _swap(user, _exactIn(tokenIn, tokenOut, amountIn, 0));
         vm.revertToState(snap);
     }
 
-    /// @dev Executes an exactOutputSingle via snapshot, returns the amountIn without persisting state
+    /// @dev Executes a one-leg exact-output swap via snapshot, returns the amountIn without persisting state
     function _probeExactOutput(
         address tokenIn,
         address tokenOut,
@@ -149,18 +384,7 @@ contract UniswapV3ProxyTest is Test {
         returns (uint256 amountIn)
     {
         uint256 snap = vm.snapshotState();
-        ExactOutputSingleParams memory p = ExactOutputSingleParams({
-            tokenIn: tokenIn,
-            tokenOut: tokenOut,
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountOut: amountOut,
-            amountInMaximum: type(uint256).max,
-            sqrtPriceLimitX96: 0
-        });
-        vm.prank(user);
-        amountIn = proxy.exactOutputSingle(p);
+        amountIn = _swap(user, _exactOut(tokenIn, tokenOut, amountOut, type(uint128).max));
         vm.revertToState(snap);
     }
 
@@ -168,14 +392,26 @@ contract UniswapV3ProxyTest is Test {
     // CONSTRUCTOR
     // ===========================================================================
 
+    /// @notice The mint harness derives pools from the factory it was built with
     function testConstructor() public view {
         assertEq(proxy.UNI_V3_FACTORY(), address(factory));
+    }
+
+    /// @notice The swapping proxy is built on the same factory, so the pool address it derives for a
+    /// leg is the one the factory deployed, and on a real PoolManager
+    function testLobsterProxyConstructor() public view {
+        assertEq(lobster.UNI_V3_FACTORY(), address(factory));
+        assertEq(address(lobster.POOL_MANAGER()), manager);
+        assertEq(lobster.PERMISSION_SWAP(), SWAP, "SWAP is not PoolRegistry.PERMISSION_SWAP");
+        assertEq(_v3PoolAddress(address(token0), address(token1), FEE), address(pool), "CREATE2 derivation differs");
     }
 
     // ===========================================================================
     // MINT -- happy paths
     // ===========================================================================
 
+    /// @notice A narrow mint charges the payer exactly the computed amounts and creates the expected
+    /// position for the recipient
     function testMintSuccess() public {
         uint256 t0Before = token0.balanceOf(user);
         uint256 t1Before = token1.balanceOf(user);
@@ -221,6 +457,7 @@ contract UniswapV3ProxyTest is Test {
         assertEq(posLiq, expectedLiq, "position liquidity should match expected");
     }
 
+    /// @notice A wide mint: same exact accounting and position
     function testMintWideTicks() public {
         uint256 t0Before = token0.balanceOf(user);
         uint256 t1Before = token1.balanceOf(user);
@@ -255,6 +492,7 @@ contract UniswapV3ProxyTest is Test {
         assertEq(posLiq, expectedLiq);
     }
 
+    /// @notice The payer may mint to itself
     function testMintToSelfAsRecipient() public {
         (uint128 expectedLiq, uint256 expectedAmt0, uint256 expectedAmt1) =
             _computeExpectedMintAmounts(TICK_LOWER, TICK_UPPER, AMOUNT_DESIRED, AMOUNT_DESIRED);
@@ -284,6 +522,7 @@ contract UniswapV3ProxyTest is Test {
         assertEq(posLiq, expectedLiq);
     }
 
+    /// @notice Two positions on the same pool are independent and each gets its exact liquidity
     function testMintMultiplePositionsSamePool() public {
         // First mint -- narrow ticks
         (uint128 expectedLiq1,,) = _computeExpectedMintAmounts(TICK_LOWER, TICK_UPPER, AMOUNT_DESIRED, AMOUNT_DESIRED);
@@ -351,6 +590,7 @@ contract UniswapV3ProxyTest is Test {
     // MINT -- revert cases
     // ===========================================================================
 
+    /// @notice A mint past its deadline reverts
     function testMintRevertsOnExpiredDeadline() public {
         MintParams memory params = MintParams({
             token0: address(token0),
@@ -371,6 +611,7 @@ contract UniswapV3ProxyTest is Test {
         proxy.mint(params);
     }
 
+    /// @notice A mint depositing less than amount0Min / amount1Min reverts
     function testMintRevertsOnSlippageExceeded() public {
         MintParams memory params = MintParams({
             token0: address(token0),
@@ -391,6 +632,7 @@ contract UniswapV3ProxyTest is Test {
         proxy.mint(params);
     }
 
+    /// @notice A position minted to address(0) could never be withdrawn: the harness refuses it
     function testMintRevertsOnZeroRecipient() public {
         MintParams memory params = MintParams({
             token0: address(token0),
@@ -407,10 +649,11 @@ contract UniswapV3ProxyTest is Test {
         });
 
         vm.prank(user);
-        vm.expectRevert();
+        vm.expectRevert(UniswapV3ProxyHarness.InvalidRecipient.selector);
         proxy.mint(params);
     }
 
+    /// @notice The payer has not approved the harness: the mint callback cannot pull the tokens
     function testMintRevertsWithoutApproval() public {
         address noApproval = makeAddr("noApproval");
         token0.mint(noApproval, AMOUNT_DESIRED);
@@ -431,10 +674,11 @@ contract UniswapV3ProxyTest is Test {
         });
 
         vm.prank(noApproval);
-        vm.expectRevert();
+        vm.expectRevert(_stringError("STF"));
         proxy.mint(params);
     }
 
+    /// @notice The payer approved but cannot cover the deposit
     function testMintRevertsWithInsufficientBalance() public {
         address poor = makeAddr("poor");
         token0.mint(poor, 1);
@@ -460,10 +704,11 @@ contract UniswapV3ProxyTest is Test {
         });
 
         vm.prank(poor);
-        vm.expectRevert();
+        vm.expectRevert(_stringError("STF"));
         proxy.mint(params);
     }
 
+    /// @notice A mint on a pair no pool exists for reverts
     function testMintRevertsOnNonExistentPool() public {
         MockERC20 rogue = new MockERC20();
 
@@ -487,9 +732,11 @@ contract UniswapV3ProxyTest is Test {
     }
 
     // ===========================================================================
-    // EXACT INPUT SINGLE -- happy paths
+    // EXACT INPUT SINGLE -- happy paths (a one-leg `swap`)
     // ===========================================================================
 
+    /// @notice Exact input token0 -> token1: the caller pays exactly amountIn and receives exactly
+    /// what the call reports, nobody else is involved
     function testExactInputSingleZeroForOne() public {
         _mintDefaultLiquidity();
 
@@ -497,23 +744,12 @@ contract UniswapV3ProxyTest is Test {
         uint256 expectedOut = _probeExactInput(address(token0), address(token1), SWAP_AMOUNT);
 
         uint256 userT0Before = token0.balanceOf(user);
+        uint256 userT1Before = token1.balanceOf(user);
         uint256 recipientT1Before = token1.balanceOf(recipient);
         uint256 poolT0Before = token0.balanceOf(address(pool));
         uint256 poolT1Before = token1.balanceOf(address(pool));
 
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountIn: SWAP_AMOUNT,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        uint256 amountOut = proxy.exactInputSingle(params);
+        uint256 amountOut = _swap(user, _exactIn(address(token0), address(token1), SWAP_AMOUNT, 0));
 
         // Output matches the probed expectation exactly
         assertEq(amountOut, expectedOut, "amountOut should match probed value");
@@ -522,44 +758,38 @@ contract UniswapV3ProxyTest is Test {
         uint256 totalCost = SWAP_AMOUNT - amountOut;
         assertEq(totalCost, SWAP_AMOUNT - expectedOut, "total cost should match probed expectation");
 
-        // Exact balance accounting
+        // Exact balance accounting: the output goes to the caller, never to the outsider
         assertEq(token0.balanceOf(user), userT0Before - SWAP_AMOUNT);
-        assertEq(token1.balanceOf(recipient), recipientT1Before + amountOut);
+        assertEq(token1.balanceOf(user), userT1Before + amountOut);
+        assertEq(token1.balanceOf(recipient), recipientT1Before, "an outsider received the output");
         assertEq(token0.balanceOf(address(pool)), poolT0Before + SWAP_AMOUNT);
         assertEq(token1.balanceOf(address(pool)), poolT1Before - amountOut);
     }
 
+    /// @notice Exact input token1 -> token0: same exact accounting in the other direction
     function testExactInputSingleOneForZero() public {
         _mintDefaultLiquidity();
 
         uint256 expectedOut = _probeExactInput(address(token1), address(token0), SWAP_AMOUNT);
 
         uint256 userT1Before = token1.balanceOf(user);
+        uint256 userT0Before = token0.balanceOf(user);
         uint256 recipientT0Before = token0.balanceOf(recipient);
         uint256 poolT0Before = token0.balanceOf(address(pool));
         uint256 poolT1Before = token1.balanceOf(address(pool));
 
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token1),
-            tokenOut: address(token0),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountIn: SWAP_AMOUNT,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        uint256 amountOut = proxy.exactInputSingle(params);
+        uint256 amountOut = _swap(user, _exactIn(address(token1), address(token0), SWAP_AMOUNT, 0));
 
         assertEq(amountOut, expectedOut);
         assertEq(token1.balanceOf(user), userT1Before - SWAP_AMOUNT);
-        assertEq(token0.balanceOf(recipient), recipientT0Before + amountOut);
+        assertEq(token0.balanceOf(user), userT0Before + amountOut);
+        assertEq(token0.balanceOf(recipient), recipientT0Before, "an outsider received the output");
         assertEq(token1.balanceOf(address(pool)), poolT1Before + SWAP_AMOUNT);
         assertEq(token0.balanceOf(address(pool)), poolT0Before - amountOut);
     }
 
+    /// @notice The caller is its own recipient (now the only possible one): it pays exactly amountIn
+    /// and receives exactly amountOut
     function testExactInputSingleRecipientIsSelf() public {
         _mintDefaultLiquidity();
 
@@ -567,139 +797,99 @@ contract UniswapV3ProxyTest is Test {
         uint256 userT0Before = token0.balanceOf(user);
         uint256 userT1Before = token1.balanceOf(user);
 
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: user,
-            deadline: block.timestamp + 3600,
-            amountIn: SWAP_AMOUNT,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        uint256 amountOut = proxy.exactInputSingle(params);
+        uint256 amountOut = _swap(user, _exactIn(address(token0), address(token1), SWAP_AMOUNT, 0));
 
         assertEq(amountOut, expectedOut);
         assertEq(token0.balanceOf(user), userT0Before - SWAP_AMOUNT);
         assertEq(token1.balanceOf(user), userT1Before + amountOut);
     }
 
+    /// @notice amountOutMinimum set to exactly the expected output passes
     function testExactInputSingleWithSlippageProtection() public {
         _mintDefaultLiquidity();
 
         uint256 expectedOut = _probeExactInput(address(token0), address(token1), SWAP_AMOUNT);
 
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountIn: SWAP_AMOUNT,
-            amountOutMinimum: expectedOut, // set to exact expected -- should pass
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        uint256 amountOut = proxy.exactInputSingle(params);
+        // set to exact expected -- should pass
+        uint256 amountOut = _swap(user, _exactIn(address(token0), address(token1), SWAP_AMOUNT, expectedOut));
 
         assertEq(amountOut, expectedOut);
     }
 
+    /// @notice A price limit 1 unit below the current price: the swap stops exactly there, spends only
+    /// what the pool took to get there and delivers less than the same swap without a limit
     function testExactInputSingleWithSqrtPriceLimit() public {
         _mintDefaultLiquidity();
 
         (uint160 currentSqrtPrice,,,,,,) = pool.slot0();
         uint160 priceLimit = currentSqrtPrice - 1;
+        SwapCalldata.Leg memory leg = _limited(_exactIn(address(token0), address(token1), SWAP_AMOUNT, 0), priceLimit);
 
         // Probe with the same limit
         uint256 snap = vm.snapshotState();
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountIn: SWAP_AMOUNT,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: priceLimit
-        });
-        vm.prank(user);
-        uint256 expectedOut = proxy.exactInputSingle(params);
+        uint256 expectedOut = _swap(user, leg);
         vm.revertToState(snap);
 
         // Also probe the unlimited case for comparison
         uint256 unlimitedOut = _probeExactInput(address(token0), address(token1), SWAP_AMOUNT);
 
+        uint256 userT0Before = token0.balanceOf(user);
+        uint256 poolT0Before = token0.balanceOf(address(pool));
+
         // Execute with limit
-        vm.prank(user);
-        uint256 amountOut = proxy.exactInputSingle(params);
+        uint256 amountOut = _swap(user, leg);
 
         assertEq(amountOut, expectedOut);
 
         // With a very tight price limit (1 unit below current), the limited output is less than unlimited
+        assertLt(amountOut, unlimitedOut, "the limit did not bind");
         // Verify the exact difference
         uint256 limitationCost = unlimitedOut - expectedOut;
         assertEq(unlimitedOut - amountOut, limitationCost, "limitation cost should be exact");
+
+        // The pool stopped at the limit and the caller paid only what it took to get there
+        (uint160 priceAfter,,,,,,) = pool.slot0();
+        assertEq(priceAfter, priceLimit, "the swap did not stop at its limit");
+        uint256 paid = token0.balanceOf(address(pool)) - poolT0Before;
+        assertEq(token0.balanceOf(user), userT0Before - paid, "the caller paid more than the pool took");
+        assertLt(paid, SWAP_AMOUNT, "a limited swap spent all of amountIn");
     }
 
+    /// @notice A tiny exact input still settles exactly
     function testExactInputSingleSmallAmount() public {
         _mintDefaultLiquidity();
 
         uint256 smallAmount = 1000;
         uint256 expectedOut = _probeExactInput(address(token0), address(token1), smallAmount);
 
-        uint256 recipientBefore = token1.balanceOf(recipient);
+        uint256 userT1Before = token1.balanceOf(user);
 
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountIn: smallAmount,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        uint256 amountOut = proxy.exactInputSingle(params);
+        uint256 amountOut = _swap(user, _exactIn(address(token0), address(token1), smallAmount, 0));
 
         assertEq(amountOut, expectedOut);
-        assertEq(token1.balanceOf(recipient), recipientBefore + amountOut);
+        assertEq(token1.balanceOf(user), userT1Before + amountOut);
     }
 
+    /// @notice Two identical swaps in a row: the second runs on the moved price and gets less
     function testExactInputSingleConsecutiveSwapsPriceImpact() public {
         _mintDefaultLiquidity();
 
         // Probe first swap output
         uint256 expectedOut1 = _probeExactInput(address(token0), address(token1), SWAP_AMOUNT);
 
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountIn: SWAP_AMOUNT,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
+        SwapCalldata.Leg memory leg = _exactIn(address(token0), address(token1), SWAP_AMOUNT, 0);
 
-        vm.prank(user);
-        uint256 amountOut1 = proxy.exactInputSingle(params);
+        uint256 amountOut1 = _swap(user, leg);
         assertEq(amountOut1, expectedOut1);
 
         // After first swap, probe second swap on shifted state
         uint256 expectedOut2 = _probeExactInput(address(token0), address(token1), SWAP_AMOUNT);
 
-        vm.prank(user);
-        uint256 amountOut2 = proxy.exactInputSingle(params);
+        uint256 amountOut2 = _swap(user, leg);
         assertEq(amountOut2, expectedOut2);
 
         // Verify the exact price impact: second output is less by a precise delta
+        assertLt(amountOut2, amountOut1, "the second swap was not worse");
         uint256 priceImpactDelta = amountOut1 - amountOut2;
         assertEq(amountOut1 - amountOut2, priceImpactDelta, "price impact delta should be exact");
     }
@@ -708,162 +898,129 @@ contract UniswapV3ProxyTest is Test {
     // EXACT INPUT SINGLE -- revert cases
     // ===========================================================================
 
+    /// @notice A call past its deadline reverts before anything runs: the pool is never called
     function testExactInputSingleRevertsOnExpiredDeadline() public {
         _mintDefaultLiquidity();
 
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp - 1,
-            amountIn: SWAP_AMOUNT,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
+        bytes memory data = SwapCalldata.encode(
+            vm.getBlockTimestamp() - 1, _one(_exactIn(address(token0), address(token1), SWAP_AMOUNT, 0))
+        );
 
-        vm.prank(user);
-        vm.expectRevert(IProxyErrors.TransactionTooOld.selector);
-        proxy.exactInputSingle(params);
+        vm.expectCall(address(pool), abi.encodeWithSelector(IUniswapV3PoolMinimal.swap.selector), 0);
+        _expectSwapRevert(user, data, _proxyError(IProxyErrors.TransactionTooOld.selector));
     }
 
+    /// @notice An unreachable amountOutMinimum (the largest the 128-bit field holds) reverts
     function testExactInputSingleRevertsOnSlippageExceeded() public {
         _mintDefaultLiquidity();
 
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountIn: SWAP_AMOUNT,
-            amountOutMinimum: type(uint256).max,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        vm.expectRevert(IProxyErrors.TooLittleReceived.selector);
-        proxy.exactInputSingle(params);
+        _expectSwapRevert(
+            user,
+            _data(_exactIn(address(token0), address(token1), SWAP_AMOUNT, type(uint128).max)),
+            _proxyError(IProxyErrors.TooLittleReceived.selector)
+        );
     }
 
+    /// @notice amountOutMinimum one wei above the actual output reverts
     function testExactInputSingleRevertsSlippageByOneWei() public {
         _mintDefaultLiquidity();
 
         uint256 expectedOut = _probeExactInput(address(token0), address(token1), SWAP_AMOUNT);
 
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountIn: SWAP_AMOUNT,
-            amountOutMinimum: expectedOut + 1, // one wei above actual -- must revert
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        vm.expectRevert(IProxyErrors.TooLittleReceived.selector);
-        proxy.exactInputSingle(params);
+        // one wei above actual -- must revert
+        _expectSwapRevert(
+            user,
+            _data(_exactIn(address(token0), address(token1), SWAP_AMOUNT, expectedOut + 1)),
+            _proxyError(IProxyErrors.TooLittleReceived.selector)
+        );
     }
 
-    function testExactInputSingleRevertsOnZeroRecipient() public {
+    /// @notice Replaces "zero recipient reverts". A leg has no recipient field, so its output can be
+    /// neither burnt nor sent elsewhere: appending one, as the old parameters had, leaves bytes after
+    /// the last leg and the data is malformed; the well-formed leg makes the pool pay the caller, in
+    /// full (what the pool lost is what the caller gained, the supply is unchanged)
+    function testExactInputSingleOutputCanOnlyGoToTheCaller() public {
         _mintDefaultLiquidity();
+        SwapCalldata.Leg memory leg = _exactIn(address(token0), address(token1), SWAP_AMOUNT, 0);
 
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: address(0),
-            deadline: block.timestamp + 3600,
-            amountIn: SWAP_AMOUNT,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
+        _expectSwapRevert(
+            user, bytes.concat(_data(leg), bytes20(address(0))), _proxyError(IProxyErrors.MalformedSwap.selector)
+        );
 
-        vm.prank(user);
-        vm.expectRevert();
-        proxy.exactInputSingle(params);
+        uint256 supply = token1.totalSupply();
+        uint256 userT1Before = token1.balanceOf(user);
+        uint256 poolT1Before = token1.balanceOf(address(pool));
+        uint256 recipientT1Before = token1.balanceOf(recipient);
+
+        vm.expectCall(address(pool), abi.encodeWithSelector(IUniswapV3PoolMinimal.swap.selector, user));
+        uint256 amountOut = _swap(user, leg);
+
+        assertGt(amountOut, 0, "nothing was swapped");
+        assertEq(token1.balanceOf(user), userT1Before + amountOut, "the caller did not get the output");
+        assertEq(poolT1Before - token1.balanceOf(address(pool)), amountOut, "the pool paid out something else");
+        assertEq(token1.totalSupply(), supply, "output was burnt");
+        assertEq(token1.balanceOf(recipient), recipientT1Before, "an outsider received the output");
+        _assertProxyHoldsNothing();
     }
 
+    /// @notice The caller (registered for the pool) has not approved the proxy: the pool's callback
+    /// cannot pull the input
     function testExactInputSingleRevertsWithoutApproval() public {
         _mintDefaultLiquidity();
 
         address noApproval = makeAddr("noApproval");
         token0.mint(noApproval, SWAP_AMOUNT);
+        _allow(noApproval, address(pool));
 
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountIn: SWAP_AMOUNT,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(noApproval);
-        vm.expectRevert();
-        proxy.exactInputSingle(params);
+        _expectSwapRevert(
+            noApproval, _data(_exactIn(address(token0), address(token1), SWAP_AMOUNT, 0)), _stringError("STF")
+        );
+        assertEq(token0.balanceOf(noApproval), SWAP_AMOUNT);
     }
 
+    /// @notice The caller (registered, approved) cannot cover amountIn
     function testExactInputSingleRevertsWithInsufficientBalance() public {
         _mintDefaultLiquidity();
 
         address poor = makeAddr("poor");
         token0.mint(poor, 1);
+        _allow(poor, address(pool));
 
         vm.prank(poor);
-        token0.approve(address(proxy), type(uint256).max);
+        token0.approve(address(lobster), type(uint256).max);
 
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountIn: SWAP_AMOUNT,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(poor);
-        vm.expectRevert();
-        proxy.exactInputSingle(params);
+        _expectSwapRevert(poor, _data(_exactIn(address(token0), address(token1), SWAP_AMOUNT, 0)), _stringError("STF"));
     }
 
+    /// @notice A pair no pool was ever created for. Unregistered, the registry refuses it before
+    /// anything runs (PoolNotAllowed). Registered by its CREATE2 key, the proxy finds no pool behind
+    /// the address and refuses it (NotAPool) rather than "swap" on an empty account. Nothing moves.
     function testExactInputSingleRevertsOnNonExistentPool() public {
         MockERC20 rogue = new MockERC20();
+        address nowhere = _v3PoolAddress(address(token0), address(rogue), FEE);
+        assertEq(nowhere.code.length, 0, "a pool exists there: the test proves nothing");
 
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(rogue),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountIn: SWAP_AMOUNT,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
+        bytes memory data = _data(_exactIn(address(token0), address(rogue), SWAP_AMOUNT, 0));
+        uint256 userT0Before = token0.balanceOf(user);
+        vm.expectCall(nowhere, abi.encodeWithSelector(IUniswapV3PoolMinimal.swap.selector), 0);
 
-        vm.prank(user);
-        vm.expectRevert();
-        proxy.exactInputSingle(params);
+        _expectSwapRevert(user, data, _proxyError(IProxyErrors.PoolNotAllowed.selector));
+
+        _allow(user, nowhere);
+        _expectSwapRevert(user, data, _proxyError(IProxyErrors.NotAPool.selector));
+
+        assertEq(token0.balanceOf(user), userT0Before, "caller paid");
+        assertEq(rogue.balanceOf(user), 0, "caller received");
+        assertEq(rogue.balanceOf(address(lobster)), 0, "proxy holds rogue");
+        _assertProxyHoldsNothing();
     }
-
-    // ===========================================================================
-    // EXACT OUTPUT SINGLE -- happy paths
-    // ===========================================================================
-
-    // ===========================================================================
-    // EXACT OUTPUT SINGLE -- revert cases
-    // ===========================================================================
 
     // ===========================================================================
     // ROUNDTRIP -- swap and swap back, verify fee accounting
     // ===========================================================================
 
+    /// @notice token0 -> token1 -> token0 in two calls: token1 ends where it started and the caller
+    /// lost exactly the fees and price impact in token0
     function testRoundtripSwapPaysFees() public {
         _mintDefaultLiquidity();
 
@@ -874,38 +1031,14 @@ contract UniswapV3ProxyTest is Test {
         uint256 expectedOut1 = _probeExactInput(address(token0), address(token1), SWAP_AMOUNT);
 
         // Leg 1: token0 -> token1
-        ExactInputSingleParams memory leg1 = ExactInputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: user,
-            deadline: block.timestamp + 3600,
-            amountIn: SWAP_AMOUNT,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        uint256 received = proxy.exactInputSingle(leg1);
+        uint256 received = _swap(user, _exactIn(address(token0), address(token1), SWAP_AMOUNT, 0));
         assertEq(received, expectedOut1);
 
         // Probe leg 2 on shifted state
         uint256 expectedGotBack = _probeExactInput(address(token1), address(token0), received);
 
         // Leg 2: token1 -> token0
-        ExactInputSingleParams memory leg2 = ExactInputSingleParams({
-            tokenIn: address(token1),
-            tokenOut: address(token0),
-            fee: FEE,
-            recipient: user,
-            deadline: block.timestamp + 3600,
-            amountIn: received,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        uint256 gotBack = proxy.exactInputSingle(leg2);
+        uint256 gotBack = _swap(user, _exactIn(address(token1), address(token0), received, 0));
         assertEq(gotBack, expectedGotBack);
 
         // token1 balance unchanged
@@ -917,18 +1050,16 @@ contract UniswapV3ProxyTest is Test {
     }
 
     // ===========================================================================
-    // CALLBACK SECURITY
+    // CALLBACK SECURITY -- only the pool being called, and only once
     // ===========================================================================
 
+    /// @notice Outside a swap no one may call the swap callback; here this contract, which is no pool
     function testSwapCallbackRevertsFromNonPool() public {
-        vm.expectRevert();
-        proxy.uniswapV3SwapCallback(
-            1,
-            -1,
-            abi.encode(SwapCallbackData({tokenIn: address(token0), tokenOut: address(token1), fee: FEE, payer: user}))
-        );
+        vm.expectRevert(IProxyErrors.UnexpectedCallback.selector);
+        lobster.uniswapV3SwapCallback(1, -1, _callbackData(address(token0)));
     }
 
+    /// @notice The mint callback verifies its caller is the factory's pool for the key in the data
     function testMintCallbackRevertsFromNonPool() public {
         vm.expectRevert();
         proxy.uniswapV3MintCallback(
@@ -943,82 +1074,199 @@ contract UniswapV3ProxyTest is Test {
         );
     }
 
+    /// @notice An attacker calling the swap callback directly, claiming a pool is owed: refused, and
+    /// the vault, which has standing approvals, pays nothing
     function testSwapCallbackRevertsFromRandomAddress() public {
         address attacker = makeAddr("attacker");
+        uint256 userT0Before = token0.balanceOf(user);
+
         vm.prank(attacker);
-        vm.expectRevert();
-        proxy.uniswapV3SwapCallback(
-            1,
-            -1,
-            abi.encode(SwapCallbackData({tokenIn: address(token0), tokenOut: address(token1), fee: FEE, payer: user}))
+        vm.expectRevert(IProxyErrors.UnexpectedCallback.selector);
+        lobster.uniswapV3SwapCallback(FORGED_AMOUNT, -1, _callbackData(address(token0)));
+
+        assertEq(token0.balanceOf(user), userT0Before, "a forged callback moved funds");
+    }
+
+    /// @notice Even the genuine, registered pool cannot call the swap callback outside a swap the
+    /// proxy is making on it: being a pool is not enough
+    function testSwapCallbackRevertsFromTheGenuinePoolOutsideASwap() public {
+        _mintDefaultLiquidity();
+        uint256 userT0Before = token0.balanceOf(user);
+        uint256 poolT0Before = token0.balanceOf(address(pool));
+
+        vm.prank(address(pool));
+        vm.expectRevert(IProxyErrors.UnexpectedCallback.selector);
+        lobster.uniswapV3SwapCallback(FORGED_AMOUNT, 0, _callbackData(address(token0)));
+
+        assertEq(token0.balanceOf(user), userT0Before, "the vault paid");
+        assertEq(token0.balanceOf(address(pool)), poolT0Before, "the pool was paid");
+    }
+
+    /// @notice Outside a swap the callback is refused for every caller, deltas and data
+    function testFuzz_SwapCallbackRevertsOutsideASwap(
+        address caller,
+        int256 amount0Delta,
+        int256 amount1Delta,
+        bytes calldata data
+    )
+        public
+    {
+        assumeNotForgeAddress(caller);
+        uint256 userT0Before = token0.balanceOf(user);
+        uint256 userT1Before = token1.balanceOf(user);
+
+        vm.prank(caller);
+        vm.expectRevert(IProxyErrors.UnexpectedCallback.selector);
+        lobster.uniswapV3SwapCallback(amount0Delta, amount1Delta, data);
+
+        assertEq(token0.balanceOf(user), userT0Before, "a forged callback moved token0");
+        assertEq(token1.balanceOf(user), userT1Before, "a forged callback moved token1");
+    }
+
+    /// @dev A V3 pool of token0 and a {CallbackForgingToken}, with liquidity, registered for the user
+    function _forgingTokenPool() internal returns (CallbackForgingToken evil) {
+        evil = new CallbackForgingToken();
+        IUniswapV3PoolMinimal evilPool = IUniswapV3PoolMinimal(factory.createPool(address(token0), address(evil), FEE));
+        evilPool.initialize(2 ** 96);
+
+        (address a, address b) =
+            address(token0) < address(evil) ? (address(token0), address(evil)) : (address(evil), address(token0));
+        token0.approve(address(proxy), type(uint256).max);
+        evil.approve(address(proxy), type(uint256).max);
+        proxy.mint(
+            MintParams({
+                token0: a,
+                token1: b,
+                fee: FEE,
+                tickLower: TICK_LOWER_WIDE,
+                tickUpper: TICK_UPPER_WIDE,
+                amount0Desired: AMOUNT_DESIRED,
+                amount1Desired: AMOUNT_DESIRED,
+                amount0Min: 0,
+                amount1Min: 0,
+                recipient: address(this),
+                deadline: vm.getBlockTimestamp() + 3600
+            })
         );
+        _allow(user, address(evilPool));
+    }
+
+    /// @notice Mid-swap, while the proxy waits for the pool's callback, the token being paid out calls
+    /// the callback itself: "the pool is owed, pay me from the vault". Only the pool the proxy is
+    /// calling is honoured: the forgery is refused, the swap completes, the vault pays its swap only.
+    function testSwapCallbackForgedMidSwapIsRefused() public {
+        CallbackForgingToken evil = _forgingTokenPool();
+        evil.arm(
+            address(lobster),
+            abi.encodeCall(
+                IUniswapV3SwapCallback.uniswapV3SwapCallback, (FORGED_AMOUNT, 0, _callbackData(address(token0)))
+            ),
+            address(0)
+        );
+        uint256 userT0Before = token0.balanceOf(user);
+
+        uint256 amountOut = _swap(user, _exactIn(address(token0), address(evil), SWAP_AMOUNT, 0));
+
+        assertTrue(evil.attempted(), "the forgery never ran: the test proves nothing");
+        assertFalse(evil.forgerySucceeded(), "a forged callback was honoured");
+        assertEq(evil.forgeryRevertData(), abi.encodeWithSelector(IProxyErrors.UnexpectedCallback.selector));
+        assertEq(token0.balanceOf(user), userT0Before - SWAP_AMOUNT, "the vault paid more than its swap");
+        assertEq(token0.balanceOf(address(evil)), 0, "the forger was paid");
+        assertEq(evil.balanceOf(user), amountOut, "the swap did not deliver");
+    }
+
+    /// @notice The same mid-swap forgery, made as another genuine pool the vault registered: a pool's
+    /// CREATE2 identity is not enough, only the pool being called right now is honoured
+    function testSwapCallbackFromAnotherRegisteredPoolMidSwapIsRefused() public {
+        CallbackForgingToken evil = _forgingTokenPool();
+        evil.arm(
+            address(lobster),
+            abi.encodeCall(
+                IUniswapV3SwapCallback.uniswapV3SwapCallback, (FORGED_AMOUNT, 0, _callbackData(address(token0)))
+            ),
+            address(pool)
+        );
+        uint256 userT0Before = token0.balanceOf(user);
+        uint256 poolT0Before = token0.balanceOf(address(pool));
+
+        _swap(user, _exactIn(address(token0), address(evil), SWAP_AMOUNT, 0));
+
+        assertTrue(evil.attempted(), "the forgery never ran: the test proves nothing");
+        assertFalse(evil.forgerySucceeded(), "a callback from a pool not being called was honoured");
+        assertEq(evil.forgeryRevertData(), abi.encodeWithSelector(IProxyErrors.UnexpectedCallback.selector));
+        assertEq(token0.balanceOf(user), userT0Before - SWAP_AMOUNT, "the vault paid more than its swap");
+        assertEq(token0.balanceOf(address(pool)), poolT0Before, "the impersonated pool was paid");
+    }
+
+    /// @notice The callback is honoured once per pool call: a registered "pool" (an etched contract
+    /// standing for one that misbehaves) calling back a second time is refused, so the vault pays once
+    function testSwapCallbackIsHonouredOnlyOnce() public {
+        address fake = _v3PoolAddress(address(token0), address(token1), UNCREATED_FEE);
+        vm.etch(fake, address(new DoubleCallbackPool()).code);
+        _allow(user, fake);
+        SwapCalldata.Leg memory leg = _exactIn(address(token0), address(token1), SWAP_AMOUNT, 0);
+        leg.fee = UNCREATED_FEE;
+        uint256 userT0Before = token0.balanceOf(user);
+
+        _swap(user, leg);
+
+        assertFalse(DoubleCallbackPool(fake).secondCallbackSucceeded(), "a second callback was honoured");
+        assertEq(
+            DoubleCallbackPool(fake).secondCallbackRevertData(),
+            abi.encodeWithSelector(IProxyErrors.UnexpectedCallback.selector)
+        );
+        assertEq(token0.balanceOf(user), userT0Before - SWAP_AMOUNT, "the vault paid twice");
+        assertEq(token0.balanceOf(fake), SWAP_AMOUNT);
     }
 
     // ===========================================================================
     // POOL STATE VERIFICATION
     // ===========================================================================
 
+    /// @notice Selling token0 (zeroForOne) lowers sqrtPriceX96, exactly as probed
     function testSwapZeroForOneDecreasesSqrtPrice() public {
         _mintDefaultLiquidity();
 
         (uint160 priceBefore,,,,,,) = pool.slot0();
+        SwapCalldata.Leg memory leg = _exactIn(address(token0), address(token1), SWAP_AMOUNT, 0);
 
         // Probe the exact post-swap price
         uint256 snap = vm.snapshotState();
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountIn: SWAP_AMOUNT,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
-        vm.prank(user);
-        proxy.exactInputSingle(params);
+        _swap(user, leg);
         (uint160 expectedPriceAfter,,,,,,) = pool.slot0();
         vm.revertToState(snap);
 
         // Execute the real swap
-        vm.prank(user);
-        proxy.exactInputSingle(params);
+        _swap(user, leg);
         (uint160 priceAfter,,,,,,) = pool.slot0();
 
         assertEq(priceAfter, expectedPriceAfter, "post-swap price should match probed value");
         // Selling token0 for token1 (zeroForOne) must decrease sqrtPriceX96
+        assertLt(priceAfter, priceBefore, "the price did not go down");
         assertEq(priceBefore - priceAfter, priceBefore - expectedPriceAfter, "price decrease should be exact");
     }
 
+    /// @notice Selling token1 (oneForZero) raises sqrtPriceX96, exactly as probed
     function testSwapOneForZeroIncreasesSqrtPrice() public {
         _mintDefaultLiquidity();
 
         (uint160 priceBefore,,,,,,) = pool.slot0();
+        SwapCalldata.Leg memory leg = _exactIn(address(token1), address(token0), SWAP_AMOUNT, 0);
 
         uint256 snap = vm.snapshotState();
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token1),
-            tokenOut: address(token0),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountIn: SWAP_AMOUNT,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
-        vm.prank(user);
-        proxy.exactInputSingle(params);
+        _swap(user, leg);
         (uint160 expectedPriceAfter,,,,,,) = pool.slot0();
         vm.revertToState(snap);
 
-        vm.prank(user);
-        proxy.exactInputSingle(params);
+        _swap(user, leg);
         (uint160 priceAfter,,,,,,) = pool.slot0();
 
         assertEq(priceAfter, expectedPriceAfter);
+        assertGt(priceAfter, priceBefore, "the price did not go up");
         assertEq(priceAfter - priceBefore, expectedPriceAfter - priceBefore, "price increase should be exact");
     }
 
+    /// @notice A mint creates exactly the computed liquidity
     function testMintIncreasesPoolLiquidity() public {
         bytes32 posKey = keccak256(abi.encodePacked(address(user), TICK_LOWER_WIDE, TICK_UPPER_WIDE));
         (uint128 liqBefore,,,,) = pool.positions(posKey);
@@ -1037,6 +1285,7 @@ contract UniswapV3ProxyTest is Test {
     // EDGE CASES
     // ===========================================================================
 
+    /// @notice A large exact input settles exactly and pays for its price impact
     function testExactInputSingleLargeSwapHighSlippage() public {
         _mintDefaultLiquidity();
 
@@ -1045,50 +1294,48 @@ contract UniswapV3ProxyTest is Test {
 
         uint256 poolT1Before = token1.balanceOf(address(pool));
 
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountIn: hugeAmount,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        uint256 amountOut = proxy.exactInputSingle(params);
+        uint256 amountOut = _swap(user, _exactIn(address(token0), address(token1), hugeAmount, 0));
 
         assertEq(amountOut, expectedOut);
         assertEq(token1.balanceOf(address(pool)), poolT1Before - amountOut);
 
         // Verify price impact: output is less than linear expectation
         uint256 linearOut = hugeAmount * (1_000_000 - FEE) / 1_000_000;
+        assertLt(amountOut, linearOut, "no price impact");
         uint256 slippageLoss = linearOut - amountOut;
         assertEq(linearOut - amountOut, slippageLoss);
     }
 
+    /// @notice The deadline is inclusive: a call whose deadline is this block's timestamp runs
     function testDeadlineExactlyAtBlockTimestamp() public {
         _mintDefaultLiquidity();
 
         uint256 expectedOut = _probeExactInput(address(token0), address(token1), SWAP_AMOUNT);
 
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp, // boundary -- should pass (<=)
-            amountIn: SWAP_AMOUNT,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        uint256 amountOut = proxy.exactInputSingle(params);
+        // boundary -- should pass (<=)
+        bytes memory data = SwapCalldata.encode(
+            vm.getBlockTimestamp(), _one(_exactIn(address(token0), address(token1), SWAP_AMOUNT, 0))
+        );
+        uint256 amountOut = _swapData(user, data);
         assertEq(amountOut, expectedOut);
     }
 
+    /// @notice The deadline is a uint32 in the call's header: the largest one is honoured up to and
+    /// including its own second, and once block.timestamp passes 2**32 - 1 (in 2106) no deadline a
+    /// swap accepts can be encoded any more (documented in {SwapFlags})
+    function testDeadlineIsAUint32Timestamp() public {
+        _mintDefaultLiquidity();
+        bytes memory data =
+            SwapCalldata.encode(type(uint32).max, _one(_exactIn(address(token0), address(token1), SWAP_AMOUNT, 0)));
+
+        vm.warp(type(uint32).max);
+        assertGt(_swapData(user, data), 0, "the largest deadline was refused at its own second");
+
+        vm.warp(2 ** 32);
+        _expectSwapRevert(user, data, _proxyError(IProxyErrors.TransactionTooOld.selector));
+    }
+
+    /// @notice The deadline is inclusive for mints too
     function testMintDeadlineExactlyAtBlockTimestamp() public {
         (, uint256 expectedAmt0, uint256 expectedAmt1) =
             _computeExpectedMintAmounts(TICK_LOWER, TICK_UPPER, AMOUNT_DESIRED, AMOUNT_DESIRED);
@@ -1114,34 +1361,32 @@ contract UniswapV3ProxyTest is Test {
         assertApproxEqAbs(amount1, expectedAmt1, 1);
     }
 
+    /// @notice A swap leaves every other account alone, even one with standing approvals to the proxy
     function testSwapDoesNotAffectUnrelatedBalances() public {
         _mintDefaultLiquidity();
 
         address bystander = makeAddr("bystander");
         token0.mint(bystander, 100e18);
         token1.mint(bystander, 100e18);
+        vm.startPrank(bystander);
+        token0.approve(address(lobster), type(uint256).max);
+        token1.approve(address(lobster), type(uint256).max);
+        vm.stopPrank();
 
         uint256 bystanderT0 = token0.balanceOf(bystander);
         uint256 bystanderT1 = token1.balanceOf(bystander);
+        uint256 recipientT0 = token0.balanceOf(recipient);
+        uint256 recipientT1 = token1.balanceOf(recipient);
 
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountIn: SWAP_AMOUNT,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        proxy.exactInputSingle(params);
+        _swap(user, _exactIn(address(token0), address(token1), SWAP_AMOUNT, 0));
 
         assertEq(token0.balanceOf(bystander), bystanderT0);
         assertEq(token1.balanceOf(bystander), bystanderT1);
+        assertEq(token0.balanceOf(recipient), recipientT0);
+        assertEq(token1.balanceOf(recipient), recipientT1);
     }
 
+    /// @notice The mint harness keeps nothing
     function testProxyHoldsNoTokensAfterMint() public {
         _mintDefaultLiquidity();
 
@@ -1149,62 +1394,182 @@ contract UniswapV3ProxyTest is Test {
         assertEq(token1.balanceOf(address(proxy)), 0, "proxy should hold zero token1");
     }
 
+    /// @notice The swapping proxy keeps nothing, tokens or ETH
     function testProxyHoldsNoTokensAfterSwap() public {
         _mintDefaultLiquidity();
 
-        ExactInputSingleParams memory params = ExactInputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountIn: SWAP_AMOUNT,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
+        _swap(user, _exactIn(address(token0), address(token1), SWAP_AMOUNT, 0));
+        _swap(user, _exactOut(address(token1), address(token0), 5e18, type(uint128).max));
+
+        _assertProxyHoldsNothing();
+    }
+
+    // ===========================================================================
+    // V3 LEGS NEED NO NATIVE ETH AND NO POOL MANAGER
+    // ===========================================================================
+
+    /// @notice V3 has no native ETH: a V3 leg naming address(0) as either token is malformed, even if
+    /// the caller registered the CREATE2 key such a pool would have and attached ETH
+    function testV3LegCannotTradeNativeEth() public {
+        _mintDefaultLiquidity();
+        _allow(user, _v3PoolAddress(address(0), address(token1), FEE));
+        bytes memory ethIn = _data(_exactIn(address(0), address(token1), 1 ether, 0));
+        bytes memory ethOut = _data(_exactIn(address(token1), address(0), SWAP_AMOUNT, 0));
+        uint256 ethBefore = user.balance;
+        uint256 userT1Before = token1.balanceOf(user);
 
         vm.prank(user);
-        proxy.exactInputSingle(params);
+        vm.expectRevert(IProxyErrors.MalformedSwap.selector);
+        lobster.swap{value: 1 ether}(ethIn);
+        _expectSwapRevert(user, ethOut, _proxyError(IProxyErrors.MalformedSwap.selector));
 
-        assertEq(token0.balanceOf(address(proxy)), 0, "proxy should hold zero token0");
-        assertEq(token1.balanceOf(address(proxy)), 0, "proxy should hold zero token1");
+        assertEq(user.balance, ethBefore, "ETH moved");
+        assertEq(token1.balanceOf(user), userT1Before, "token1 moved");
+        _assertProxyHoldsNothing();
     }
 
-    // ===========================================================================
-    // RECIPIENT CANNOT BE THE PROXY -- nothing sent there could ever leave
-    // ===========================================================================
-
-    function testSwapsRejectTheProxyAsRecipient() public {
+    /// @notice A call with only V3 legs never unlocks the PoolManager: a single leg either way, nor a
+    /// V3 -> V3 chain, whose parked output waits in the proxy itself
+    function testV3OnlySwapNeverUnlocksThePoolManager() public {
         _mintDefaultLiquidity();
-        uint256 userBefore = token0.balanceOf(user);
+        SwapCalldata.Leg memory parked = _exactIn(address(token0), address(token1), SWAP_AMOUNT, 0);
+        parked.park = true;
+        SwapCalldata.Leg memory held = _exactIn(address(token1), address(token0), 0, 0);
+        held.held = true;
+        bytes memory chain = SwapCalldata.encode(vm.getBlockTimestamp() + 3600, _two(parked, held));
 
-        vm.startPrank(user);
-        vm.expectRevert(IProxyErrors.InvalidRecipient.selector);
-        proxy.exactInputSingle(
-            ExactInputSingleParams({
-                tokenIn: address(token0),
-                tokenOut: address(token1),
-                fee: FEE,
-                recipient: address(proxy),
-                deadline: block.timestamp + 3600,
-                amountIn: SWAP_AMOUNT,
-                amountOutMinimum: 0,
-                sqrtPriceLimitX96: 0
-            })
-        );
-        vm.stopPrank();
+        vm.expectCall(manager, abi.encodeWithSelector(IPoolManagerMinimal.unlock.selector), 0);
+        _swap(user, _exactIn(address(token0), address(token1), SWAP_AMOUNT, 0));
+        _swap(user, _exactOut(address(token1), address(token0), 5e18, type(uint128).max));
+        vm.prank(user);
+        lobster.swap(chain);
 
-        assertEq(token0.balanceOf(user), userBefore, "caller paid");
-        assertEq(token1.balanceOf(address(proxy)), 0, "tokens reached the proxy");
+        _assertProxyHoldsNothing();
     }
 
+    /// @notice `swap` is payable (V4 legs may spend native ETH) but a V3 leg spends none: ETH sent
+    /// with a V3-only call comes back in full. ETH force-fed to the proxy beforehand belongs to no one
+    /// and goes to that caller too (documented behaviour).
+    function testV3SwapRefundsAnyEthSent() public {
+        _mintDefaultLiquidity();
+        bytes memory data = _data(_exactIn(address(token0), address(token1), SWAP_AMOUNT, 0));
+        uint256 ethBefore = user.balance;
+
+        vm.prank(user);
+        lobster.swap{value: 1 ether}(data);
+        assertEq(user.balance, ethBefore, "the swap kept ETH");
+        assertEq(address(lobster).balance, 0, "the proxy kept ETH");
+
+        vm.deal(address(lobster), 0.5 ether);
+        vm.prank(user);
+        lobster.swap{value: 1 ether}(data);
+        assertEq(user.balance, ethBefore + 0.5 ether, "force-fed ETH was not swept to the caller");
+        assertEq(address(lobster).balance, 0, "the proxy kept ETH");
+    }
+
+    // ===========================================================================
+    // OUTPUTS ONLY EVER REACH THE CALLER -- the proxy cannot be a recipient
+    // ===========================================================================
+
+    /// @notice Replaces "the proxy is rejected as recipient". A leg names no recipient, so the proxy
+    /// only ever gets an output through PARK, for a later leg of the same call. Appending the proxy's
+    /// address as a recipient makes the data malformed; parking with no later leg to spend it reverts
+    /// (FundsLeftInProxy) and costs nothing; parked and spent, the round trip ends at the caller.
+    function testSwapOutputCanNeverStayInTheProxy() public {
+        _mintDefaultLiquidity();
+        uint256 userT0Before = token0.balanceOf(user);
+        uint256 userT1Before = token1.balanceOf(user);
+        uint256 poolT1Before = token1.balanceOf(address(pool));
+        SwapCalldata.Leg memory parked = _exactIn(address(token0), address(token1), SWAP_AMOUNT, 0);
+        parked.park = true;
+
+        _expectSwapRevert(
+            user,
+            bytes.concat(_data(_exactIn(address(token0), address(token1), SWAP_AMOUNT, 0)), bytes20(address(lobster))),
+            _proxyError(IProxyErrors.MalformedSwap.selector)
+        );
+        _expectSwapRevert(user, _data(parked), _proxyError(IProxyErrors.FundsLeftInProxy.selector));
+        assertEq(token0.balanceOf(user), userT0Before, "caller paid");
+        _assertProxyHoldsNothing();
+
+        SwapCalldata.Leg memory back = _exactIn(address(token1), address(token0), 0, 0);
+        back.held = true;
+        bytes memory roundTrip = SwapCalldata.encode(vm.getBlockTimestamp() + 3600, _two(parked, back));
+        vm.prank(user);
+        uint256[] memory amounts = lobster.swap(roundTrip);
+
+        assertEq(amounts.length, 2);
+        assertEq(
+            token1.balanceOf(address(pool)), poolT1Before, "the second leg did not spend exactly the parked output"
+        );
+        assertEq(token1.balanceOf(user), userT1Before, "the parked output reached the caller");
+        assertLt(amounts[1], SWAP_AMOUNT, "a round trip cannot gain");
+        assertEq(
+            token0.balanceOf(user), userT0Before - SWAP_AMOUNT + amounts[1], "the round trip did not end at the caller"
+        );
+        _assertProxyHoldsNothing();
+    }
+
+    /// @notice Whoever calls, in either direction and for either kind of leg, the pool is told to pay
+    /// the caller and does: the caller gains exactly what the pool loses and pays exactly what it
+    /// gains; the user, the outsider and the proxy are untouched
+    function testFuzz_OutputAlwaysLandsAtTheCaller(
+        address caller,
+        uint256 amount,
+        bool zeroForOne,
+        bool exactOut
+    )
+        public
+    {
+        vm.assume(caller != address(0) && caller.code.length == 0 && caller != user && caller != recipient);
+        assumeNotPrecompile(caller);
+        assumeNotForgeAddress(caller);
+        _mintDefaultLiquidity();
+        amount = bound(amount, 1e6, 100e18);
+        (MockERC20 tokenIn, MockERC20 tokenOut) = zeroForOne ? (token0, token1) : (token1, token0);
+        tokenIn.mint(caller, 1000e18);
+        vm.prank(caller);
+        tokenIn.approve(address(lobster), type(uint256).max);
+        _allow(caller, address(pool));
+
+        uint256[2] memory callerBefore = [tokenIn.balanceOf(caller), tokenOut.balanceOf(caller)];
+        uint256[2] memory poolBefore = [tokenIn.balanceOf(address(pool)), tokenOut.balanceOf(address(pool))];
+        uint256[4] memory othersBefore = [
+            tokenIn.balanceOf(user),
+            tokenOut.balanceOf(user),
+            tokenIn.balanceOf(recipient),
+            tokenOut.balanceOf(recipient)
+        ];
+
+        vm.expectCall(address(pool), abi.encodeWithSelector(IUniswapV3PoolMinimal.swap.selector, caller));
+        uint256 reported = _swap(
+            caller,
+            exactOut
+                ? _exactOut(address(tokenIn), address(tokenOut), amount, type(uint128).max)
+                : _exactIn(address(tokenIn), address(tokenOut), amount, 0)
+        );
+
+        uint256 paid = tokenIn.balanceOf(address(pool)) - poolBefore[0];
+        uint256 received = poolBefore[1] - tokenOut.balanceOf(address(pool));
+        assertEq(tokenIn.balanceOf(caller), callerBefore[0] - paid, "the caller did not pay exactly");
+        assertEq(tokenOut.balanceOf(caller), callerBefore[1] + received, "the caller did not get the output");
+        assertEq(reported, exactOut ? paid : received, "the reported amount is wrong");
+        assertEq(exactOut ? received : paid, amount, "the exact side is not exact");
+        assertEq(tokenIn.balanceOf(user), othersBefore[0]);
+        assertEq(tokenOut.balanceOf(user), othersBefore[1]);
+        assertEq(tokenIn.balanceOf(recipient), othersBefore[2]);
+        assertEq(tokenOut.balanceOf(recipient), othersBefore[3]);
+        _assertProxyHoldsNothing();
+    }
+
+    /// @notice The mint harness refuses itself as the recipient
     /// @dev A position minted to the proxy would be owned by it in the pool, and the proxy has no
     /// burn/collect, so the liquidity could never be withdrawn.
     function testMintRejectsTheProxyAsRecipient() public {
         uint256 userBefore = token0.balanceOf(user);
 
         vm.prank(user);
-        vm.expectRevert(IProxyErrors.InvalidRecipient.selector);
+        vm.expectRevert(UniswapV3ProxyHarness.InvalidRecipient.selector);
         proxy.mint(
             MintParams({
                 token0: address(token0),
@@ -1270,41 +1635,266 @@ contract UniswapV3ProxyTest is Test {
     }
 
     // ===========================================================================
-    // AMOUNTS CANNOT WRAP -- uint256 -> int256 is checked
+    // THE PAYER IS ALWAYS THE CALLER
     // ===========================================================================
 
-    /// @dev 2**255 is where a plain cast wraps negative, turning exact-input into exact-output of
-    /// ~2**255 (buys out the pool, passes any amountOutMinimum). Also UniversalRouter's
-    /// CONTRACT_BALANCE sentinel.
-    function testExactInputSingleRejectsAmountsThatWouldWrap() public {
+    /// @notice The input is pulled from the account that called `swap` (the lock holder), not from
+    /// tx.origin, even when tx.origin has standing approvals to the proxy
+    function testSwapIsPaidByItsCallerNotByTxOrigin() public {
         _mintDefaultLiquidity();
-        uint256[3] memory amounts = [uint256(2 ** 255), 2 ** 255 + 1, type(uint256).max];
-        uint256 userBefore = token0.balanceOf(user);
+        address vault = makeAddr("vault");
+        token0.mint(vault, SWAP_AMOUNT);
+        vm.prank(vault);
+        token0.approve(address(lobster), type(uint256).max);
+        _allow(vault, address(pool));
+        bytes memory data = _data(_exactIn(address(token0), address(token1), SWAP_AMOUNT, 0));
+        uint256 userT0Before = token0.balanceOf(user);
+        uint256 userT1Before = token1.balanceOf(user);
+
+        vm.prank(vault, user);
+        uint256[] memory amounts = lobster.swap(data);
+
+        assertEq(token0.balanceOf(vault), 0, "the caller did not pay");
+        assertEq(token1.balanceOf(vault), amounts[0], "the caller did not receive");
+        assertEq(token0.balanceOf(user), userT0Before, "tx.origin paid");
+        assertEq(token1.balanceOf(user), userT1Before, "tx.origin received");
+    }
+
+    /// @notice An account registered for the pool but with nothing to pay can never make the proxy
+    /// charge another account that approved it: its own swap fails to pull from itself ("STF"); funded,
+    /// it pays for itself. The approved account is untouched either way.
+    function testFuzz_SwapNeverChargesAnotherApprovedAccount(uint256 amount, bool exactOut) public {
+        _mintDefaultLiquidity();
+        address attacker = makeAddr("attacker");
+        _allow(attacker, address(pool));
+        amount = bound(amount, 1, 100e18);
+        bytes memory data = _data(
+            exactOut
+                ? _exactOut(address(token0), address(token1), amount, type(uint128).max)
+                : _exactIn(address(token0), address(token1), amount, 0)
+        );
+        uint256 userT0Before = token0.balanceOf(user);
+        uint256 userT1Before = token1.balanceOf(user);
+
+        _expectSwapRevert(attacker, data, _stringError("STF"));
+
+        token0.mint(attacker, 1000e18);
+        vm.prank(attacker);
+        token0.approve(address(lobster), type(uint256).max);
+        uint256 reported = _swapData(attacker, data);
+
+        if (exactOut) {
+            assertEq(token1.balanceOf(attacker), amount, "the attacker did not get its exact output");
+            assertEq(token0.balanceOf(attacker), 1000e18 - reported, "the attacker did not pay its input");
+        } else {
+            assertEq(token0.balanceOf(attacker), 1000e18 - amount, "the attacker did not pay its input");
+            assertEq(token1.balanceOf(attacker), reported, "the attacker did not get its output");
+        }
+        assertEq(token0.balanceOf(user), userT0Before, "another account paid");
+        assertEq(token1.balanceOf(user), userT1Before, "another account was touched");
+    }
+
+    // ===========================================================================
+    // AMOUNTS CANNOT WRAP -- 128-bit fields
+    // ===========================================================================
+
+    /// @notice Replaces the uint256 -> int256 wrap test. Amounts are 128-bit fields now, so 2**255 and
+    /// above cannot even be written, and the largest that can, including those with the field's top
+    /// bit set, reach the pool as a positive amountSpecified (exact input), with the caller as
+    /// recipient and the default price limit. The pool runs to that limit and the caller pays exactly
+    /// what it took, far less than the amount.
+    function testExactInputSingleLargestAmountsStayExactInput() public {
+        _mintDefaultLiquidity();
+        uint256[3] memory amounts = [uint256(2 ** 127 - 1), 2 ** 127, type(uint128).max];
 
         for (uint256 i = 0; i < amounts.length; i++) {
-            vm.prank(user);
-            vm.expectRevert(abi.encodeWithSelector(SafeCast.SafeCastOverflowedUintToInt.selector, amounts[i]));
-            proxy.exactInputSingle(
-                ExactInputSingleParams({
-                    tokenIn: address(token0),
-                    tokenOut: address(token1),
-                    fee: FEE,
-                    recipient: recipient,
-                    deadline: block.timestamp + 3600,
-                    amountIn: amounts[i],
-                    amountOutMinimum: 1e18,
-                    sqrtPriceLimitX96: 0
-                })
-            );
-        }
+            for (uint256 direction = 0; direction < 2; direction++) {
+                bool zeroForOne = direction == 0;
+                (MockERC20 tokenIn, MockERC20 tokenOut) = zeroForOne ? (token0, token1) : (token1, token0);
+                uint160 defaultLimit = zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1;
+                uint256 snap = vm.snapshotState();
+                uint256 userInBefore = tokenIn.balanceOf(user);
+                uint256 userOutBefore = tokenOut.balanceOf(user);
+                uint256 poolInBefore = tokenIn.balanceOf(address(pool));
 
-        assertEq(token0.balanceOf(user), userBefore, "caller paid");
+                vm.expectCall(
+                    address(pool), _poolSwapCall(user, zeroForOne, SafeCast.toInt256(amounts[i]), defaultLimit)
+                );
+                uint256 received = _swap(user, _exactIn(address(tokenIn), address(tokenOut), amounts[i], 1e18));
+
+                uint256 paid = tokenIn.balanceOf(address(pool)) - poolInBefore;
+                assertEq(tokenIn.balanceOf(user), userInBefore - paid, "the caller paid more than the pool took");
+                assertLt(paid, amounts[i], "the amount was spent, not bounded by the pool");
+                assertGe(received, 1e18, "amountOutMinimum not honoured");
+                assertEq(tokenOut.balanceOf(user), userOutBefore + received);
+                (uint160 priceAfter,,,,,,) = pool.slot0();
+                assertEq(priceAfter, defaultLimit, "the swap did not run to the default limit");
+                vm.revertToState(snap);
+            }
+        }
+    }
+
+    /// @notice The exact-output side of the same boundary: the largest amounts reach the pool as a
+    /// negative amountSpecified (exact output). No pool holds that much, so without a price limit the
+    /// leg reverts (exact output fills completely) and the caller pays nothing; with a limit, the
+    /// partial fill costs exactly what the pool took.
+    function testExactOutputSingleLargestAmountsStayExactOutput() public {
+        _mintDefaultLiquidity();
+        uint256[3] memory amounts = [uint256(2 ** 127 - 1), 2 ** 127, type(uint128).max];
+        uint160 limit = TickMath.getSqrtRatioAtTick(-30);
+        uint256 userT0Before = token0.balanceOf(user);
+
+        for (uint256 i = 0; i < amounts.length; i++) {
+            _expectSwapRevert(
+                user,
+                _data(_exactOut(address(token0), address(token1), amounts[i], type(uint128).max)),
+                _proxyError(IProxyErrors.TooLittleReceived.selector)
+            );
+            assertEq(token0.balanceOf(user), userT0Before, "caller paid");
+
+            uint256 snap = vm.snapshotState();
+            uint256 poolT0Before = token0.balanceOf(address(pool));
+            vm.expectCall(address(pool), _poolSwapCall(user, true, -SafeCast.toInt256(amounts[i]), limit));
+            uint256 paid = _swap(
+                user, _limited(_exactOut(address(token0), address(token1), amounts[i], type(uint128).max), limit)
+            );
+
+            assertEq(paid, token0.balanceOf(address(pool)) - poolT0Before, "reported input is not what the pool took");
+            assertEq(token0.balanceOf(user), userT0Before - paid, "the caller paid more than the pool took");
+            (uint160 priceAfter,,,,,,) = pool.slot0();
+            assertEq(priceAfter, limit, "the partial fill did not stop at the limit");
+            vm.revertToState(snap);
+        }
+    }
+
+    /// @notice 2**128 needs 17 bytes: a leg written with one, as amount or as bound, no longer ends
+    /// where the format says it does, so the data is malformed and nothing runs
+    function testAmountsWiderThan128BitsCannotBeEncoded() public {
+        _mintDefaultLiquidity();
+        // V3, exact input, token0 -> token1, FEE
+        bytes memory head = bytes.concat(bytes1(0x00), bytes1(0x00), bytes1(0x01), bytes3(FEE));
+        bytes memory twoPow128 = bytes.concat(bytes1(0x01), bytes16(0));
+        uint256 userT0Before = token0.balanceOf(user);
+
+        vm.expectCall(address(pool), abi.encodeWithSelector(IUniswapV3PoolMinimal.swap.selector), 0);
+        _expectSwapRevert(
+            user, _rawData(bytes.concat(head, twoPow128, bytes16(0))), _proxyError(IProxyErrors.MalformedSwap.selector)
+        );
+        _expectSwapRevert(
+            user,
+            _rawData(bytes.concat(head, bytes16(SafeCast.toUint128(SWAP_AMOUNT)), twoPow128)),
+            _proxyError(IProxyErrors.MalformedSwap.selector)
+        );
+
+        assertEq(token0.balanceOf(user), userT0Before, "caller paid");
+    }
+
+    /// @notice The low end: an amount of 0 reaches the pool, which refuses it ("AS"), for exact input
+    /// and exact output alike; nothing moves
+    function testZeroAmountIsRefused() public {
+        _mintDefaultLiquidity();
+        uint256 userT0Before = token0.balanceOf(user);
+        uint256 userT1Before = token1.balanceOf(user);
+
+        _expectSwapRevert(user, _data(_exactIn(address(token0), address(token1), 0, 0)), _stringError("AS"));
+        _expectSwapRevert(
+            user, _data(_exactOut(address(token0), address(token1), 0, type(uint128).max)), _stringError("AS")
+        );
+
+        assertEq(token0.balanceOf(user), userT0Before);
+        assertEq(token1.balanceOf(user), userT1Before);
+    }
+
+    // ===========================================================================
+    // PRICE LIMITS
+    // ===========================================================================
+
+    /// @notice A limit reached before amountIn is spent: the leg passes it to the pool as given, the
+    /// pool stops exactly there, the caller pays only what the pool took, and the leg reports what
+    /// the caller received
+    function testExactInputSingleStopsAtItsPriceLimit() public {
+        _mintDefaultLiquidity();
+        uint160 limit = TickMath.getSqrtRatioAtTick(-30);
+        uint256 userT0Before = token0.balanceOf(user);
+        uint256 userT1Before = token1.balanceOf(user);
+        uint256 poolT0Before = token0.balanceOf(address(pool));
+        uint256 poolT1Before = token1.balanceOf(address(pool));
+
+        vm.expectCall(address(pool), _poolSwapCall(user, true, SafeCast.toInt256(SWAP_AMOUNT), limit));
+        uint256 amountOut = _swap(user, _limited(_exactIn(address(token0), address(token1), SWAP_AMOUNT, 0), limit));
+
+        (uint160 priceAfter,,,,,,) = pool.slot0();
+        assertEq(priceAfter, limit, "the swap did not stop at its limit");
+        uint256 paid = token0.balanceOf(address(pool)) - poolT0Before;
+        assertGt(paid, 0, "nothing was swapped");
+        assertLt(paid, SWAP_AMOUNT, "the limit did not bind");
+        assertEq(token0.balanceOf(user), userT0Before - paid, "the caller paid more than the pool took");
+        assertEq(amountOut, poolT1Before - token1.balanceOf(address(pool)), "reported output is not what the pool paid");
+        assertEq(token1.balanceOf(user), userT1Before + amountOut);
+    }
+
+    /// @notice A limit on the wrong side of the price, or at the pool's own extreme, reaches the pool as
+    /// given and the pool refuses it ("SPL"); nothing moves
+    function testPriceLimitOnTheWrongSideIsRefused() public {
+        _mintDefaultLiquidity();
+        (uint160 price,,,,,,) = pool.slot0();
+        uint256 userT0Before = token0.balanceOf(user);
+        uint256 userT1Before = token1.balanceOf(user);
+
+        // Selling token0 lowers the price: a limit above it, or MIN_SQRT_RATIO itself, is invalid
+        _expectSwapRevert(
+            user,
+            _data(_limited(_exactIn(address(token0), address(token1), SWAP_AMOUNT, 0), price + 1)),
+            _stringError("SPL")
+        );
+        _expectSwapRevert(
+            user,
+            _data(_limited(_exactIn(address(token0), address(token1), SWAP_AMOUNT, 0), TickMath.MIN_SQRT_RATIO)),
+            _stringError("SPL")
+        );
+        // Selling token1 raises it: a limit below it is invalid
+        _expectSwapRevert(
+            user,
+            _data(_limited(_exactIn(address(token1), address(token0), SWAP_AMOUNT, 0), price - 1)),
+            _stringError("SPL")
+        );
+
+        assertEq(token0.balanceOf(user), userT0Before);
+        assertEq(token1.balanceOf(user), userT1Before);
+    }
+
+    /// @notice With the PRICE_LIMIT flag the limit field cannot be 0 (no limit is written by leaving the
+    /// flag out): such data is malformed and runs nothing, while the same leg with a real limit runs
+    function testZeroPriceLimitIsMalformed() public {
+        _mintDefaultLiquidity();
+        // V3, exact input with a price limit, token0 -> token1, FEE, amountIn, amountOutMinimum 0
+        bytes memory head = bytes.concat(
+            bytes1(SwapFlags.PRICE_LIMIT),
+            bytes1(0x00),
+            bytes1(0x01),
+            bytes3(FEE),
+            bytes16(SafeCast.toUint128(SWAP_AMOUNT)),
+            bytes16(0)
+        );
+        uint160 limit = TickMath.getSqrtRatioAtTick(-30);
+
+        // The pool is called once: by the well-formed control below
+        vm.expectCall(address(pool), abi.encodeWithSelector(IUniswapV3PoolMinimal.swap.selector), 1);
+        _expectSwapRevert(
+            user, _rawData(bytes.concat(head, bytes20(0))), _proxyError(IProxyErrors.MalformedSwap.selector)
+        );
+        _swapData(user, _rawData(bytes.concat(head, bytes20(limit))));
+
+        (uint160 priceAfter,,,,,,) = pool.slot0();
+        assertEq(priceAfter, limit, "the control leg did not run with its limit");
     }
 
     // ===========================================================================
     // EXACT OUTPUT SINGLE -- happy paths
     // ===========================================================================
 
+    /// @notice Exact output token0 -> token1: the caller receives exactly amountOut and pays exactly
+    /// what the call reports
     function testExactOutputSingleZeroForOne() public {
         _mintDefaultLiquidity();
 
@@ -1312,23 +1902,12 @@ contract UniswapV3ProxyTest is Test {
         uint256 expectedIn = _probeExactOutput(address(token0), address(token1), desiredOut);
 
         uint256 userT0Before = token0.balanceOf(user);
+        uint256 userT1Before = token1.balanceOf(user);
         uint256 recipientT1Before = token1.balanceOf(recipient);
         uint256 poolT0Before = token0.balanceOf(address(pool));
         uint256 poolT1Before = token1.balanceOf(address(pool));
 
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountOut: desiredOut,
-            amountInMaximum: SWAP_AMOUNT,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        uint256 amountIn = proxy.exactOutputSingle(params);
+        uint256 amountIn = _swap(user, _exactOut(address(token0), address(token1), desiredOut, SWAP_AMOUNT));
 
         // Input matches probed expectation
         assertEq(amountIn, expectedIn, "amountIn should match probed value");
@@ -1337,8 +1916,9 @@ contract UniswapV3ProxyTest is Test {
         uint256 totalCost = amountIn - desiredOut;
         assertEq(totalCost, expectedIn - desiredOut, "total cost should match probed expectation");
 
-        // Recipient received exactly the desired output
-        assertEq(token1.balanceOf(recipient), recipientT1Before + desiredOut);
+        // The caller received exactly the desired output, the outsider nothing
+        assertEq(token1.balanceOf(user), userT1Before + desiredOut);
+        assertEq(token1.balanceOf(recipient), recipientT1Before, "an outsider received the output");
 
         // Exact balance accounting
         assertEq(token0.balanceOf(user), userT0Before - amountIn);
@@ -1346,6 +1926,7 @@ contract UniswapV3ProxyTest is Test {
         assertEq(token1.balanceOf(address(pool)), poolT1Before - desiredOut);
     }
 
+    /// @notice Exact output token1 -> token0: same exact accounting in the other direction
     function testExactOutputSingleOneForZero() public {
         _mintDefaultLiquidity();
 
@@ -1353,31 +1934,22 @@ contract UniswapV3ProxyTest is Test {
         uint256 expectedIn = _probeExactOutput(address(token1), address(token0), desiredOut);
 
         uint256 userT1Before = token1.balanceOf(user);
+        uint256 userT0Before = token0.balanceOf(user);
         uint256 recipientT0Before = token0.balanceOf(recipient);
         uint256 poolT0Before = token0.balanceOf(address(pool));
         uint256 poolT1Before = token1.balanceOf(address(pool));
 
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token1),
-            tokenOut: address(token0),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountOut: desiredOut,
-            amountInMaximum: SWAP_AMOUNT,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        uint256 amountIn = proxy.exactOutputSingle(params);
+        uint256 amountIn = _swap(user, _exactOut(address(token1), address(token0), desiredOut, SWAP_AMOUNT));
 
         assertEq(amountIn, expectedIn);
-        assertEq(token0.balanceOf(recipient), recipientT0Before + desiredOut);
+        assertEq(token0.balanceOf(user), userT0Before + desiredOut);
+        assertEq(token0.balanceOf(recipient), recipientT0Before, "an outsider received the output");
         assertEq(token1.balanceOf(user), userT1Before - amountIn);
         assertEq(token1.balanceOf(address(pool)), poolT1Before + amountIn);
         assertEq(token0.balanceOf(address(pool)), poolT0Before - desiredOut);
     }
 
+    /// @notice The caller is its own recipient (now the only possible one) for exact output too
     function testExactOutputSingleRecipientIsSelf() public {
         _mintDefaultLiquidity();
 
@@ -1386,202 +1958,137 @@ contract UniswapV3ProxyTest is Test {
         uint256 userT0Before = token0.balanceOf(user);
         uint256 userT1Before = token1.balanceOf(user);
 
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: user,
-            deadline: block.timestamp + 3600,
-            amountOut: desiredOut,
-            amountInMaximum: SWAP_AMOUNT,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        uint256 amountIn = proxy.exactOutputSingle(params);
+        uint256 amountIn = _swap(user, _exactOut(address(token0), address(token1), desiredOut, SWAP_AMOUNT));
 
         assertEq(amountIn, expectedIn);
         assertEq(token0.balanceOf(user), userT0Before - amountIn);
         assertEq(token1.balanceOf(user), userT1Before + desiredOut);
     }
 
+    /// @notice amountInMaximum set to exactly the required input passes
     function testExactOutputSingleMaximumInputExactlyMet() public {
         _mintDefaultLiquidity();
 
         uint256 desiredOut = 5e18;
         uint256 exactRequired = _probeExactOutput(address(token0), address(token1), desiredOut);
+        uint256 userT1Before = token1.balanceOf(user);
 
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountOut: desiredOut,
-            amountInMaximum: exactRequired, // exactly enough
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        uint256 amountIn = proxy.exactOutputSingle(params);
+        // exactly enough
+        uint256 amountIn = _swap(user, _exactOut(address(token0), address(token1), desiredOut, exactRequired));
 
         assertEq(amountIn, exactRequired, "amountIn should equal the exact required amount");
-        assertEq(token1.balanceOf(recipient), desiredOut);
+        assertEq(token1.balanceOf(user), userT1Before + desiredOut);
     }
 
     // ===========================================================================
     // EXACT OUTPUT SINGLE -- revert cases
     // ===========================================================================
 
+    /// @notice An exact-output call past its deadline reverts before anything runs
     function testExactOutputSingleRevertsOnExpiredDeadline() public {
         _mintDefaultLiquidity();
 
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp - 1,
-            amountOut: 5e18,
-            amountInMaximum: SWAP_AMOUNT,
-            sqrtPriceLimitX96: 0
-        });
+        bytes memory data = SwapCalldata.encode(
+            vm.getBlockTimestamp() - 1, _one(_exactOut(address(token0), address(token1), 5e18, SWAP_AMOUNT))
+        );
 
-        vm.prank(user);
-        vm.expectRevert(IProxyErrors.TransactionTooOld.selector);
-        proxy.exactOutputSingle(params);
+        vm.expectCall(address(pool), abi.encodeWithSelector(IUniswapV3PoolMinimal.swap.selector), 0);
+        _expectSwapRevert(user, data, _proxyError(IProxyErrors.TransactionTooOld.selector));
     }
 
+    /// @notice An impossibly small amountInMaximum reverts
     function testExactOutputSingleRevertsOnSlippageExceeded() public {
         _mintDefaultLiquidity();
 
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountOut: 5e18,
-            amountInMaximum: 1, // impossibly small
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        vm.expectRevert(IProxyErrors.TooMuchRequested.selector);
-        proxy.exactOutputSingle(params);
+        // impossibly small
+        _expectSwapRevert(
+            user,
+            _data(_exactOut(address(token0), address(token1), 5e18, 1)),
+            _proxyError(IProxyErrors.TooMuchRequested.selector)
+        );
     }
 
+    /// @notice amountInMaximum one wei below the required input reverts
     function testExactOutputSingleRevertsSlippageByOneWei() public {
         _mintDefaultLiquidity();
 
         uint256 desiredOut = 5e18;
         uint256 exactRequired = _probeExactOutput(address(token0), address(token1), desiredOut);
 
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountOut: desiredOut,
-            amountInMaximum: exactRequired - 1, // one wei below required -- must revert
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(user);
-        vm.expectRevert(IProxyErrors.TooMuchRequested.selector);
-        proxy.exactOutputSingle(params);
+        // one wei below required -- must revert
+        _expectSwapRevert(
+            user,
+            _data(_exactOut(address(token0), address(token1), desiredOut, exactRequired - 1)),
+            _proxyError(IProxyErrors.TooMuchRequested.selector)
+        );
     }
 
-    function testExactOutputSingleRevertsOnZeroRecipient() public {
+    /// @notice Replaces "zero recipient reverts" for exact output: appending a recipient makes the data
+    /// malformed, and the well-formed leg delivers exactly amountOut to the caller, nothing burnt
+    function testExactOutputSingleOutputCanOnlyGoToTheCaller() public {
         _mintDefaultLiquidity();
+        uint256 desiredOut = 5e18;
+        SwapCalldata.Leg memory leg = _exactOut(address(token0), address(token1), desiredOut, SWAP_AMOUNT);
 
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: address(0),
-            deadline: block.timestamp + 3600,
-            amountOut: 5e18,
-            amountInMaximum: SWAP_AMOUNT,
-            sqrtPriceLimitX96: 0
-        });
+        _expectSwapRevert(
+            user, bytes.concat(_data(leg), bytes20(address(0))), _proxyError(IProxyErrors.MalformedSwap.selector)
+        );
 
-        vm.prank(user);
-        vm.expectRevert();
-        proxy.exactOutputSingle(params);
+        uint256 supply = token1.totalSupply();
+        uint256 userT1Before = token1.balanceOf(user);
+        uint256 poolT1Before = token1.balanceOf(address(pool));
+        uint256 recipientT1Before = token1.balanceOf(recipient);
+
+        vm.expectCall(address(pool), abi.encodeWithSelector(IUniswapV3PoolMinimal.swap.selector, user));
+        _swap(user, leg);
+
+        assertEq(token1.balanceOf(user), userT1Before + desiredOut, "the caller did not get exactly amountOut");
+        assertEq(poolT1Before - token1.balanceOf(address(pool)), desiredOut, "the pool paid out something else");
+        assertEq(token1.totalSupply(), supply, "output was burnt");
+        assertEq(token1.balanceOf(recipient), recipientT1Before, "an outsider received the output");
+        _assertProxyHoldsNothing();
     }
 
+    /// @notice The caller (registered for the pool) has not approved the proxy
     function testExactOutputSingleRevertsWithoutApproval() public {
         _mintDefaultLiquidity();
 
         address noApproval = makeAddr("noApproval");
         token0.mint(noApproval, SWAP_AMOUNT);
+        _allow(noApproval, address(pool));
 
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountOut: 5e18,
-            amountInMaximum: SWAP_AMOUNT,
-            sqrtPriceLimitX96: 0
-        });
-
-        vm.prank(noApproval);
-        vm.expectRevert();
-        proxy.exactOutputSingle(params);
+        _expectSwapRevert(
+            noApproval, _data(_exactOut(address(token0), address(token1), 5e18, SWAP_AMOUNT)), _stringError("STF")
+        );
+        assertEq(token0.balanceOf(noApproval), SWAP_AMOUNT);
     }
 
+    /// @notice Exact output on a pair no pool exists for: PoolNotAllowed unregistered, NotAPool once
+    /// its CREATE2 key is registered; the pool address is never called and nothing moves
     function testExactOutputSingleRevertsOnNonExistentPool() public {
         MockERC20 rogue = new MockERC20();
+        address nowhere = _v3PoolAddress(address(token0), address(rogue), FEE);
+        assertEq(nowhere.code.length, 0, "a pool exists there: the test proves nothing");
 
-        ExactOutputSingleParams memory params = ExactOutputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(rogue),
-            fee: FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountOut: 5e18,
-            amountInMaximum: SWAP_AMOUNT,
-            sqrtPriceLimitX96: 0
-        });
+        bytes memory data = _data(_exactOut(address(token0), address(rogue), 5e18, SWAP_AMOUNT));
+        uint256 userT0Before = token0.balanceOf(user);
+        vm.expectCall(nowhere, abi.encodeWithSelector(IUniswapV3PoolMinimal.swap.selector), 0);
 
-        vm.prank(user);
-        vm.expectRevert();
-        proxy.exactOutputSingle(params);
-    }
+        _expectSwapRevert(user, data, _proxyError(IProxyErrors.PoolNotAllowed.selector));
 
-    function testExactOutputSingleRejectsAmountsThatWouldWrap() public {
-        _mintDefaultLiquidity();
-        uint256[3] memory amounts = [uint256(2 ** 255), 2 ** 255 + 1, type(uint256).max];
-        uint256 userBefore = token0.balanceOf(user);
+        _allow(user, nowhere);
+        _expectSwapRevert(user, data, _proxyError(IProxyErrors.NotAPool.selector));
 
-        for (uint256 i = 0; i < amounts.length; i++) {
-            vm.prank(user);
-            vm.expectRevert(abi.encodeWithSelector(SafeCast.SafeCastOverflowedUintToInt.selector, amounts[i]));
-            proxy.exactOutputSingle(
-                ExactOutputSingleParams({
-                    tokenIn: address(token0),
-                    tokenOut: address(token1),
-                    fee: FEE,
-                    recipient: recipient,
-                    deadline: block.timestamp + 3600,
-                    amountOut: amounts[i],
-                    amountInMaximum: type(uint256).max,
-                    sqrtPriceLimitX96: 0
-                })
-            );
-        }
-
-        assertEq(token0.balanceOf(user), userBefore, "caller paid");
+        assertEq(token0.balanceOf(user), userT0Before, "caller paid");
+        assertEq(rogue.balanceOf(user), 0, "caller received");
+        _assertProxyHoldsNothing();
     }
 
     // ===========================================================================
     // SWAP CONSISTENCY -- exactInput and exactOutput produce matching results
     // ===========================================================================
 
+    /// @notice Exact output of what an exact input yields costs that exact input, within a wei
     function testExactInputAndOutputConsistency() public {
         _mintDefaultLiquidity();
 
@@ -1603,7 +2110,8 @@ contract UniswapV3ProxyTest is Test {
 
     uint24 constant THIN_FEE = 500;
 
-    /// @dev A second, deliberately thin pool: 20 of each token around price 1, so it can run dry
+    /// @dev A second, deliberately thin pool: 20 of each token around price 1, so it can run dry.
+    /// Registered for the user like the main pool.
     function _createThinPool() internal returns (IUniswapV3PoolMinimal thin) {
         thin = IUniswapV3PoolMinimal(factory.createPool(address(token0), address(token1), THIN_FEE));
         thin.initialize(2 ** 96);
@@ -1616,6 +2124,8 @@ contract UniswapV3ProxyTest is Test {
         token1.approve(address(proxy), type(uint256).max);
         proxy.mint(_thinMintParams(-6000, 6000, 20e18, 20e18, lp));
         vm.stopPrank();
+
+        _allow(user, address(thin));
     }
 
     function _thinMintParams(
@@ -1640,7 +2150,7 @@ contract UniswapV3ProxyTest is Test {
             amount0Min: 0,
             amount1Min: 0,
             recipient: to,
-            deadline: block.timestamp + 3600
+            deadline: vm.getBlockTimestamp() + 3600
         });
     }
 
@@ -1652,86 +2162,84 @@ contract UniswapV3ProxyTest is Test {
     )
         internal
         view
-        returns (ExactOutputSingleParams memory)
+        returns (SwapCalldata.Leg memory leg)
     {
-        return ExactOutputSingleParams({
-            tokenIn: address(token0),
-            tokenOut: address(token1),
-            fee: THIN_FEE,
-            recipient: recipient,
-            deadline: block.timestamp + 3600,
-            amountOut: amountOut,
-            amountInMaximum: maxIn,
-            sqrtPriceLimitX96: limit
-        });
+        leg = _limited(_exactOut(address(token0), address(token1), amountOut, maxIn), limit);
+        leg.fee = THIN_FEE;
     }
 
+    /// @notice Without a price limit, an exact output the pool cannot fill reverts instead of
+    /// spending amountInMaximum on a partial fill
     function testExactOutputSingleRevertsOnShortFill() public {
         _createThinPool();
-        uint256 userBefore = token0.balanceOf(user);
-        uint256 recipientBefore = token1.balanceOf(recipient);
+        uint256 userT0Before = token0.balanceOf(user);
+        uint256 userT1Before = token1.balanceOf(user);
 
-        vm.prank(user);
-        vm.expectRevert(IProxyErrors.TooLittleReceived.selector);
-        proxy.exactOutputSingle(_thinExactOut(100e18, type(uint256).max, 0)); // pool holds ~20
+        // pool holds ~20
+        _expectSwapRevert(
+            user,
+            _data(_thinExactOut(100e18, type(uint128).max, 0)),
+            _proxyError(IProxyErrors.TooLittleReceived.selector)
+        );
 
-        assertEq(token0.balanceOf(user), userBefore, "caller paid for a partial fill");
-        assertEq(token1.balanceOf(recipient), recipientBefore, "a partial fill was delivered");
+        assertEq(token0.balanceOf(user), userT0Before, "caller paid for a partial fill");
+        assertEq(token1.balanceOf(user), userT1Before, "a partial fill was delivered");
     }
 
+    /// @notice An exact output with a price limit may fill partially, up to the limit, and is charged
+    /// exactly what it reports
     /// @dev With an explicit price limit the caller has bounded the price, so a partial fill is a
     /// legitimate outcome and still succeeds.
     function testExactOutputSingleWithPriceLimitMayFillPartially() public {
-        _createThinPool();
-        uint256 recipientBefore = token1.balanceOf(recipient);
+        IUniswapV3PoolMinimal thin = _createThinPool();
+        uint256 userT0Before = token0.balanceOf(user);
+        uint256 userT1Before = token1.balanceOf(user);
+        uint160 limit = TickMath.getSqrtRatioAtTick(-600);
 
-        vm.prank(user);
-        uint256 amountIn =
-            proxy.exactOutputSingle(_thinExactOut(100e18, type(uint256).max, TickMath.getSqrtRatioAtTick(-600)));
+        uint256 amountIn = _swap(user, _thinExactOut(100e18, type(uint128).max, limit));
 
-        uint256 delivered = token1.balanceOf(recipient) - recipientBefore;
+        uint256 delivered = token1.balanceOf(user) - userT1Before;
         assertGt(amountIn, 0, "nothing was paid");
+        assertEq(token0.balanceOf(user), userT0Before - amountIn, "the reported input is not what was paid");
         assertGt(delivered, 0, "nothing was delivered");
         assertLt(delivered, 100e18, "expected a partial fill up to the price limit");
+        (uint160 priceAfter,,,,,,) = thin.slot0();
+        assertEq(priceAfter, limit, "the partial fill did not stop at the limit");
     }
 
     /// @notice The audit's sandwich, end to end. The attacker buys out the honest liquidity and parks
     /// a tiny position at a price ~20x worse than fair. Before the fix the victim's "exactly 2, for at
     /// most 2.2" order filled 0.1 of the 2 against it for ~1.95 and reported success. Now it reverts.
     function testExactOutputSingleSandwichAgainstShortFillReverts() public {
-        _createThinPool();
+        IUniswapV3PoolMinimal thin = _createThinPool();
 
+        // The attacker is just another account that registered the pool for itself
         address attacker = makeAddr("attacker");
         token0.mint(attacker, 1000e18);
         token1.mint(attacker, 10e18);
+        _allow(attacker, address(thin));
         vm.startPrank(attacker);
-        token0.approve(address(proxy), type(uint256).max);
+        token0.approve(address(lobster), type(uint256).max);
         token1.approve(address(proxy), type(uint256).max);
-        // Front-run 1: buy out all honest token1, stopping just past the honest range
-        proxy.exactInputSingle(
-            ExactInputSingleParams({
-                tokenIn: address(token0),
-                tokenOut: address(token1),
-                fee: THIN_FEE,
-                recipient: attacker,
-                deadline: block.timestamp + 3600,
-                amountIn: 1000e18,
-                amountOutMinimum: 0,
-                sqrtPriceLimitX96: TickMath.getSqrtRatioAtTick(-6010)
-            })
-        );
-        // Front-run 2: a tiny token1-only position far below fair price
-        proxy.mint(_thinMintParams(-30000, -29400, 0, 0.1e18, attacker));
         vm.stopPrank();
 
-        uint256 victimBefore = token0.balanceOf(user);
-        uint256 recipientBefore = token1.balanceOf(recipient);
+        // Front-run 1: buy out all honest token1, stopping just past the honest range
+        SwapCalldata.Leg memory buyOut =
+            _limited(_exactIn(address(token0), address(token1), 1000e18, 0), TickMath.getSqrtRatioAtTick(-6010));
+        buyOut.fee = THIN_FEE;
+        _swap(attacker, buyOut);
+        // Front-run 2: a tiny token1-only position far below fair price
+        vm.prank(attacker);
+        proxy.mint(_thinMintParams(-30000, -29400, 0, 0.1e18, attacker));
 
-        vm.prank(user);
-        vm.expectRevert(IProxyErrors.TooLittleReceived.selector);
-        proxy.exactOutputSingle(_thinExactOut(2e18, 2.2e18, 0));
+        uint256 victimBefore = token0.balanceOf(user);
+        uint256 victimT1Before = token1.balanceOf(user);
+
+        _expectSwapRevert(
+            user, _data(_thinExactOut(2e18, 2.2e18, 0)), _proxyError(IProxyErrors.TooLittleReceived.selector)
+        );
 
         assertEq(token0.balanceOf(user), victimBefore, "victim paid");
-        assertEq(token1.balanceOf(recipient), recipientBefore, "victim received a partial fill");
+        assertEq(token1.balanceOf(user), victimT1Before, "victim received a partial fill");
     }
 }
