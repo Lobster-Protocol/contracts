@@ -103,9 +103,10 @@ abstract contract ForkBase is Test {
         assertEq(address(proxy.POOL_MANAGER()), POOL_MANAGER, "proxy wired to wrong pool manager");
 
         // A freshly deployed proxy can land on an address that already holds a balance on the
-        // forked chain, and `_refundExcessNative` would hand that to the first caller, breaking
-        // every ETH-delta assertion for reasons unrelated to the code. Zero it here; the
-        // stranded-ETH behaviour is tested deliberately in integration/V4Swap.t.sol.
+        // forked chain. The proxy neither spends nor refunds ETH that was not sent with the current
+        // call, so that balance would just stay there, breaking every "the proxy holds no ETH"
+        // assertion for reasons unrelated to the code. Zero it here; force-fed ETH is tested
+        // deliberately in integration/V4Swap.t.sol.
         vm.deal(address(proxy), 0);
 
         // The scenario every one of these tests is about: a user who has granted the proxy an

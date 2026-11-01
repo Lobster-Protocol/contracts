@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.27;
 
-import {IUniswapV3MintCallback, MintParams, MintCallbackData} from "./interfaces/uniswapV3/IUniswapV3MintCallback.sol";
+import {IUniswapV3MintCallback, MintParams} from "./interfaces/uniswapV3/IUniswapV3MintCallback.sol";
 import {IUniswapV3PoolMinimal} from "./interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {TransferHelper} from "./libraries/uniswapV3/TransferHelper.sol";
 import {PoolAddress} from "./libraries/uniswapV3/PoolAddress.sol";
@@ -18,7 +18,7 @@ import {UniswapV3ProxyBase} from "./base/UniswapV3ProxyBase.sol";
 abstract contract UniswapV3MintProxy is UniswapV3ProxyBase, IUniswapV3MintCallback {
     /// @notice Mints liquidity to a Uniswap V3 pool, owned by `params.recipient`. Body of {LobsterProxy-mint}, which has
     /// already checked the registry, the price band, the deadline and that the recipient is the caller.
-    /// The position is paid for by `msg.sender`.
+    /// The position is paid for by `msg.sender`, the account holding the lock ({Guards}).
     /// @dev READ BEFORE CHOOSING A RECIPIENT. Unlike Uniswap's NonfungiblePositionManager, no NFT
     /// is minted and nothing about the position is recorded here. It lives in the pool, keyed by
     /// (recipient, tickLower, tickUpper), and the pool lets only that owner act on it: `burn` and
@@ -56,28 +56,27 @@ abstract contract UniswapV3MintProxy is UniswapV3ProxyBase, IUniswapV3MintCallba
             );
         }
 
-        (amount0, amount1) = pool.mint(
-            params.recipient,
-            params.tickLower,
-            params.tickUpper,
-            liquidity,
-            abi.encode(MintCallbackData({poolKey: poolKey, payer: msg.sender}))
-        );
+        (amount0, amount1) =
+            pool.mint(params.recipient, params.tickLower, params.tickUpper, liquidity, abi.encode(poolKey));
 
         require(amount0 >= params.amount0Min && amount1 >= params.amount1Min, PriceSlippageCheck());
     }
 
+    /// @inheritdoc IUniswapV3MintCallback
+    /// @dev Honoured only from the pool of `data`'s key (CREATE2, `CallbackValidation`) while an entry
+    /// point is running, and paid by the account holding the lock: never by anyone named in `data`.
     function uniswapV3MintCallback(uint256 amount0Owed, uint256 amount1Owed, bytes calldata data) external override {
-        MintCallbackData memory decoded = abi.decode(data, (MintCallbackData));
+        PoolAddress.PoolKey memory poolKey = abi.decode(data, (PoolAddress.PoolKey));
 
         // Make sure caller is a contract deployed by the Uniswap V3 factory
-        CallbackValidation.verifyCallback(UNI_V3_FACTORY, decoded.poolKey);
+        CallbackValidation.verifyCallback(UNI_V3_FACTORY, poolKey);
+        address payer = _lockHolder();
 
         if (amount0Owed > 0) {
-            TransferHelper.safeTransferFrom(decoded.poolKey.token0, decoded.payer, msg.sender, amount0Owed);
+            TransferHelper.safeTransferFrom(poolKey.token0, payer, msg.sender, amount0Owed);
         }
         if (amount1Owed > 0) {
-            TransferHelper.safeTransferFrom(decoded.poolKey.token1, decoded.payer, msg.sender, amount1Owed);
+            TransferHelper.safeTransferFrom(poolKey.token1, payer, msg.sender, amount1Owed);
         }
     }
 }

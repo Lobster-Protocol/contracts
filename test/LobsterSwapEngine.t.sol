@@ -4,7 +4,7 @@ pragma solidity >=0.8.24;
 import {BatchSwapFixture} from "./helpers/BatchSwapFixture.sol";
 import {SwapCalldata} from "./helpers/SwapCalldata.sol";
 import {SwapFlags} from "../src/libraries/SwapFlags.sol";
-import {MintParams} from "../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
+import {MintParams, MintCallbackData} from "../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
 import {IUniswapV3FactoryMinimal} from "../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {
@@ -13,6 +13,7 @@ import {
     IPoolManagerMinimal
 } from "../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
 import {TickMath} from "../src/libraries/uniswapV3/TickMath.sol";
+import {PoolAddress} from "../src/libraries/uniswapV3/PoolAddress.sol";
 import {IProxyErrors} from "../src/interfaces/IProxyErrors.sol";
 
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
@@ -97,9 +98,11 @@ interface IProxyErrorsCallback {
 
 /// @notice Adversarial suite for the mechanisms the swap-engine rewrite introduced: the one-unlock
 /// hand-off of V3 outputs to the PoolManager (sync/settle/take), the memory ledger and its
-/// end-of-call zero check, the packed-calldata validation, native-ETH accounting, the callback
-/// guards and the transient lock. Built on the five-pool graph of {LobsterProxyGasTest}, plus a
-/// hostile token with a V3 and a V4 pool against token1 for the settle-hijack cases.
+/// end-of-call zero check, the packed-calldata validation, native-ETH accounting (msg.value is the
+/// only budget, force-fed ETH is inert), the callback guards (including callbacks delivered when no
+/// entry point is running) and the transient lock. Built on the five-pool graph of
+/// {LobsterProxyGasTest}, plus a hostile token with a V3 and a V4 pool against token1 for the
+/// settle-hijack cases.
 ///
 /// Route graph (five pools, both versions, native ETH in the middle):
 ///   token0 --V3--  token1 --V3--  tokenC
@@ -114,6 +117,12 @@ contract LobsterSwapEngineTest is BatchSwapFixture {
     uint8 constant E_V4_E1 = 3;
     uint8 constant E_V4_EC = 4;
     address constant ETH = address(0);
+
+    /// @dev {PoolManagerBase}'s tag of a swap unlock
+    bytes1 constant SWAP_TAG = 0x01;
+    /// @dev {UniswapSwapProxy}'s plan word bit (private there): this V3 leg's parked output goes to the
+    /// PoolManager. {test_forgedSwapUnlock_payloadIsTheProxysOwn} proves the value matches.
+    uint256 constant TO_MANAGER = 1 << 48;
 
     MockERC20 tokenC;
     ProxyPoolKey nativeKeyC; // ETH / tokenC, no hook
@@ -242,10 +251,52 @@ contract LobsterSwapEngineTest is BatchSwapFixture {
         assertEq(address(proxy).balance, 0, "proxy retained ETH");
     }
 
-    /// @dev `swap(encode(now, legs))` as a low-level call by `who`, so the caller sees the raw revert
+    /// @dev The proxy holds no token and exactly `eth` (what was force-fed to it)
+    function _assertProxyHoldsOnlyEth(uint256 eth) internal view {
+        assertEq(token0.balanceOf(address(proxy)), 0, "proxy retained token0");
+        assertEq(token1.balanceOf(address(proxy)), 0, "proxy retained token1");
+        assertEq(tokenC.balanceOf(address(proxy)), 0, "proxy retained tokenC");
+        assertEq(evil.balanceOf(address(proxy)), 0, "proxy retained evil");
+        assertEq(address(proxy).balance, eth, "the proxy's force-fed ETH was spent or refunded");
+    }
+
+    /// @dev The victim (the user: every pool registered, every token approved to the proxy), the
+    /// attacker, an outsider, the proxy and the PoolManager
+    function _everyone() internal view returns (address[] memory accounts) {
+        accounts = new address[](5);
+        accounts[0] = user;
+        accounts[1] = attacker;
+        accounts[2] = outsider;
+        accounts[3] = address(proxy);
+        accounts[4] = address(manager);
+    }
+
+    /// @dev Every asset the engine could move (token0, token1, tokenC, evil, ETH), for each account
+    function _balancesOf(address[] memory accounts) internal view returns (uint256[] memory b) {
+        b = new uint256[](5 * accounts.length);
+        for (uint256 i = 0; i < accounts.length; i++) {
+            address a = accounts[i];
+            b[5 * i] = token0.balanceOf(a);
+            b[5 * i + 1] = token1.balanceOf(a);
+            b[5 * i + 2] = tokenC.balanceOf(a);
+            b[5 * i + 3] = evil.balanceOf(a);
+            b[5 * i + 4] = a.balance;
+        }
+    }
+
+    function _assertBalancesEq(uint256[] memory a, uint256[] memory b, string memory ctx) internal pure {
+        assertEq(a.length, b.length, string.concat(ctx, ": balance lists differ"));
+        for (uint256 i = 0; i < a.length; i++) {
+            assertEq(a[i], b[i], string.concat(ctx, ": balance ", vm.toString(i), " moved"));
+        }
+    }
+
+    /// @dev `swap(encode(now, legs))` as a low-level call by `who`, so the caller sees the raw revert.
+    /// The deadline is read with vm.getBlockTimestamp(), so it holds across vm.revertToState.
     function _trySwap(address who, SwapCalldata.Leg[] memory legs) internal returns (bool ok, bytes memory ret) {
+        bytes memory data = _call(legs);
         vm.prank(who);
-        (ok, ret) = address(proxy).call(SwapCalldata.call(block.timestamp, legs));
+        (ok, ret) = address(proxy).call(data);
     }
 
     function _trySwapValue(
@@ -256,8 +307,9 @@ contract LobsterSwapEngineTest is BatchSwapFixture {
         internal
         returns (bool ok, bytes memory ret)
     {
+        bytes memory data = _call(legs);
         vm.prank(who);
-        (ok, ret) = address(proxy).call{value: value}(SwapCalldata.call(block.timestamp, legs));
+        (ok, ret) = address(proxy).call{value: value}(data);
     }
 
     function _selector(bytes memory ret) internal pure returns (bytes4 sel) {
@@ -859,7 +911,9 @@ contract LobsterSwapEngineTest is BatchSwapFixture {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // 7. Native ETH accounting (the entry point is payable).
+    // 7. Native ETH accounting (the entry point is payable). Native input is paid from msg.value only,
+    //    one budget shared by every leg of the call, and only what is left of it is refunded: ETH
+    //    force-fed to the proxy is neither spent nor refunded.
     // ---------------------------------------------------------------------------------------------
 
     /// @notice A native-input V4 leg spends exactly its input from msg.value and refunds the rest to
@@ -877,18 +931,119 @@ contract LobsterSwapEngineTest is BatchSwapFixture {
         _assertProxyEmpty();
     }
 
-    /// @notice ETH force-fed to the proxy (it has no receive, so this models a selfdestruct/coinbase
-    /// push) belongs to no one and is swept to the caller at the end of the next swap.
-    function test_native_forceFedEthSweptToCaller() public {
-        vm.deal(address(proxy), 3e18);
-        SwapCalldata.Leg memory leg = _v3In(address(token0), address(token1), 1e18, 0);
+    /// @dev The user's call of `legs` sending `value` reverts NotEnoughEthSent and moves nothing
+    function _assertNotEnoughEthSent(SwapCalldata.Leg[] memory legs, uint256 value, string memory ctx) internal {
+        uint256[16] memory before = _snapshot();
+        (bool ok, bytes memory ret) = _trySwapValue(user, legs, value);
+        assertFalse(ok, string.concat(ctx, ": the native input was paid"));
+        assertEq(
+            ret, abi.encodeWithSelector(IProxyErrors.NotEnoughEthSent.selector), string.concat(ctx, ": wrong error")
+        );
+        _assertSnapshotEq(_snapshot(), before, ctx);
+    }
+
+    /// @notice ETH force-fed to the proxy (it has no `receive`, so vm.deal models a selfdestruct or a
+    /// coinbase payment) belongs to no one and is inert. It never pays a native leg: an exact-input leg
+    /// sent no ETH or one wei less than its input, and an exact-output leg sent no ETH or one wei less
+    /// than it costs, revert NotEnoughEthSent while the proxy holds 50 times what they need. It is never
+    /// refunded: a caller gets back exactly its msg.value minus what its legs spent, a call that sent no
+    /// ETH gets none, and the proxy keeps the force-fed amount throughout. (Replaces
+    /// `test_native_forceFedEthSweptToCaller`: native input is now paid from msg.value only.)
+    function test_native_forceFedEthIsInert() public {
+        uint256 forceFed = 50e18;
+        vm.deal(address(proxy), forceFed);
+        SwapCalldata.Leg[] memory exactIn = _legs(_v4In(nativeKey, true, _u128(1e18), 0)); // ETH -> token1
+        SwapCalldata.Leg[] memory exactOut = _legs(_v4Out(nativeKey, true, _u128(1e18), type(uint128).max));
+
+        // What the exact-output leg costs at the current price, from a run that is then rewound
+        uint256 snap = vm.snapshotState();
+        (bool ok, bytes memory ret) = _trySwapValue(user, exactOut, 2e18);
+        assertTrue(ok, "pricing run reverted");
+        uint256 cost = abi.decode(ret, (uint256[]))[0];
+        assertTrue(vm.revertToState(snap), "pricing run not rewound");
+        assertGt(cost, 1e18, "an exact-output leg costs more than its output at a 1:1 price with a fee");
+
+        // Never spent: every wei of a native leg's input must come from msg.value
+        _assertNotEnoughEthSent(exactIn, 0, "exact input, no msg.value");
+        _assertNotEnoughEthSent(exactIn, 1e18 - 1, "exact input, one wei short");
+        _assertNotEnoughEthSent(exactOut, 0, "exact output, no msg.value");
+        _assertNotEnoughEthSent(exactOut, cost - 1, "exact output, one wei short");
+
+        // Never refunded: the caller gets back exactly what its legs left of its msg.value
+        uint256 ethBefore = user.balance;
+        (ok,) = _trySwapValue(user, exactOut, cost);
+        assertTrue(ok, "exact output sent exactly its cost reverted");
+        assertEq(user.balance, ethBefore - cost, "a call that spent all its msg.value got ETH back");
+        _assertProxyHoldsOnlyEth(forceFed);
+
+        ethBefore = user.balance;
+        (ok,) = _trySwapValue(user, exactIn, 3e18);
+        assertTrue(ok, "exact input sent spare msg.value reverted");
+        assertEq(user.balance, ethBefore - 1e18, "the caller got back other than its unspent msg.value");
+        _assertProxyHoldsOnlyEth(forceFed);
+
+        // The old sweep's own call, V3 only: sent no ETH, gets none; sent some, gets exactly that back
+        SwapCalldata.Leg[] memory v3Only = _legs(_v3In(address(token0), address(token1), 1e18, 0));
+        ethBefore = user.balance;
+        (ok,) = _trySwapValue(user, v3Only, 0);
+        assertTrue(ok, "V3-only call over a force-fed proxy reverted");
+        assertEq(user.balance, ethBefore, "a call that sent no ETH was paid the force-fed ETH");
+        (ok,) = _trySwapValue(user, v3Only, 1e18);
+        assertTrue(ok, "payable V3-only call over a force-fed proxy reverted");
+        assertEq(user.balance, ethBefore, "a V3-only call got back other than its msg.value");
+        _assertProxyHoldsOnlyEth(forceFed);
+    }
+
+    /// @notice ETH force-fed to the proxy cannot block a caller that cannot receive ETH (before exact
+    /// native accounting, one force-fed wei made every call it made revert "STE"): a call with no
+    /// msg.value sends it no ETH, nor does one whose msg.value is spent to the wei. Only change it is
+    /// really owed is sent, and the proxy keeps the force-fed wei.
+    function test_native_forceFedEthCannotBlockACallerThatRefusesEth() public {
+        address refuser = makeAddr("refuser");
+        vm.etch(refuser, hex"60006000fd"); // revert(0, 0) on any call, a plain ETH transfer included
+        token0.mint(refuser, 10e18);
+        vm.prank(refuser);
+        assertTrue(token0.approve(address(proxy), type(uint256).max));
+        _allow(refuser, proxy.v3Key(address(v3Pool)), SWAP);
+        _allow(refuser, proxy.v4Key(cleanKey), SWAP);
+        _allow(refuser, proxy.v4Key(nativeKey), SWAP);
+        vm.deal(refuser, 2e18);
+        vm.deal(address(proxy), 1); // the griefer's whole cost
+        SwapCalldata.Leg[] memory v3Only = _legs(_v3In(address(token0), address(token1), 1e18, 0));
+
+        // The premise: change the refuser is owed cannot be delivered to it
+        (bool ok, bytes memory ret) = _trySwapValue(refuser, v3Only, 1e18);
+        assertFalse(ok, "the refuser accepted its change: the test proves nothing");
+        assertEq(ret, abi.encodeWithSignature("Error(string)", "STE"), "change refused for the wrong reason");
+
+        (ok,) = _trySwapValue(refuser, v3Only, 0);
+        assertTrue(ok, "force-fed ETH blocked a V3-only call that sent no ETH");
+        (ok,) = _trySwapValue(refuser, _legs(_v4In(cleanKey, true, _u128(1e18), 0)), 0);
+        assertTrue(ok, "force-fed ETH blocked a V4 call that sent no ETH");
+        (ok,) = _trySwapValue(refuser, _legs(_v4In(nativeKey, true, _u128(1e18), 0)), 1e18);
+        assertTrue(ok, "force-fed ETH blocked a call that spent all its msg.value");
+
+        assertEq(refuser.balance, 1e18, "the refuser paid other than its native leg's input");
+        _assertProxyHoldsOnlyEth(1);
+    }
+
+    /// @notice ETH pushed into the proxy during a call, which only code the call itself runs can do
+    /// (here the input token's hook; a selfdestruct on chain), is not the caller's msg.value, so no leg
+    /// can spend it, but it is counted as change and refunded to that call's caller. ETH force-fed
+    /// between calls stays in the proxy.
+    function test_native_ethArrivingMidCall_isRefundedToThatCaller() public {
+        vm.deal(address(proxy), 2e18); // force-fed between calls
+        // Mid-call, the hook raises the proxy's balance by 1e18 (vm.deal sets a balance)
+        evil.arm(address(vm), abi.encodeCall(vm.deal, (address(proxy), 3e18)), false, true, false);
         uint256 ethBefore = user.balance;
 
-        (bool ok,) = _trySwapValue(user, _legs(leg), 0);
+        (bool ok,) = _trySwap(user, _legs(_v3In(address(evil), address(token1), 1e18, 0)));
 
-        assertTrue(ok, "swap over force-fed proxy reverted");
-        assertEq(user.balance - ethBefore, 3e18, "force-fed ETH was not swept to the caller");
-        _assertProxyEmpty();
+        assertTrue(ok, "swap reverted");
+        assertEq(evil.fires(), 1, "the hook never fired; the test proves nothing");
+        assertTrue(evil.attackSucceeded(), "the mid-call deposit did not happen");
+        assertEq(user.balance, ethBefore + 1e18, "ETH that arrived mid-call was not refunded to the caller");
+        _assertProxyHoldsOnlyEth(2e18);
     }
 
     /// @notice A V3-only call carrying msg.value spends none of it and refunds all of it.
@@ -930,6 +1085,160 @@ contract LobsterSwapEngineTest is BatchSwapFixture {
         assertFalse(fromManager, "proxy accepted a plain ETH transfer from the PoolManager");
 
         assertEq(address(proxy).balance, 0, "proxy retained force-sent ETH");
+    }
+
+    /// @notice Native-input legs share one budget, the call's msg.value. Three legs of 1e18 sent
+    /// 3e18 - 1, while the proxy holds 10e18 of force-fed ETH, revert NotEnoughEthSent: each leg alone fits
+    /// in msg.value and the proxy's balance covers all three, but the first two drew the budget down (two
+    /// settlements of exactly 1e18 ran, in the reverted frame) and the third found 1e18 - 1 left. Sent
+    /// their exact total, the same legs run and the caller pays exactly that.
+    function test_native_legsShareOneBudget_totalAboveMsgValueReverts() public {
+        vm.deal(address(proxy), 10e18);
+        SwapCalldata.Leg[] memory legs = _legs(
+            _v4In(nativeKey, true, _u128(1e18), 0), // ETH -> token1
+            _v4In(nativeKeyC, true, _u128(1e18), 0), // ETH -> tokenC
+            _v4In(nativeKey, true, _u128(1e18), 0) // ETH -> token1
+        );
+
+        // Two settlements of 1e18 in the short call, before its third leg runs out (counted in the
+        // reverted frame), then three in the funded one
+        vm.expectCall(address(manager), 1e18, abi.encodeWithSelector(IPoolManagerMinimal.settle.selector), 5);
+        _assertNotEnoughEthSent(legs, 3e18 - 1, "three legs of 1e18, one wei short in total");
+
+        uint256 ethBefore = user.balance;
+        (bool ok,) = _trySwapValue(user, legs, 3e18);
+        assertTrue(ok, "three legs sent exactly their total reverted");
+        assertEq(user.balance, ethBefore - 3e18, "the caller paid other than its legs' native input");
+        _assertProxyHoldsOnlyEth(10e18);
+    }
+
+    /// @notice Only the native legs the caller pays draw on its msg.value. In [V4 ETH->token1 1e18]
+    /// [V4 token1->ETH 1e18 PARK][V4 ETH->tokenC HELD][V4 ETH->tokenC 1e18], the HELD leg spends the ETH
+    /// the call parked: 2e18 - 1 reverts NotEnoughEthSent at the last leg, and 2e18 is exactly enough, with
+    /// no change. The 7e18 force-fed to the proxy is untouched either way.
+    function test_native_heldNativeLegDrawsNothingFromMsgValue() public {
+        vm.deal(address(proxy), 7e18);
+        SwapCalldata.Leg[] memory legs = new SwapCalldata.Leg[](4);
+        legs[0] = _v4In(nativeKey, true, _u128(1e18), 0); // ETH -> token1, from msg.value
+        legs[1] = _v4In(nativeKey, false, _u128(1e18), 0); // token1 -> ETH, parked as credit
+        legs[1].park = true;
+        legs[2] = _v4In(nativeKeyC, true, 0, 0); // ETH -> tokenC, from that credit
+        legs[2].held = true;
+        legs[3] = _v4In(nativeKeyC, true, _u128(1e18), 0); // ETH -> tokenC, from msg.value
+
+        _assertNotEnoughEthSent(legs, 2e18 - 1, "two paid native legs, one wei short in total");
+
+        uint256 ethBefore = user.balance;
+        (bool ok,) = _trySwapValue(user, legs, 2e18);
+        assertTrue(ok, "the paid native legs' exact total reverted");
+        assertEq(user.balance, ethBefore - 2e18, "the HELD native leg drew on msg.value, or change was sent");
+        _assertProxyHoldsOnlyEth(7e18);
+    }
+
+    /// @dev One native-input V4 leg paid from msg.value, ETH -> token1 or ETH -> tokenC, exact input or
+    /// exact output, of a random size
+    function _randomNativeLeg(uint256 seed, uint256 i) internal view returns (SwapCalldata.Leg memory) {
+        uint256 r = uint256(keccak256(abi.encode(seed, i, "native")));
+        ProxyPoolKey memory key = r & 1 == 0 ? nativeKey : nativeKeyC;
+        uint128 amount = _u128(bound(r >> 8, 1e6, 2e18));
+        return (r >> 1) & 1 == 0 ? _v4In(key, true, amount, 0) : _v4Out(key, true, amount, type(uint128).max);
+    }
+
+    /// @dev 1-4 native-input legs paid from msg.value, rotated among an optional ERC20 V3 leg that spends
+    /// no ETH, and optionally wrapped in a native credit round trip, [V4 token1->ETH PARK] then, later,
+    /// [V4 ETH->tokenC HELD]: a native leg paid from what the call parked, never from msg.value
+    function _randomNativeRoute(uint256 seed) internal view returns (SwapCalldata.Leg[] memory legs) {
+        uint256 natives = bound(seed, 1, 4);
+        bool withV3 = (seed >> 8) & 1 == 1;
+        bool withCredit = (seed >> 9) & 1 == 1;
+        uint256 middle = natives + (withV3 ? 1 : 0);
+        SwapCalldata.Leg[] memory mid = new SwapCalldata.Leg[](middle);
+        uint256 rotation = bound(seed >> 16, 0, middle - 1);
+        for (uint256 i = 0; i < middle; i++) {
+            mid[(i + rotation) % middle] =
+                i < natives ? _randomNativeLeg(seed, i) : _v3In(address(token0), address(token1), 1e18, 0);
+        }
+        if (!withCredit) return mid;
+
+        SwapCalldata.Leg memory sell = _v4In(nativeKey, false, _u128(1e18), 0); // token1 -> ETH, parked
+        sell.park = true;
+        SwapCalldata.Leg memory spend = _v4In(nativeKeyC, true, 0, 0); // ETH -> tokenC, from that credit
+        spend.held = true;
+        uint256 parkAt = bound(seed >> 32, 0, middle);
+        uint256 heldAt = bound(seed >> 48, parkAt + 1, middle + 1);
+        legs = new SwapCalldata.Leg[](middle + 2);
+        uint256 next = 0;
+        for (uint256 at = 0; at < middle + 2; at++) {
+            if (at == parkAt) legs[at] = sell;
+            else if (at == heldAt) legs[at] = spend;
+            else legs[at] = mid[next++];
+        }
+    }
+
+    /// @dev The native input `legs` paid from msg.value, given the call's returned amounts: an exact-input
+    /// leg pays its amount, an exact-output leg what it returned; HELD legs pay from parked funds
+    function _nativePaidFromValue(
+        SwapCalldata.Leg[] memory legs,
+        uint256[] memory amounts
+    )
+        internal
+        pure
+        returns (uint256 paid)
+    {
+        for (uint256 i = 0; i < legs.length; i++) {
+            if (legs[i].tokenIn != ETH || legs[i].held) continue;
+            paid += legs[i].exactOut ? amounts[i] : legs[i].amount;
+        }
+    }
+
+    /// @notice The native budget is the caller's own msg.value, whatever the proxy holds. Over random
+    /// native-input routes (mixed with an ERC20 leg and a HELD native leg paid from parked ETH), a random
+    /// msg.value and a random force-fed balance: the native input is measured where it lands, the
+    /// PoolManager, and matches what the legs report; a call sent at least that runs and costs the caller
+    /// exactly that; a call sent less reverts NotEnoughEthSent and costs nothing; and the proxy holds the
+    /// force-fed amount after every call.
+    function testFuzz_native_budgetIsTheCallersMsgValueOnly(uint256 seed, uint256 value, uint256 forceFed) public {
+        SwapCalldata.Leg[] memory legs = _randomNativeRoute(seed);
+        forceFed = bound(forceFed, 0, 1_000_000e18);
+        vm.deal(address(proxy), forceFed);
+        vm.deal(user, 1000e18);
+
+        // The route's native input, from a generously funded run that is then rewound
+        uint256 snap = vm.snapshotState();
+        uint256 userEth = user.balance;
+        uint256 managerEth = address(manager).balance;
+        (bool ok, bytes memory ret) = _trySwapValue(user, legs, 100e18);
+        assertTrue(ok, "a valid native route reverted");
+        assertGe(address(manager).balance, managerEth, "funded run: the PoolManager paid out ETH");
+        uint256 need = address(manager).balance - managerEth;
+        assertGt(need, 0, "the route has no native input: the test proves nothing");
+        assertEq(need, _nativePaidFromValue(legs, abi.decode(ret, (uint256[]))), "PoolManager got other ETH");
+        assertEq(user.balance, userEth - need, "funded run: the caller paid other than its native input");
+        _assertProxyHoldsOnlyEth(forceFed);
+        assertTrue(vm.revertToState(snap), "funded run not rewound");
+
+        // msg.value: one wei short, exactly enough, or anywhere up to twice the need
+        uint256 mode = (seed >> 128) % 4;
+        if (mode == 0) value = need - 1;
+        else if (mode == 1) value = need;
+        else value = bound(value, 0, 2 * need);
+
+        userEth = user.balance;
+        managerEth = address(manager).balance;
+        (ok, ret) = _trySwapValue(user, legs, value);
+        if (value >= need) {
+            assertTrue(ok, "msg.value covers the native input, yet the call reverted");
+            assertEq(user.balance, userEth - need, "the caller paid other than its native input");
+            assertEq(address(manager).balance, managerEth + need, "the PoolManager got other than the native input");
+        } else {
+            assertFalse(ok, "msg.value is short of the native input, yet the call ran");
+            assertEq(
+                ret, abi.encodeWithSelector(IProxyErrors.NotEnoughEthSent.selector), "short msg.value: wrong error"
+            );
+            assertEq(user.balance, userEth, "a reverted call cost the caller ETH");
+            assertEq(address(manager).balance, managerEth, "a reverted call paid the PoolManager");
+        }
+        _assertProxyHoldsOnlyEth(forceFed);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -1044,6 +1353,379 @@ contract LobsterSwapEngineTest is BatchSwapFixture {
             IProxyErrors.ReentrancyGuardReentrantCall.selector,
             "the lock did not hold for a zero-address caller"
         );
+        _assertProxyEmpty();
+    }
+
+    /// @notice The lock also counts as held for the checks that require a lock holder when the caller is
+    /// address(0): its V4 swap (the swap unlock requires the lock) and its mint (the mint callback pays
+    /// the lock holder) both run, and it pays exactly for each.
+    function test_lock_zeroSender_v4SwapAndMintStillRun() public {
+        token0.mint(address(0), 100e18);
+        token1.mint(address(0), 100e18);
+        vm.startPrank(address(0));
+        assertTrue(token0.approve(address(proxy), type(uint256).max));
+        assertTrue(token1.approve(address(proxy), type(uint256).max));
+        vm.stopPrank();
+        _allow(address(0), proxy.v4Key(cleanKey), SWAP);
+        _allow(address(0), proxy.v3Key(address(v3Pool)), MINT);
+
+        uint256 t0 = token0.balanceOf(address(0));
+        uint256 t1 = token1.balanceOf(address(0));
+        (bool ok, bytes memory ret) = _trySwap(address(0), _legs(_v4In(cleanKey, true, _u128(1e17), 0)));
+        assertTrue(ok, "a V4 swap by address(0) reverted");
+        uint256[] memory amounts = abi.decode(ret, (uint256[]));
+        assertGt(amounts[0], 0, "no V4 output");
+        assertEq(token0.balanceOf(address(0)), t0 - 1e17, "address(0) did not pay its V4 input");
+        assertEq(token1.balanceOf(address(0)), t1 + amounts[0], "address(0) did not get its V4 output");
+
+        MintParams memory params = MintParams({
+            token0: address(token0),
+            token1: address(token1),
+            fee: FEE,
+            tickLower: -TICK_RANGE,
+            tickUpper: TICK_RANGE,
+            amount0Desired: 1e18,
+            amount1Desired: 1e18,
+            amount0Min: 0,
+            amount1Min: 0,
+            recipient: address(0),
+            deadline: vm.getBlockTimestamp()
+        });
+        t0 = token0.balanceOf(address(0));
+        t1 = token1.balanceOf(address(0));
+        vm.prank(address(0));
+        (uint256 amount0, uint256 amount1) = proxy.mint(params);
+        assertGt(amount0 + amount1, 0, "nothing minted");
+        assertEq(token0.balanceOf(address(0)), t0 - amount0, "address(0) did not pay its mint's token0");
+        assertEq(token1.balanceOf(address(0)), t1 - amount1, "address(0) did not pay its mint's token1");
+        _assertProxyEmpty();
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // 10. Callbacks when no entry point is running. A swap unlock and a V3 mint callback act only for
+    //     the entry point holding the lock: delivered by the genuine PoolManager or pool when none is
+    //     running, they revert UnexpectedCallback before touching anything, whatever their data says.
+    // ---------------------------------------------------------------------------------------------
+
+    /// @dev Expects that nothing a swap or a mint does happens from here on (calls in reverted frames
+    /// count too): no V3 price read or swap, no PoolManager price read, swap, sync, settle or take, no
+    /// token transfer
+    function _expectNothingRuns() internal {
+        address[3] memory pools =
+            [address(v3Pool), address(_v3PoolFor(address(token1), address(tokenC))), address(evilV3Pool)];
+        for (uint256 i = 0; i < pools.length; i++) {
+            vm.expectCall(pools[i], abi.encodeWithSelector(IUniswapV3PoolMinimal.slot0.selector), 0);
+            vm.expectCall(pools[i], abi.encodeWithSelector(IUniswapV3PoolMinimal.swap.selector), 0);
+        }
+        bytes4[5] memory managerCalls = [
+            IPoolManagerMinimal.extsload.selector,
+            IPoolManagerMinimal.swap.selector,
+            IPoolManagerMinimal.sync.selector,
+            IPoolManagerMinimal.settle.selector,
+            IPoolManagerMinimal.take.selector
+        ];
+        for (uint256 i = 0; i < managerCalls.length; i++) {
+            vm.expectCall(address(manager), abi.encodeWithSelector(managerCalls[i]), 0);
+        }
+        address[4] memory tokens = [address(token0), address(token1), address(tokenC), address(evil)];
+        for (uint256 i = 0; i < tokens.length; i++) {
+            vm.expectCall(tokens[i], abi.encodeWithSelector(token0.transfer.selector), 0);
+            vm.expectCall(tokens[i], abi.encodeWithSelector(token0.transferFrom.selector), 0);
+        }
+    }
+
+    /// @dev A plan band word, as the registry returns it: minTick | maxTick << 24, 24 bits each
+    function _bandWord(int24 minTick, int24 maxTick) internal pure returns (uint256 band) {
+        assembly ("memory-safe") {
+            band := or(and(minTick, 0xffffff), shl(24, and(maxTick, 0xffffff)))
+        }
+    }
+
+    /// @dev The registry key of a leg's pool: the V3 pool's address, or the hookless V4 pool's PoolId
+    function _registryKey(SwapCalldata.Leg memory leg) internal view returns (bytes32) {
+        if (!leg.v4) return proxy.v3Key(address(_v3PoolFor(leg.tokenIn, leg.tokenOut)));
+        return proxy.v4Key(_toProxyKey(_v4CoreKey(_lo(leg.tokenIn, leg.tokenOut), _hi(leg.tokenIn, leg.tokenOut))));
+    }
+
+    /// @dev A swap unlock payload laid out as {UniswapSwapProxy} writes its own: SWAP_TAG | legs |
+    /// word 1 (msg.value << 1 | usesLedger) | per leg, the registry key and the band word | swap data.
+    /// The plan words come from `vault`'s registry, so they name its registered pools and its bands; bit
+    /// i of `toManager` sets TO_MANAGER on leg i.
+    function _swapUnlockPayload(
+        address vault,
+        SwapCalldata.Leg[] memory legs,
+        uint256 word1,
+        uint256 toManager
+    )
+        internal
+        view
+        returns (bytes memory)
+    {
+        bytes memory words;
+        for (uint256 i = 0; i < legs.length; i++) {
+            bytes32 key = _registryKey(legs[i]);
+            (int24 minTick, int24 maxTick) = proxy.priceBandOf(vault, key);
+            uint256 band = _bandWord(minTick, maxTick);
+            if ((toManager >> i) & 1 != 0) band |= TO_MANAGER;
+            words = bytes.concat(words, key, bytes32(band));
+        }
+        return bytes.concat(
+            SWAP_TAG, bytes32(legs.length), bytes32(word1), words, SwapCalldata.encode(vm.getBlockTimestamp(), legs)
+        );
+    }
+
+    /// @dev The victim's route, one of everything a swap unlock carries: [V3 token0->token1 PARK], its
+    /// output handed to the PoolManager (TO_MANAGER), [V4 token1->ETH HELD PARK] parking ETH,
+    /// [V4 ETH->tokenC HELD] spending it, and [V4 ETH->token1 0.5e18] paid from msg.value
+    function _victimRoute() internal view returns (SwapCalldata.Leg[] memory legs) {
+        legs = new SwapCalldata.Leg[](4);
+        legs[0] = _v3In(address(token0), address(token1), 1e18, 0);
+        legs[0].park = true;
+        legs[1] = _v4In(nativeKey, false, 0, 0); // token1 -> ETH
+        legs[1].held = true;
+        legs[1].park = true;
+        legs[2] = _v4In(nativeKeyC, true, 0, 0); // ETH -> tokenC
+        legs[2].held = true;
+        legs[3] = _v4In(nativeKey, true, _u128(0.5e18), 0); // ETH -> token1
+    }
+
+    /// @dev The victim's route as a swap unlock with `word1`, TO_MANAGER on its V3 leg as the proxy sets it
+    function _victimPayload(uint256 word1) internal view returns (bytes memory) {
+        return _swapUnlockPayload(user, _victimRoute(), word1, 1);
+    }
+
+    /// @dev Swap unlock payloads an attacker could craft, each naming the victim's registered pools and
+    /// bands in its plan words, while the proxy holds `forceFed` of force-fed ETH
+    function _forgedSwapPayloads(uint256 forceFed) internal view returns (bytes[] memory payloads) {
+        payloads = new bytes[](9);
+        // The tag alone, and a body of zero legs (which, before the lock check, ran and returned)
+        payloads[0] = bytes.concat(SWAP_TAG);
+        payloads[1] = bytes.concat(SWAP_TAG, new bytes(64));
+        // Byte for byte the victim's own call sending 1e18 ({test_forgedSwapUnlock_payloadIsTheProxysOwn}),
+        // then its legs budgeted with every wei the proxy holds, and with every bit of word 1 set
+        payloads[2] = _victimPayload((1e18 << 1) | 1);
+        payloads[3] = _victimPayload((forceFed << 1) | 1);
+        payloads[4] = _victimPayload(type(uint256).max);
+        // One native leg spending all the force-fed ETH, budgeted for exactly that, no ledger (without the
+        // lock check, delivered while a third party holds the PoolManager unlocked, it runs and spends it all)
+        payloads[5] = _swapUnlockPayload(user, _legs(_v4In(nativeKey, true, _u128(forceFed), 0)), forceFed << 1, 0);
+        // HELD from the first leg with nothing parked, and TO_MANAGER on every leg
+        SwapCalldata.Leg memory heldV3 = _v3In(address(token1), address(tokenC), 0, 0);
+        heldV3.held = true;
+        heldV3.park = true;
+        SwapCalldata.Leg memory heldV4 = _v4In(nativeKeyC, false, 0, 0); // tokenC -> ETH
+        heldV4.held = true;
+        payloads[6] = _swapUnlockPayload(user, _legs(heldV3, heldV4), (forceFed << 1) | 1, 3);
+        // A V3 exact-output leg on the victim's pool, its output marked for the PoolManager
+        payloads[7] =
+            _swapUnlockPayload(user, _legs(_v3Out(address(token0), address(token1), 1e18, type(uint256).max)), 0, 1);
+        // A legs word that would overflow every size the body computes
+        payloads[8] = bytes.concat(SWAP_TAG, bytes32(type(uint256).max), bytes32(type(uint256).max));
+    }
+
+    /// @dev Delivers `payload` to the proxy's `unlockCallback` as the PoolManager, outside any `swap`:
+    /// with the PoolManager locked (a direct call), or unlocked by a third party, this contract, which
+    /// forges the callback from inside its own unlock ({unlockCallback}), so V4 legs could trade
+    function _forgeSwapUnlock(bytes memory payload, bool managerUnlocked) internal returns (bool, bytes memory) {
+        if (managerUnlocked) return abi.decode(manager.unlock(payload), (bool, bytes));
+        bytes memory callData = abi.encodeCall(proxy.unlockCallback, (payload));
+        vm.prank(address(manager));
+        return address(proxy).call(callData);
+    }
+
+    /// @notice Not a test: the third party's own unlock callback for {_forgeSwapUnlock}. It delivers
+    /// `payload` to the proxy as the PoolManager would, and records the answer rather than bubbling it,
+    /// so that its own unlock closes.
+    function unlockCallback(bytes calldata payload) external returns (bytes memory) {
+        assertEq(msg.sender, address(manager), "unlockCallback: not the PoolManager");
+        bytes memory callData = abi.encodeCall(proxy.unlockCallback, (payload));
+        vm.prank(address(manager));
+        (bool ok, bytes memory ret) = address(proxy).call(callData);
+        return abi.encode(ok, ret);
+    }
+
+    /// @notice The PoolManager calls `unlockCallback` only on whoever called `unlock`, with that caller's
+    /// data, so on-chain only the proxy's own `swap` reaches the swap body. Even so, SWAP_TAG payloads the
+    /// PoolManager delivers outside any `swap` (vm.prank) are refused with UnexpectedCallback before they
+    /// touch anything, whatever they carry: the victim's registered pools and bands as plan words,
+    /// TO_MANAGER bits, HELD legs, native legs, a msg.value budget in word 1 up to every bit set while the
+    /// proxy holds force-fed ETH, sizes that would overflow; and whether the PoolManager is locked or
+    /// unlocked by a third party, where V4 legs could trade. No price is read, no pool, PoolManager or
+    /// token call is made, and no balance of the victim, the attacker, an outsider, the proxy or the
+    /// PoolManager moves.
+    function test_forgedSwapUnlock_outsideASwap_revertsUnexpectedCallback() public {
+        uint256 forceFed = 5e18;
+        vm.deal(address(proxy), forceFed);
+        bytes[] memory payloads = _forgedSwapPayloads(forceFed);
+        address[] memory everyone = _everyone();
+        uint256[] memory before = _balancesOf(everyone);
+
+        _expectNothingRuns();
+        for (uint256 i = 0; i < payloads.length; i++) {
+            for (uint256 m = 0; m < 2; m++) {
+                string memory ctx = string.concat(
+                    "forged payload ",
+                    vm.toString(i),
+                    m == 0 ? ", PoolManager locked" : ", PoolManager unlocked by a third party"
+                );
+                (bool ok, bytes memory ret) = _forgeSwapUnlock(payloads[i], m == 1);
+                assertFalse(ok, string.concat(ctx, ": the swap body ran"));
+                assertEq(
+                    ret,
+                    abi.encodeWithSelector(IProxyErrors.UnexpectedCallback.selector),
+                    string.concat(ctx, ": refused for the wrong reason")
+                );
+            }
+        }
+        _assertBalancesEq(_balancesOf(everyone), before, "forged swap unlock");
+    }
+
+    /// @notice The forged payloads are the real thing: for the victim's route the builder writes, byte for
+    /// byte, the payload the proxy itself passes to `unlock` and receives in `unlockCallback` when the
+    /// victim calls `swap` with 1e18 (plan words from its registry, TO_MANAGER on the V3 leg, word 1 =
+    /// 1e18 << 1 | 1), and inside that call, with the lock held, the same payload runs every leg.
+    function test_forgedSwapUnlock_payloadIsTheProxysOwn() public {
+        bytes memory payload = _victimPayload((1e18 << 1) | 1);
+        vm.expectCall(address(manager), abi.encodeCall(IPoolManagerMinimal.unlock, (payload)), 1);
+        vm.expectCall(address(proxy), abi.encodeCall(proxy.unlockCallback, (payload)), 1);
+        uint256 ethBefore = user.balance;
+        uint256 tokenCBefore = tokenC.balanceOf(user);
+
+        (bool ok,) = _trySwapValue(user, _victimRoute(), 1e18);
+
+        assertTrue(ok, "the victim's own route reverted");
+        assertEq(user.balance, ethBefore - 0.5e18, "the native leg's input or the change is wrong");
+        assertGt(tokenC.balanceOf(user), tokenCBefore, "the HELD native leg delivered nothing");
+        _assertProxyEmpty();
+    }
+
+    /// @notice Whatever word 1 (msg.value << 1 | usesLedger) and the TO_MANAGER bits of a forged swap
+    /// unlock say, however much ETH was force-fed to the proxy, and whether the PoolManager is locked or
+    /// not, the PoolManager delivering it outside a `swap` gets UnexpectedCallback: nothing runs, nothing
+    /// moves.
+    function testFuzz_forgedSwapUnlock_anyBudgetOrBits_reverts(
+        uint256 word1,
+        uint256 toManager,
+        uint256 forceFed,
+        bool managerUnlocked
+    )
+        public
+    {
+        forceFed = bound(forceFed, 0, 1_000_000e18);
+        vm.deal(address(proxy), forceFed);
+        bytes memory payload = _swapUnlockPayload(user, _victimRoute(), word1, toManager);
+        address[] memory everyone = _everyone();
+        uint256[] memory before = _balancesOf(everyone);
+
+        _expectNothingRuns();
+        (bool ok, bytes memory ret) = _forgeSwapUnlock(payload, managerUnlocked);
+
+        assertFalse(ok, "a forged swap unlock ran");
+        assertEq(ret, abi.encodeWithSelector(IProxyErrors.UnexpectedCallback.selector), "refused for the wrong reason");
+        _assertBalancesEq(_balancesOf(everyone), before, "forged swap unlock");
+    }
+
+    /// @notice A V3 pool calls `uniswapV3MintCallback` only on the caller of its `mint`, which only the
+    /// proxy's `mint` entry point makes. Even so, the genuine pool itself (vm.prank) calling it outside any
+    /// entry point is refused with UnexpectedCallback, whatever its data names as payer: the old
+    /// MintCallbackData naming the victim, who approved the proxy for every token, or the bare pool key
+    /// the proxy now passes; on each of the three V3 pools and for any amounts owed. No token moves; the
+    /// victim, the pools and everyone else are untouched. The same data from anyone else fails one step
+    /// earlier, at the pool check (CallbackValidation, empty revert data): the pool itself is refused by
+    /// the lock check alone.
+    function test_mintCallback_genuinePoolOutsideAnyCall_revertsUnexpectedCallback() public {
+        IUniswapV3PoolMinimal[3] memory pools = [v3Pool, _v3PoolFor(address(token1), address(tokenC)), evilV3Pool];
+        address[] memory accounts = new address[](8);
+        address[] memory everyone = _everyone();
+        for (uint256 i = 0; i < 5; i++) {
+            accounts[i] = everyone[i];
+        }
+        for (uint256 p = 0; p < 3; p++) {
+            accounts[5 + p] = address(pools[p]);
+        }
+        uint256[] memory before = _balancesOf(accounts);
+
+        _expectNothingRuns();
+        for (uint256 p = 0; p < 3; p++) {
+            PoolAddress.PoolKey memory key =
+                PoolAddress.PoolKey({token0: pools[p].token0(), token1: pools[p].token1(), fee: FEE});
+            bytes[2] memory data = [abi.encode(MintCallbackData({poolKey: key, payer: user})), abi.encode(key)];
+            for (uint256 d = 0; d < 2; d++) {
+                string memory ctx = string.concat("pool ", vm.toString(p), d == 0 ? ", payer named" : ", pool key");
+                for (uint256 k = 0; k < 4; k++) {
+                    uint256 owed0 = k == 0 || k == 2 ? 1e18 : 0;
+                    uint256 owed1 = k == 1 || k == 2 ? 1e18 : 0;
+                    bytes memory callData = abi.encodeCall(proxy.uniswapV3MintCallback, (owed0, owed1, data[d]));
+                    vm.prank(address(pools[p]));
+                    (bool ok, bytes memory ret) = address(proxy).call(callData);
+                    assertFalse(ok, string.concat(ctx, ": the genuine pool was paid outside any call"));
+                    assertEq(
+                        ret,
+                        abi.encodeWithSelector(IProxyErrors.UnexpectedCallback.selector),
+                        string.concat(ctx, ": refused for the wrong reason")
+                    );
+                }
+                bytes memory fromAttacker = abi.encodeCall(proxy.uniswapV3MintCallback, (1e18, 1e18, data[d]));
+                vm.prank(attacker);
+                (bool okAttacker, bytes memory retAttacker) = address(proxy).call(fromAttacker);
+                assertFalse(okAttacker, string.concat(ctx, ": a non-pool caller was paid"));
+                assertEq(retAttacker.length, 0, string.concat(ctx, ": a non-pool caller passed the pool check"));
+            }
+        }
+        _assertBalancesEq(_balancesOf(accounts), before, "mint callback outside any call");
+    }
+
+    /// @notice Not a test: the hostile token's callee in
+    /// {test_mintCallback_forgedMidCall_paidByTheLockHolderNotTheNamedPayer}. It delivers a mint callback
+    /// to the proxy as `pool` would (vm.prank), from wherever it is called.
+    function forgeMintCallbackFromPool(address pool, uint256 owed0, uint256 owed1, bytes calldata data) external {
+        vm.prank(pool);
+        proxy.uniswapV3MintCallback(owed0, owed1, data);
+    }
+
+    /// @notice A payer named in mint callback data never pays. A genuine-pool mint callback (vm.prank)
+    /// forged from inside the attacker's own `swap`, by a hostile input token's hook (recorded, not
+    /// bubbled: the proxy's transfer wrapper would mask it), names the victim as payer in the old
+    /// MintCallbackData. Whether the proxy honours it (paid by the lock holder, the attacker) or refuses
+    /// it (`UnexpectedCallback`), the victim, who approved the proxy for that token, pays nothing.
+    function test_mintCallback_forgedMidCall_paidByTheLockHolderNotTheNamedPayer() public {
+        // The attacker: registered on the evil/token1 V3 pool, holding evil and token0, both approved
+        evil.mint(attacker, 10e18);
+        token0.mint(attacker, 10e18);
+        vm.startPrank(attacker);
+        assertTrue(evil.approve(address(proxy), type(uint256).max));
+        assertTrue(token0.approve(address(proxy), type(uint256).max));
+        vm.stopPrank();
+        _allow(attacker, proxy.v3Key(address(evilV3Pool)), SWAP);
+
+        PoolAddress.PoolKey memory key =
+            PoolAddress.PoolKey({token0: address(token0), token1: address(token1), fee: FEE});
+        bytes memory namingVictim = abi.encode(MintCallbackData({poolKey: key, payer: user}));
+        bytes memory forge = abi.encodeCall(this.forgeMintCallbackFromPool, (address(v3Pool), 1e18, 0, namingVictim));
+        evil.arm(address(this), forge, false, true, false); // fires as the attacker pays its V3 pool
+        uint256 victimT0 = token0.balanceOf(user);
+        uint256 victimT1 = token1.balanceOf(user);
+        uint256 attackerT0 = token0.balanceOf(attacker);
+        uint256 poolT0 = token0.balanceOf(address(v3Pool));
+
+        (bool ok,) = _trySwap(attacker, _legs(_v3In(address(evil), address(token1), 1e18, 0)));
+
+        assertTrue(ok, "the attacker's swap did not complete");
+        assertEq(evil.fires(), 1, "the forged callback never fired; the test proves nothing");
+        assertEq(token0.balanceOf(user), victimT0, "the payer named in the callback data paid");
+        assertEq(token1.balanceOf(user), victimT1, "the victim's token1 moved");
+        if (evil.attackSucceeded()) {
+            assertEq(token0.balanceOf(attacker), attackerT0 - 1e18, "the lock holder did not pay the callback");
+            assertEq(token0.balanceOf(address(v3Pool)), poolT0 + 1e18, "the pool was not paid what it was owed");
+        } else {
+            assertEq(
+                _selector(evil.attackReturn()),
+                IProxyErrors.UnexpectedCallback.selector,
+                "the forged callback was refused for the wrong reason"
+            );
+            assertEq(token0.balanceOf(attacker), attackerT0, "a refused callback charged the attacker");
+            assertEq(token0.balanceOf(address(v3Pool)), poolT0, "a refused callback paid the pool");
+        }
         _assertProxyEmpty();
     }
 }

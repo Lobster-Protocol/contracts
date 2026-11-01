@@ -17,8 +17,9 @@ import {Deadline} from "./Deadline.sol";
 /// The lock lives in transient storage, so it adds no persistent state and costs a few hundred gas per
 /// call. It holds the entry point's `msg.sender` rather than a flag (with bit 160 set, so even
 /// address(0), as in some `eth_call` simulations, locks it): the callbacks, where `msg.sender` is a pool
-/// or the PoolManager, read the vault from it. It is written only by {nonReentrant}, so it can never name
-/// anyone but the account that called in.
+/// or the PoolManager, read the vault from it, and a callback that finds it unset belongs to no call of
+/// the proxy's ({_lockHolder}). It is written only by {nonReentrant}, so it can never name anyone but the
+/// account that called in.
 abstract contract Guards is Deadline {
     using TransientSlot for *;
 
@@ -38,6 +39,16 @@ abstract contract Guards is Deadline {
     function _lockedBy() internal view returns (address account) {
         assembly ("memory-safe") {
             account := and(tload(LOCK_SLOT), 0xffffffffffffffffffffffffffffffffffffffff)
+        }
+    }
+
+    /// @dev The account whose entry point is running. Reverts with `UnexpectedCallback` when none is: a
+    /// callback then answers no call the proxy made.
+    function _lockHolder() internal view returns (address account) {
+        uint256 lock = LOCK_SLOT.asUint256().tload();
+        require(lock != 0, UnexpectedCallback());
+        assembly ("memory-safe") {
+            account := and(lock, 0xffffffffffffffffffffffffffffffffffffffff)
         }
     }
 }

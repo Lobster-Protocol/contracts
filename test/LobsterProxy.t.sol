@@ -43,11 +43,14 @@ interface IProxyGetters {
 }
 
 /// @notice A token that, the first time it is transferred to `trigger`, makes each of a list of calls
-/// on the proxy, and records how each one ended.
+/// on the proxy, and records how each one ended and how much of the token the proxy held right then.
 contract ReenterOnTransfer is MockERC20 {
     address public proxy;
     address public trigger;
     bool public armed;
+    /// @notice The proxy's balance of this token when the hook fired, before the transfer firing it moved
+    /// anything
+    uint256 public proxyBalanceWhenFired;
     bytes[] internal _calls;
     bool[] internal _succeeded;
     bytes[] internal _returned;
@@ -75,6 +78,7 @@ contract ReenterOnTransfer is MockERC20 {
     function transfer(address to, uint256 amount) public override returns (bool) {
         if (armed && to == trigger) {
             armed = false;
+            proxyBalanceWhenFired = balanceOf[proxy];
             for (uint256 i = 0; i < _calls.length; i++) {
                 (bool ok, bytes memory ret) = proxy.call(_calls[i]);
                 _succeeded.push(ok);
@@ -413,6 +417,24 @@ contract LobsterProxyTest is Test {
         assertEq(tOut.balanceOf(who), outBefore + received, "the caller received a different amount");
     }
 
+    /// @dev The head of the `pool.swap` call a V3 leg makes: recipient, direction, amountSpecified (V3:
+    /// positive is exact input) and sqrtPriceLimitX96. A prefix, for `vm.expectCall`.
+    function _poolSwapCall(
+        address to,
+        bool zeroForOne,
+        int256 amountSpecified,
+        uint160 sqrtPriceLimitX96
+    )
+        internal
+        pure
+        returns (bytes memory)
+    {
+        return
+            abi.encodeWithSelector(
+                IUniswapV3PoolMinimal.swap.selector, to, zeroForOne, amountSpecified, sqrtPriceLimitX96
+            );
+    }
+
     /// @dev LobsterProxy's whole external ABI, as `forge inspect LobsterProxy methodIdentifiers` lists
     /// it: 20 functions, and no receive or fallback
     function _abi() internal pure returns (bytes4[20] memory) {
@@ -495,9 +517,11 @@ contract LobsterProxyTest is Test {
     }
 
     /// @notice A swap leg has no recipient field, so its output can only reach the caller: for every
-    /// kind of leg, alone or two in one call, the vault pays and receives exactly what is reported, and
-    /// none of the addresses the old recipient check refused (another vault, an outsider, address(0),
-    /// the proxy, a precompile) gains or loses anything
+    /// kind of V3 leg (exact input or output, either direction, either pool, with a price limit the
+    /// swap does not reach), alone, two in one call, or chained (a PARK leg whose output a later HELD
+    /// leg spends), the vault pays and receives exactly what is reported, and none of the addresses the
+    /// old recipient check refused (another vault, an outsider, address(0), the proxy, a precompile)
+    /// gains or loses anything. (V4 legs need a real PoolManager: see the V4 suites.)
     function test_swap_outputsAlwaysGoToTheCaller() public {
         _set(vaultA, _key(FEE), SWAP);
         _set(vaultA, _key(OTHER_FEE), SWAP);
@@ -517,12 +541,41 @@ contract LobsterProxyTest is Test {
             _swapAndCheckCaller(vaultA, legs[i]);
         }
 
+        // PRICE_LIMIT legs, exact input and exact output, with limits far past where 1e18 moves the
+        // price: the pool is given the limit and told to pay the caller, and each leg runs in full
+        SwapCalldata.Leg memory limitIn = _exactIn(true, FEE);
+        limitIn.sqrtPriceLimitX96 = TickMath.getSqrtRatioAtTick(-600);
+        SwapCalldata.Leg memory limitOut = _exactOut(false, OTHER_FEE, 1e18);
+        limitOut.sqrtPriceLimitX96 = TickMath.getSqrtRatioAtTick(600);
+        vm.expectCall(_pool(FEE), _poolSwapCall(vaultA, true, 1e18, limitIn.sqrtPriceLimitX96), 1);
+        _swapAndCheckCaller(vaultA, limitIn);
+        vm.expectCall(_pool(OTHER_FEE), _poolSwapCall(vaultA, false, -1e18, limitOut.sqrtPriceLimitX96), 1);
+        _swapAndCheckCaller(vaultA, limitOut);
+
         // two legs in one call: both outputs land at the caller
         uint256 t0 = token0.balanceOf(vaultA);
         uint256 t1 = token1.balanceOf(vaultA);
         uint256[] memory amounts = _swap(vaultA, _legs(_exactIn(true, FEE), _exactIn(false, OTHER_FEE)));
         assertEq(token0.balanceOf(vaultA), t0 - 1e18 + amounts[1], "two legs: token0");
         assertEq(token1.balanceOf(vaultA), t1 + amounts[0] - 1e18, "two legs: token1");
+
+        // a V3 -> V3 chain: the first leg parks its output, the HELD leg spends exactly all of it, and
+        // only the HELD leg's output reaches the caller
+        SwapCalldata.Leg memory park = _exactIn(true, FEE);
+        park.park = true;
+        t0 = token0.balanceOf(vaultA);
+        t1 = token1.balanceOf(vaultA);
+        uint256 feePoolT1 = token1.balanceOf(_pool(FEE));
+        uint256 otherPoolT1 = token1.balanceOf(_pool(OTHER_FEE));
+        vm.expectCall(_pool(OTHER_FEE), abi.encodeWithSelector(IUniswapV3PoolMinimal.swap.selector, vaultA, false), 1);
+        amounts = _swap(vaultA, _legs(park, _held(_exactIn(false, OTHER_FEE))));
+        assertGt(amounts[0], 0, "chain: nothing was parked; test proves nothing");
+        assertEq(token0.balanceOf(vaultA), t0 - 1e18 + amounts[1], "chain: token0");
+        assertEq(token1.balanceOf(vaultA), t1, "chain: the parked output reached the caller");
+        assertEq(token1.balanceOf(_pool(FEE)), feePoolT1 - amounts[0], "chain: the first leg paid out another amount");
+        assertEq(
+            token1.balanceOf(_pool(OTHER_FEE)), otherPoolT1 + amounts[0], "chain: the HELD leg spent another amount"
+        );
 
         for (uint256 i = 0; i < others.length; i++) {
             assertEq(token0.balanceOf(others[i]), held[i][0], string.concat("token0 of other ", vm.toString(i)));
@@ -691,13 +744,27 @@ contract LobsterProxyTest is Test {
 
     /// @notice Random add / update / remove sequences, including the same pool twice in one call:
     /// `poolsOf` and `permissionsOf` must always match a simple model, with no duplicates and no
-    /// zero entries, and vault B must never be affected.
+    /// zero entries; every key keeps its own price band throughout, a removed key included, and so
+    /// does the key a removal moves in the listing (swap-and-pop rewrites that other key's entry); and
+    /// vault B, listing and bands, must never be affected.
     function testFuzz_poolsOf_staysConsistent(uint256 seed, uint256 rounds) public {
         // Two real V3 keys, an arbitrary V3-shaped key, and two V4-shaped keys. Keys are opaque to the
         // registry, so every key may get any combination of permissions.
         bytes32[5] memory candidates =
             [_key(FEE), _key(OTHER_FEE), bytes32(uint256(0x1111)), keccak256("v4 pool a"), keccak256("v4 pool b")];
+        // A distinct band per key, so a band cleared, or copied from another key, is caught
+        int24[2][5] memory bands = [
+            [int24(-10), int24(10)],
+            [int24(-20), int24(20)],
+            [int24(-30), int24(30)],
+            [int24(-40), int24(40)],
+            [int24(-50), int24(50)]
+        ];
+        for (uint256 c = 0; c < 5; c++) {
+            _bandOn(vaultA, candidates[c], bands[c][0], bands[c][1]);
+        }
         uint8[5] memory model;
+        _assertRegistryMatches(candidates, model, bands);
 
         uint256 n = bound(rounds, 1, 12);
         for (uint256 r = 0; r < n; r++) {
@@ -713,18 +780,35 @@ contract LobsterProxyTest is Test {
             }
             vm.prank(vaultA);
             lobster.setPools(pools, perms);
-            _assertRegistryMatches(candidates, model);
+            _assertRegistryMatches(candidates, model, bands);
         }
 
         (bytes32[] memory others,) = lobster.poolsOf(vaultB);
         assertEq(others.length, 0, "vault B was affected");
+        // vault B's bands on the two real pools, as setUp set them
+        for (uint256 c = 0; c < 2; c++) {
+            (int24 lo, int24 hi) = lobster.priceBandOf(vaultB, candidates[c]);
+            assertEq(lo, TickMath.MIN_TICK, "vault B's minTick was affected");
+            assertEq(hi, TickMath.MAX_TICK, "vault B's maxTick was affected");
+        }
     }
 
-    function _assertRegistryMatches(bytes32[5] memory candidates, uint8[5] memory model) internal view {
+    /// @dev Vault A's registry matches the model, and each candidate still has its own band
+    function _assertRegistryMatches(
+        bytes32[5] memory candidates,
+        uint8[5] memory model,
+        int24[2][5] memory bands
+    )
+        internal
+        view
+    {
         (bytes32[] memory listed, uint8[] memory perms) = lobster.poolsOf(vaultA);
         uint256 expected;
         for (uint256 c = 0; c < 5; c++) {
             assertEq(lobster.permissionsOf(vaultA, candidates[c]), model[c], "permissionsOf");
+            (int24 lo, int24 hi) = lobster.priceBandOf(vaultA, candidates[c]);
+            assertEq(lo, bands[c][0], string.concat("minTick of key ", vm.toString(c)));
+            assertEq(hi, bands[c][1], string.concat("maxTick of key ", vm.toString(c)));
             if (model[c] != 0) expected++;
         }
         assertEq(listed.length, expected, "poolsOf length");
@@ -1259,7 +1343,9 @@ contract LobsterProxyTest is Test {
 
     /// @notice An exact-output leg of a multi-leg call is checked like a single swap: refused on a pool
     /// the vault did not register; once registered, the call runs, its exact output lands at the vault
-    /// (a leg cannot name anyone else; vault B gets nothing) and the call reports the amount it paid
+    /// (a leg cannot name anyone else; vault B gets nothing) and the call reports the amount it paid.
+    /// Each leg has its own pool, so each is checked on its own: the exact-output leg's pool pays out
+    /// exactly amountOut and is paid exactly the reported input, the other pool exactly its own leg.
     function test_batch_exactOutputLegIsChecked() public {
         _set(vaultA, _key(FEE), SWAP);
         SwapCalldata.Leg[] memory legs = _legs(_exactIn(true, FEE), _exactOut(true, OTHER_FEE, 1e18));
@@ -1272,26 +1358,61 @@ contract LobsterProxyTest is Test {
         uint256 before0 = token0.balanceOf(vaultA);
         uint256 before1 = token1.balanceOf(vaultA);
         uint256[4] memory b = _balances(vaultB);
+        uint256[2] memory exactInPool = [token0.balanceOf(_pool(FEE)), token1.balanceOf(_pool(FEE))];
+        uint256[2] memory exactOutPool = [token0.balanceOf(_pool(OTHER_FEE)), token1.balanceOf(_pool(OTHER_FEE))];
         uint256[] memory amounts = _swap(vaultA, legs);
         assertEq(amounts.length, 2, "one amount per leg");
         assertEq(token1.balanceOf(vaultA), before1 + amounts[0] + 1e18, "vault did not receive exactly amountOut");
         assertEq(token0.balanceOf(vaultA), before0 - 1e18 - amounts[1], "vault paid a different amount than reported");
         assertGt(amounts[1], 1e18, "the call did not report the amount paid");
+        assertEq(token1.balanceOf(_pool(OTHER_FEE)), exactOutPool[1] - 1e18, "exact-output leg: not exactly amountOut");
+        assertEq(
+            token0.balanceOf(_pool(OTHER_FEE)), exactOutPool[0] + amounts[1], "exact-output leg: not the reported input"
+        );
+        assertEq(token0.balanceOf(_pool(FEE)), exactInPool[0] + 1e18, "exact-input leg: not exactly amountIn");
+        assertEq(token1.balanceOf(_pool(FEE)), exactInPool[1] - amounts[0], "exact-input leg: not the reported output");
         assertEq(token0.balanceOf(vaultB), b[0], "vault B was paid");
         assertEq(token1.balanceOf(vaultB), b[1], "vault B was paid");
         _assertProxyHoldsNothing();
+    }
+
+    /// @dev A swap unlock written the way `swap` writes one ({UniswapSwapProxy-_unlockPayload}): SWAP_TAG |
+    /// legs | msg.value << 1 | usesLedger | per leg, the pool's registry key and the caller's band word
+    /// for it (minTick | maxTick << 24, 24 bits each) | the call's data. Here one exact-input leg on the
+    /// FEE pool, with `vault`'s band for it, no ETH and nothing parked: with the lock held, the swap
+    /// body would run that leg.
+    function _swapUnlockPayload(address vault) internal view returns (bytes memory) {
+        (int24 minTick, int24 maxTick) = lobster.priceBandOf(vault, _key(FEE));
+        uint256 band =
+            SafeCast.toUint256(int256(minTick) & 0xffffff) | (SafeCast.toUint256(int256(maxTick) & 0xffffff) << 24);
+        return bytes.concat(
+            bytes1(0x01),
+            abi.encode(uint256(1), uint256(0), _key(FEE), band),
+            SwapCalldata.encode(block.timestamp, _legs(_exactIn(true, FEE)))
+        );
     }
 
     /// @notice The callbacks are the only fund-moving functions outside the lock, and none acts for
     /// anyone the proxy is not serving: the V3 swap callback is honoured only from the pool the proxy is
     /// calling at that moment, whatever mode its data names, so neither an attacker nor the genuine pool
     /// outside a swap can make it pay (the payer is the lock holder, never named in calldata); the mint
-    /// callback only from the genuine pool; the unlock callback only from the PoolManager, whatever the
-    /// tag; and the Roles condition `check` is a view. Vault A, with standing approvals, loses nothing.
+    /// callback only from the genuine pool and only while an entry point runs, for the lock holder, so
+    /// outside one even the genuine pool is refused, whatever payer its data names; the unlock callback
+    /// only from the PoolManager, whatever the tag, and from the PoolManager only for an unlock an entry
+    /// point opened: outside any call it refuses a swap unlock, even a well-formed one for the pool vault
+    /// A registered, with vault A's band, and a liquidity unlock and an unknown tag too; and the Roles
+    /// condition `check` is a view. Nothing runs: no pool or PoolManager is called and no token moves,
+    /// not even in a reverted frame. Vault A, with standing approvals, loses nothing.
     function test_callbacksCannotBeForged() public {
         _set(vaultA, _key(FEE), BOTH);
         address attacker = makeAddr("attacker");
         uint256[4] memory before = _balances(vaultA);
+        vm.expectCall(_pool(FEE), "", 0);
+        vm.expectCall(poolManager, "", 0);
+        vm.expectCall(address(token0), abi.encodeWithSelector(IERC20.transferFrom.selector), 0);
+        vm.expectCall(address(token1), abi.encodeWithSelector(IERC20.transferFrom.selector), 0);
+        vm.expectCall(address(token0), abi.encodeWithSelector(IERC20.transfer.selector), 0);
+        vm.expectCall(address(token1), abi.encodeWithSelector(IERC20.transfer.selector), 0);
 
         // uniswapV3SwapCallback data: tokenIn | mode | creditIn
         bytes[3] memory modes = [
@@ -1308,27 +1429,26 @@ contract LobsterProxyTest is Test {
             }
         }
 
-        // uniswapV3MintCallback naming vault A as payer: CREATE2-verified, refused by its bare require
+        // uniswapV3MintCallback, its data naming as payer (the old layout, MintCallbackData) vault A,
+        // which holds both tokens and approved the proxy. From an attacker: refused by the CREATE2
+        // check, a bare require.
+        PoolAddress.PoolKey memory poolKey = PoolAddress.getPoolKey(address(token0), address(token1), FEE);
+        bytes memory payerVaultA = abi.encode(MintCallbackData({poolKey: poolKey, payer: vaultA}));
         vm.prank(attacker);
-        (bool ok, bytes memory ret) = address(lobster)
-            .call(
-                abi.encodeCall(
-                    UniswapV3MintProxy.uniswapV3MintCallback,
-                    (
-                        1e18,
-                        1e18,
-                        abi.encode(
-                            MintCallbackData({
-                                poolKey: PoolAddress.getPoolKey(address(token0), address(token1), FEE), payer: vaultA
-                            })
-                        )
-                    )
-                )
-            );
+        (bool ok, bytes memory ret) =
+            address(lobster).call(abi.encodeCall(UniswapV3MintProxy.uniswapV3MintCallback, (1e18, 1e18, payerVaultA)));
         assertFalse(ok, "a forged mint callback succeeded");
         assertEq(ret.length, 0, "a forged mint callback failed for an unexpected reason");
+        // From the genuine pool, which passes that check, outside any call: no entry point holds the
+        // lock, so there is no one to charge, with that data or with the data `mint` passes (the key)
+        bytes[2] memory mintData = [payerVaultA, abi.encode(poolKey)];
+        for (uint256 i = 0; i < mintData.length; i++) {
+            vm.prank(_pool(FEE));
+            vm.expectRevert(IProxyErrors.UnexpectedCallback.selector);
+            lobster.uniswapV3MintCallback(1e18, 1e18, mintData[i]);
+        }
 
-        // unlockCallback: swap tag, liquidity tag, unknown tag
+        // unlockCallback: swap tag, liquidity tag, unknown tag, from anyone but the PoolManager
         bytes[3] memory unlocks = [
             bytes.concat(bytes1(0x01), new bytes(64)),
             bytes.concat(bytes1(0x02), abi.encode(new V4LiquidityOp[](0))),
@@ -1338,6 +1458,21 @@ contract LobsterProxyTest is Test {
             vm.prank(attacker);
             vm.expectRevert(IProxyErrors.NotPoolManager.selector);
             lobster.unlockCallback(unlocks[i]);
+        }
+        // From the PoolManager itself outside any call, i.e. for an unlock the proxy did not open: a swap
+        // unlock is refused before its payload is read (the well-formed one too), a liquidity unlock finds
+        // no operation in progress, an unknown tag is refused
+        bytes[4] memory managerUnlocks = [unlocks[0], _swapUnlockPayload(vaultA), unlocks[1], unlocks[2]];
+        bytes4[4] memory refusals = [
+            IProxyErrors.UnexpectedCallback.selector,
+            IProxyErrors.UnexpectedCallback.selector,
+            IProxyErrors.NoLiquidityOperation.selector,
+            IProxyErrors.UnexpectedCallback.selector
+        ];
+        for (uint256 i = 0; i < managerUnlocks.length; i++) {
+            vm.prank(poolManager);
+            vm.expectRevert(refusals[i]);
+            lobster.unlockCallback(managerUnlocks[i]);
         }
 
         // check: a view, which only ever answers a Roles modifier; to anyone else it says no
@@ -1475,22 +1610,27 @@ contract LobsterProxyTest is Test {
     }
 
     /// @notice The lock is what guards parked funds: while the proxy holds a V3 output parked for a
-    /// later leg, the token delivering it can reach no entry point (in particular no `swap` whose HELD
+    /// later leg, the token holding it can reach no entry point (in particular no `swap` whose HELD
     /// leg would spend that output) and can forge no callback; the call then completes and spends
-    /// exactly what it parked
+    /// exactly what it parked. The token's hook fires inside the HELD leg's callback, as the proxy pays
+    /// the pool with the output it parked, and records that the proxy holds exactly that output then.
     function test_reentrancy_parkedFundsAreLockedMidCall() public {
         ReenterOnTransfer evil = _evilPool();
+        address evilPool = _poolOf(address(token0), address(evil), FEE);
         (bytes[] memory calls, bytes[] memory reverts) = _reentryAttempts(address(evil));
-        evil.arm(address(lobster), address(lobster), calls); // fires when the pool parks EVIL in the proxy
+        evil.arm(address(lobster), evilPool, calls); // fires when the proxy pays the pool the EVIL it parked
 
         SwapCalldata.Leg memory park = _v3(address(token0), address(evil), FEE, false, 1e18, 0);
         park.park = true;
         SwapCalldata.Leg memory spend = _held(_v3(address(evil), address(token0), FEE, false, 0, 0));
         uint256 t0 = token0.balanceOf(vaultA);
+        uint256 poolEvil = evil.balanceOf(evilPool);
         uint256[] memory amounts = _swap(vaultA, _legs(park, spend));
 
         _assertEveryAttemptFailed(evil, reverts);
         assertGt(amounts[0], 0, "nothing was parked; test proves nothing");
+        assertEq(evil.proxyBalanceWhenFired(), amounts[0], "the hook fired while nothing was parked; proves nothing");
+        assertEq(evil.balanceOf(evilPool), poolEvil, "the HELD leg did not spend exactly the parked output");
         assertEq(token0.balanceOf(vaultA), t0 - 1e18 + amounts[1], "the vault did not get the round trip");
         assertEq(evil.balanceOf(vaultA), 0, "the parked output reached the vault");
         assertEq(evil.balanceOf(address(lobster)), 0, "proxy kept the parked output");
@@ -1704,21 +1844,24 @@ contract LobsterProxyTest is Test {
         assertLe(_tick(FEE), tick + 100);
     }
 
-    /// @notice Both band edges are inclusive for swaps, as for mint, at positive and at negative ticks
-    /// (the band travels sign-extended through the call's plan): a swap starting and ending exactly on
-    /// an edge goes through, a band one tick away from the price is refused
+    /// @notice Both band edges are inclusive for swaps, as for mint, at tick 0, at a negative and at a
+    /// positive tick (the band travels sign-extended through the call's plan): a swap starting and
+    /// ending exactly on an edge goes through, a band one tick away from the price is refused
     function test_swap_bandEdgesAreInclusive() public {
         _set(vaultA, _key(FEE), SWAP);
         _set(vaultB, _key(FEE), SWAP);
         // token1 -> token0, small enough that the price rises without leaving its tick
         bytes memory tiny = SwapCalldata.encode(block.timestamp, _legs(_v3Leg(false, FEE, false, 1e9, 0)));
 
-        for (uint256 round = 0; round < 2; round++) {
+        for (uint256 round = 0; round < 3; round++) {
             if (round == 1) {
                 _swap(vaultB, _legs(_v3Leg(true, FEE, false, 200e18, 0))); // to a negative tick
+            } else if (round == 2) {
+                _swap(vaultB, _legs(_v3Leg(false, FEE, false, 400e18, 0))); // back up, past 0, to a positive tick
             }
             int24 tick = _tick(FEE);
-            if (round == 1) assertLt(tick, -100, "the price did not move; test proves nothing");
+            if (round == 1) assertLt(tick, -100, "the price did not move down; test proves nothing");
+            if (round == 2) assertGt(tick, 100, "the price did not move up; test proves nothing");
 
             _band(vaultA, tick, tick + 1); // the price is on the lower edge
             vm.prank(vaultA);
@@ -1737,23 +1880,29 @@ contract LobsterProxyTest is Test {
         }
     }
 
-    /// @notice Fuzzed over the band, the starting price, the direction, the kind and the size of the
-    /// leg: a swap goes through if and only if the pool's tick is inside the vault's band both before
-    /// and after it, and a refused swap leaves the price where it was
+    /// @notice Fuzzed over the band, the starting price (tick 0, or a negative or a positive tick
+    /// another vault's swap moved it to), the direction, the kind and the size of the leg: a swap goes
+    /// through if and only if the pool's tick is inside the vault's band both before and after it, and
+    /// a refused swap leaves the price where it was
     function testFuzz_swap_bandHoldsAtBothEnds(
         int24 lo,
         int24 hi,
         uint256 amount,
         bool zeroForOne,
         bool exactOut,
-        bool moveFirst
+        bool moveFirst,
+        bool moveUp
     )
         public
     {
         _set(vaultA, _key(FEE), SWAP);
         if (moveFirst) {
             _set(vaultB, _key(FEE), SWAP);
-            _swap(vaultB, _legs(_v3Leg(true, FEE, false, 200e18, 0))); // start from a negative tick
+            // token0 in pushes the price down, to a negative tick; token1 in pushes it up, to a positive one
+            _swap(vaultB, _legs(_v3Leg(!moveUp, FEE, false, 200e18, 0)));
+            int24 moved = _tick(FEE);
+            if (moveUp) assertGt(moved, 100, "the price did not move up; test proves nothing");
+            else assertLt(moved, -100, "the price did not move down; test proves nothing");
         }
         int24 start = _tick(FEE);
         lo = SafeCast.toInt24(bound(int256(lo), int256(start) - 500, int256(start) + 500));

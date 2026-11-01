@@ -124,7 +124,7 @@ abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, ICus
     /// unlock. Operations run in order and are settled together, so a rebalance (remove one range,
     /// add another) only moves the net amounts.
     /// @dev Payable for native-ETH pools: what the vault owes in ETH is paid from msg.value, and the
-    /// rest is refunded to the caller.
+    /// rest of msg.value is refunded to the caller.
     /// @return amounts0 Per operation, the vault's currency0 delta, fees included: negative = paid,
     /// positive = received
     /// @return amounts1 Same, for currency1
@@ -138,6 +138,8 @@ abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, ICus
         checkDeadline(deadline)
         returns (int256[] memory amounts0, int256[] memory amounts1)
     {
+        // What the proxy held before msg.value arrived: no operation may spend it
+        uint256 heldBefore = address(this).balance - msg.value;
         V4Roles memory roles = _v4Roles[msg.sender];
         require(roles.rolesModifier != address(0), V4RolesNotSet());
         _requireRolesOf(roles.rolesModifier, msg.sender);
@@ -159,9 +161,9 @@ abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, ICus
 
         (amounts0, amounts1) = abi.decode(result, (int256[], int256[]));
 
-        // Unspent ETH is the caller's change: the PoolManager pays what the vault is owed to the
+        // Unspent msg.value is the caller's change: the PoolManager pays what the vault is owed to the
         // vault directly, never to the proxy (see {PoolManagerBase-_refundExcessNative})
-        _refundExcessNative();
+        _refundExcessNative(heldBefore);
     }
 
     // ---------------------------------------------------------------------------------------------

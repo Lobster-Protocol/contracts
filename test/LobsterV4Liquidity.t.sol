@@ -29,7 +29,8 @@ import {TransientStateLibrary} from "v4-core/src/libraries/TransientStateLibrary
 import {IProxyErrors} from "../src/interfaces/IProxyErrors.sol";
 
 /// @notice A token that, the first time it is pulled with `transferFrom`, calls `target` with `attack`
-/// and records the outcome. It accepts ETH, so whatever an attack would sweep to its caller reaches it.
+/// and records the outcome. It accepts ETH, so any ETH the proxy pays its caller reaches it and shows in
+/// its balance, rather than failing the call.
 contract ReenterOnTransferFrom is MockERC20 {
     address public target;
     bytes public attack;
@@ -222,9 +223,16 @@ contract LobsterV4LiquidityTest is BatchSwapFixture {
 
     /// @dev Nothing left behind: no balance in the proxy, no open delta for the vault or the proxy
     function _assertClean(Vault memory v) internal view {
+        _assertClean(v, 0);
+    }
+
+    /// @dev The same, with the proxy holding exactly the `forceFed` wei of ETH force-fed to it, which no
+    /// call may spend or refund
+    function _assertClean(Vault memory v, uint256 forceFed) internal view {
         assertEq(token0.balanceOf(address(liq)), 0, "proxy holds token0");
         assertEq(token1.balanceOf(address(liq)), 0, "proxy holds token1");
-        assertEq(address(liq).balance, 0, "proxy holds ETH");
+        assertGe(address(liq).balance, forceFed, "force-fed ETH left the proxy");
+        assertEq(address(liq).balance, forceFed, "proxy holds ETH");
         address[3] memory cs = [ETH, address(token0), address(token1)];
         for (uint256 i = 0; i < 3; i++) {
             assertEq(_delta(address(v.safe), cs[i]), 0, "vault delta open");
@@ -394,6 +402,87 @@ contract LobsterV4LiquidityTest is BatchSwapFixture {
         assertApproxEqAbs(nowHeld[2], before[2], 2, "token1 moved");
         assertEq(_liquidity(address(a.safe), cleanKey), 10e18);
         _assertClean(a);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Native ETH: an operation spends and refunds the vault's msg.value only
+    // ---------------------------------------------------------------------------
+
+    /// @dev What `ops` cost vault `a` in ETH: run with ample msg.value, then rewound
+    function _ethOwedFor(V4LiquidityOp[] memory ops) internal returns (uint256) {
+        uint256 snap = vm.snapshotState();
+        vm.prank(address(a.safe));
+        (int256[] memory a0,) = liq.modifyLiquidityV4{value: 50 ether}(ops, vm.getBlockTimestamp());
+        vm.revertToState(snap);
+        return SafeCast.toUint256(-a0[0]);
+    }
+
+    /// @notice ETH force-fed to the proxy (a selfdestruct, a coinbase payment) belongs to no one. With
+    /// some in the proxy, an operation still pays the vault's ETH from msg.value and refunds exactly what
+    /// is left of it: the change of a native add, the whole msg.value of an operation that owes no ETH,
+    /// nothing to an exit that sent none (the PoolManager pays the vault directly). The force-fed ETH stays
+    /// in the proxy throughout, neither spent nor refunded.
+    function test_forceFedEth_isNeitherSpentNorRefunded() public {
+        uint256 forceFed = 7 ether;
+        vm.deal(address(liq), forceFed);
+
+        uint256[3] memory before = _bal(address(a.safe));
+        (int256[] memory a0, int256[] memory a1) = _viaExecutor(a, _ops(_op(nativeKey, 10e18)), 50 ether);
+        assertLt(a0[0], 0, "paid no ETH");
+        uint256[3] memory nowHeld = _bal(address(a.safe));
+        _assertMoved(before[0], nowHeld[0], a0[0], "native add: vault ETH, refund != the unspent msg.value");
+        _assertMoved(before[2], nowHeld[2], a1[0], "native add: vault token1");
+        _assertClean(a, forceFed);
+
+        before = nowHeld;
+        (a0, a1) = _viaExecutor(a, _ops(_op(cleanKey, 10e18)), 5 ether);
+        nowHeld = _bal(address(a.safe));
+        assertEq(nowHeld[0], before[0], "ERC20 add: msg.value not refunded whole");
+        _assertMoved(before[1], nowHeld[1], a0[0], "ERC20 add: vault token0");
+        _assertMoved(before[2], nowHeld[2], a1[0], "ERC20 add: vault token1");
+        _assertClean(a, forceFed);
+
+        before = nowHeld;
+        (a0, a1) = _viaExecutor(a, _ops(_op(nativeKey, -10e18)), 0);
+        nowHeld = _bal(address(a.safe));
+        assertGt(a0[0], 0, "exit: received no ETH");
+        _assertMoved(before[0], nowHeld[0], a0[0], "exit: vault ETH != what it was owed");
+        _assertMoved(before[2], nowHeld[2], a1[0], "exit: vault token1");
+        assertEq(_liquidity(address(a.safe), nativeKey), 0, "exit: position not removed");
+        _assertClean(a, forceFed);
+    }
+
+    /// @notice A native add is paid from msg.value only: short of what the position costs, even by one
+    /// wei, it reverts NotEnoughEthSent although the proxy holds more than enough force-fed ETH to cover
+    /// it. Sent exactly the cost, it runs, refunds nothing, and the force-fed ETH stays where it was.
+    function test_add_native_forceFedEthCannotCoverAShortfall() public {
+        V4LiquidityOp[] memory ops = _ops(_op(nativeKey, 10e18));
+        uint256 owed = _ethOwedFor(ops);
+        uint256 forceFed = 100 ether;
+        assertGt(forceFed, owed, "fixture: the force-fed ETH would not cover the position");
+        vm.deal(address(liq), forceFed);
+        uint256[3] memory before = _bal(address(a.safe));
+
+        vm.prank(address(a.safe));
+        vm.expectRevert(IProxyErrors.NotEnoughEthSent.selector);
+        liq.modifyLiquidityV4{value: owed - 1}(ops, vm.getBlockTimestamp());
+        vm.prank(address(a.safe));
+        vm.expectRevert(IProxyErrors.NotEnoughEthSent.selector);
+        liq.modifyLiquidityV4(ops, vm.getBlockTimestamp());
+
+        uint256[3] memory nowHeld = _bal(address(a.safe));
+        for (uint256 i = 0; i < 3; i++) {
+            assertEq(nowHeld[i], before[i], "a refused add moved the vault's funds");
+        }
+        assertEq(_liquidity(address(a.safe), nativeKey), 0, "a refused add created a position");
+        assertEq(address(liq).balance, forceFed, "force-fed ETH spent");
+
+        vm.prank(address(a.safe));
+        (int256[] memory a0,) = liq.modifyLiquidityV4{value: owed}(ops, vm.getBlockTimestamp());
+        assertEq(a0[0], -SafeCast.toInt256(owed), "the position's cost changed");
+        assertEq(address(a.safe).balance, before[0] - owed, "vault ETH: paid != the position's cost");
+        assertEq(_liquidity(address(a.safe), nativeKey), 10e18, "position not created");
+        _assertClean(a, forceFed);
     }
 
     // ---------------------------------------------------------------------------
@@ -721,39 +810,69 @@ contract LobsterV4LiquidityTest is BatchSwapFixture {
         _registerOnLobster(address(a.safe), lobster.v4Key(evilKey), MINT | SWAP);
     }
 
-    /// @dev The attack is real: run by `evil` on its own while the proxy holds `held` wei (force-fed here,
-    /// as the vault's msg.value would be mid-operation), `steal` succeeds and the proxy's ETH ends up with
-    /// `evil`, but for `spent` paid into a pool. State is rewound afterwards.
-    function _assertStealsOutsideAnOperation(address evil, bytes memory steal, uint256 held, uint256 spent) internal {
+    /// @dev The accounting on its own, outside any operation: while the proxy holds `held` wei of no one's
+    /// (force-fed here, as much as the vault's msg.value mid-operation), `evil` makes `steal` with `value`
+    /// wei of its own attached. It gets back exactly what its legs left of `value`, never a wei of the
+    /// proxy's: its ETH moves by exactly `-spent` and the proxy still holds `held`. Given `revertData`, the
+    /// call must fail with it instead and move no ETH at all. State is rewound afterwards.
+    function _assertGetsBackOnlyItsOwnValue(
+        address evil,
+        bytes memory steal,
+        uint256 held,
+        uint256 value,
+        uint256 spent,
+        bytes memory revertData
+    )
+        internal
+    {
         uint256 snap = vm.snapshotState();
         vm.deal(address(liq), held);
+        vm.deal(evil, evil.balance + value);
         uint256 before = evil.balance;
         vm.prank(evil);
-        (bool ok,) = address(liq).call(steal);
-        assertTrue(ok, "the attack fails even outside an operation; test proves nothing");
-        assertEq(evil.balance - before, held - spent, "the attack did not take the proxy's ETH");
-        assertEq(address(liq).balance, 0, "the attack left ETH in the proxy");
+        (bool ok, bytes memory ret) = address(liq).call{value: value}(steal);
+        if (revertData.length == 0) {
+            assertTrue(ok, "the call fails even outside an operation; test proves nothing");
+            assertEq(evil.balance, before - spent, "the caller got back other than its unspent msg.value");
+        } else {
+            assertFalse(ok, "the call succeeded");
+            assertEq(ret, revertData, "the call failed for an unexpected reason");
+            assertEq(evil.balance, before, "a refused call moved the caller's ETH");
+        }
+        assertEq(address(liq).balance, held, "the proxy's ETH was spent or paid out");
         vm.revertToState(snap);
     }
 
     /// @notice Liquidity and swaps share one contract, so while an operation runs the proxy holds the
     /// vault's msg.value. A token pulled mid-operation tries to spend it with a `swap` whose native-input
-    /// leg is paid from the proxy's balance (no msg.value; the ETH would go to the token's own pool and
-    /// the end-of-call refund would sweep the rest to the token). The reentrancy lock refuses it, with
-    /// OpenZeppelin's selector, and the vault pays exactly what its position cost. (Without the lock this
-    /// particular leg would still fail, with the PoolManager's AlreadyUnlocked, a second layer; the test
-    /// pins the first.)
+    /// leg it does not pay for (no msg.value; the ETH would go to the token's own pool, the token out to
+    /// the token). Two independent defences stop it, each proven on its own:
+    /// - the lock: inside the operation the re-entry is refused, with OpenZeppelin's selector, before
+    ///   anything runs, and the vault pays exactly what its position cost;
+    /// - the accounting: outside any operation, the same call made while the proxy holds as much ETH as
+    ///   the vault sends reverts NotEnoughEthSent, as it does with too little ETH of its own, because a
+    ///   native input is paid from the caller's msg.value only; paying its own way, the token gets back
+    ///   exactly its change.
+    /// (Inside an operation, without the lock, this leg would also hit the PoolManager's AlreadyUnlocked:
+    /// a third layer, not pinned here.)
     function test_reentryDuringALiquidityOperation_cannotSpendTheVaultsEth() public {
         (ReenterOnTransferFrom evil, ProxyPoolKey memory evilKey) = _reentrantTokenPool();
-        // ETH in, paid from whatever the proxy holds; the token out, to the token
+        // ETH in, without paying for it; the token out, to the token
         bytes memory steal = SwapCalldata.call(vm.getBlockTimestamp(), _batch(_v4In(evilKey, true, 1e18, 0)));
-        // The token is a caller in its own right, with the pool registered and a band: only the lock can
-        // stop it
+        // The token is a caller in its own right, with the pool registered and a band: the registry does
+        // not stop it
         _registerOnLobster(address(evil), lobster.v4Key(evilKey), SWAP);
-        _assertStealsOutsideAnOperation(address(evil), steal, 50 ether, 1e18);
-        evil.arm(address(liq), steal);
 
+        // The accounting, outside any operation
+        bytes memory notEnoughEth = abi.encodeWithSelector(IProxyErrors.NotEnoughEthSent.selector);
+        _assertGetsBackOnlyItsOwnValue(address(evil), steal, 50 ether, 0, 0, notEnoughEth);
+        _assertGetsBackOnlyItsOwnValue(address(evil), steal, 50 ether, 1e18 - 1, 0, notEnoughEth);
+        _assertGetsBackOnlyItsOwnValue(address(evil), steal, 50 ether, 1.5e18, 1e18, "");
+
+        // The lock, inside an operation
+        evil.arm(address(liq), steal);
         uint256 ethBefore = address(a.safe).balance;
+        uint256 evilEthBefore = address(evil).balance;
         (int256[] memory a0,) = _viaExecutor(a, _ops(_op(evilKey, 10e18)), 50 ether);
 
         assertEq(evil.attempts(), 1, "the token never re-entered; test proves nothing");
@@ -770,11 +889,17 @@ contract LobsterV4LiquidityTest is BatchSwapFixture {
         );
         _assertMoved(ethBefore, address(a.safe).balance, a0[0], "vault paid more ETH than its position cost");
         assertEq(address(liq).balance, 0, "proxy kept ETH");
+        assertEq(address(evil).balance, evilEthBefore, "the token got ETH");
     }
 
-    /// @notice The same attack with no V4 leg at all: a V3-only `swap` opens no unlock, so no
-    /// AlreadyUnlocked stands behind the lock, and its end-of-call refund would hand the token all of the
-    /// vault's in-flight ETH. The lock alone refuses it, and the vault pays exactly what its position cost.
+    /// @notice The same attack with no V4 leg at all: a V3-only `swap` the token pays for itself opens no
+    /// unlock, so no AlreadyUnlocked stands behind the lock, and its end-of-call refund is where the
+    /// vault's in-flight ETH could leak. Two independent defences, each proven on its own:
+    /// - the lock: inside the operation the re-entry is refused, with OpenZeppelin's selector, and the
+    ///   vault pays exactly what its position cost;
+    /// - the accounting: outside any operation, the same call made while the proxy holds as much ETH as
+    ///   the vault sends runs, and gets back exactly its own msg.value: nothing without one, all of it
+    ///   with one, and never the proxy's ETH.
     function test_reentryWithAV3OnlySwap_cannotSweepTheVaultsEth() public {
         (ReenterOnTransferFrom evil, ProxyPoolKey memory evilKey) = _reentrantTokenPool();
         // A plain V3 swap the token pays for itself, on a pool it registered with a band
@@ -784,10 +909,15 @@ contract LobsterV4LiquidityTest is BatchSwapFixture {
         _registerOnLobster(address(evil), lobster.v3Key(address(v3Pool)), SWAP);
         bytes memory steal =
             SwapCalldata.call(vm.getBlockTimestamp(), _batch(_v3In(address(token0), address(token1), 1e18, 0)));
-        _assertStealsOutsideAnOperation(address(evil), steal, 50 ether, 0);
-        evil.arm(address(liq), steal);
 
+        // The accounting, outside any operation
+        _assertGetsBackOnlyItsOwnValue(address(evil), steal, 50 ether, 0, 0, "");
+        _assertGetsBackOnlyItsOwnValue(address(evil), steal, 50 ether, 1 ether, 0, "");
+
+        // The lock, inside an operation
+        evil.arm(address(liq), steal);
         uint256 ethBefore = address(a.safe).balance;
+        uint256 evilEthBefore = address(evil).balance;
         (int256[] memory a0,) = _viaExecutor(a, _ops(_op(evilKey, 10e18)), 50 ether);
 
         assertEq(evil.attempts(), 1, "the token never re-entered; test proves nothing");
@@ -799,6 +929,7 @@ contract LobsterV4LiquidityTest is BatchSwapFixture {
         );
         _assertMoved(ethBefore, address(a.safe).balance, a0[0], "vault paid more ETH than its position cost");
         assertEq(address(liq).balance, 0, "proxy kept ETH");
+        assertEq(address(evil).balance, evilEthBefore, "the token got ETH");
     }
 
     // ---------------------------------------------------------------------------

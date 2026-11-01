@@ -29,13 +29,17 @@ import {PoolAddress} from "./libraries/uniswapV3/PoolAddress.sol";
 /// requires every one of the proxy's deltas to be zero (`CurrencyNotSettled`).
 ///
 /// CALLBACKS. A V3 pool's swap callback is honoured only from the pool the proxy is calling at that
-/// moment, once (`EXPECTED_POOL_SLOT`, transient, cleared on use); the PoolManager's only from the
-/// PoolManager ({PoolManagerBase}). Both pay for the account holding the lock ({Guards}), i.e. the
-/// caller of `swap`, never for anyone named in calldata.
+/// moment, once (`EXPECTED_POOL_SLOT`, transient, cleared on use; a canonical pool always calls back
+/// before its `swap` returns); the PoolManager's only from the PoolManager ({PoolManagerBase}) and only
+/// while an entry point holds the lock (in practice `swap`, the only one that opens a swap unlock).
+/// Both pay for the account holding the lock ({Guards}), i.e. the caller of `swap`, never for anyone
+/// named in calldata. Like all V3 authentication, this assumes `UNI_V3_FACTORY` is Uniswap's: a
+/// contract at a CREATE2 address of another factory could ask for any amount in its callback.
 ///
 /// KNOWN BEHAVIOURS:
-/// - native ETH input is paid from the proxy's balance: the caller's msg.value, plus any ETH force-fed
-///   to the proxy, which belongs to no one; what is left is refunded to the caller;
+/// - native ETH input is paid from the caller's msg.value only, and what is left of it is refunded;
+///   ETH force-fed to the proxy between calls belongs to no one and is neither spent nor refunded (ETH
+///   a selfdestruct run by the call itself pushes in mid-call is refunded with the change);
 /// - tokens sent to the proxy outside a call are never spent: a HELD leg spends exactly what the call
 ///   parked;
 /// - a token that delivers less than a pool reports (fee-on-transfer, rounding) makes a hand-off through
@@ -84,47 +88,55 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
         uint160 sqrtPriceLimitX96;
     }
 
-    /// @dev What the current call has parked, per token index
+    /// @dev What the current call has parked, per token index, and what is left of its msg.value
     struct Ledger {
         /// @dev Owed to the proxy by the PoolManager: a parked V4 output, or a V3 output paid to it
         uint256[] credit;
         /// @dev In the proxy's own balance: a parked V3 output
         uint256[] held;
+        /// @dev Native ETH the caller sent that no leg has spent yet
+        uint256 value;
     }
 
     /// @notice Runs the swap legs encoded in `data` ({SwapFlags}), in order, for the caller
-    /// @dev Payable for native-ETH input on V4 legs; unspent ETH is refunded to the caller.
+    /// @dev Payable for native-ETH input on V4 legs, which is paid from msg.value only; what is left of
+    /// msg.value is refunded to the caller.
     /// @return amounts Per leg: the amount received for exact input, the amount paid for exact output
     function swap(bytes calldata data) external payable nonReentrant returns (uint256[] memory amounts) {
+        // What the proxy held before msg.value arrived: no leg may spend it
+        uint256 heldBefore = address(this).balance - msg.value;
         (Plan memory plan, bool anyV4) = _prepare(data);
         if (anyV4) {
             // The callback returns the amounts as raw words ({_swapCallback}): reinterpret them in place
-            bytes memory words = POOL_MANAGER.unlock(_unlockPayload(data, plan));
+            bytes memory words = POOL_MANAGER.unlock(_unlockPayload(data, plan, msg.value));
             assembly ("memory-safe") {
                 amounts := words
                 mstore(amounts, shr(5, mload(words)))
             }
         } else {
-            amounts = _execute(data, plan, false);
+            amounts = _execute(data, plan, msg.sender, msg.value);
         }
-        _refundExcessNative();
+        _refundExcessNative(heldBefore);
     }
 
-    /// @dev The swap unlock opened by {swap}: `payload` is {_unlockPayload}'s, written by the proxy itself
+    /// @dev The swap unlock opened by {swap}: `payload` is {_unlockPayload}'s, written by the proxy itself.
+    /// Only while an entry point holds the lock (in practice `swap`, the only one that opens a swap
+    /// unlock): with no lock held, this reverts.
     function _swapCallback(bytes calldata payload) internal override returns (bytes memory) {
+        address vault = _lockHolder();
         uint256 legs;
-        uint256 usesLedger;
+        uint256 valueAndLedger;
         assembly ("memory-safe") {
             legs := calldataload(payload.offset)
-            usesLedger := calldataload(add(payload.offset, 0x20))
+            valueAndLedger := calldataload(add(payload.offset, 0x20))
         }
         uint256 wordsSize = legs * 64;
         uint256[] memory words = new uint256[](legs * 2);
         assembly ("memory-safe") {
             calldatacopy(add(words, 0x20), add(payload.offset, 0x40), wordsSize)
         }
-        Plan memory plan = Plan({legs: legs, usesLedger: usesLedger != 0, words: words});
-        uint256[] memory amounts = _execute(payload[64 + wordsSize:], plan, true);
+        Plan memory plan = Plan({legs: legs, usesLedger: valueAndLedger & 1 != 0, words: words});
+        uint256[] memory amounts = _execute(payload[64 + wordsSize:], plan, vault, valueAndLedger >> 1);
         // Raw words, the array without its length: {swap} reinterprets them in place
         bytes memory raw;
         assembly ("memory-safe") {
@@ -134,8 +146,16 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
         return raw;
     }
 
-    /// @dev SWAP_TAG | legs | usesLedger | plan words | data
-    function _unlockPayload(bytes calldata data, Plan memory plan) private pure returns (bytes memory payload) {
+    /// @dev SWAP_TAG | legs | msg.value << 1 | usesLedger | plan words | data
+    function _unlockPayload(
+        bytes calldata data,
+        Plan memory plan,
+        uint256 value
+    )
+        private
+        pure
+        returns (bytes memory payload)
+    {
         uint256 legs = plan.legs;
         bool usesLedger = plan.usesLedger;
         uint256[] memory words = plan.words;
@@ -145,7 +165,7 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
             let p := add(payload, 0x20)
             mstore8(p, 0x01) // SWAP_TAG
             mstore(add(p, 0x01), legs)
-            mstore(add(p, 0x21), usesLedger)
+            mstore(add(p, 0x21), or(shl(1, value), usesLedger))
             mcopy(add(p, 0x41), add(words, 0x20), wordsSize)
             calldatacopy(add(add(p, 0x41), wordsSize), data.offset, data.length)
         }
@@ -304,17 +324,26 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
     // Running
     // ---------------------------------------------------------------------------------------------
 
-    /// @dev Runs every leg of a call {_prepare} validated, for the account holding the lock.
-    /// `inUnlock`: inside the swap unlock, where V4 legs run and the PoolManager holds parked funds.
-    function _execute(bytes calldata data, Plan memory plan, bool inUnlock) private returns (uint256[] memory amounts) {
-        address vault = _lockedBy();
+    /// @dev Runs every leg of a call {_prepare} validated, for `vault`, the account holding the lock,
+    /// which sent `value` in native ETH. A call with a V4 leg runs inside the swap unlock.
+    function _execute(
+        bytes calldata data,
+        Plan memory plan,
+        address vault,
+        uint256 value
+    )
+        private
+        returns (uint256[] memory amounts)
+    {
         uint256 tokenCount = _wordAt(data, 4) >> 248;
         uint256 legs = plan.legs;
         amounts = new uint256[](legs);
         Ledger memory ledger;
         if (plan.usesLedger) {
-            ledger = Ledger({credit: new uint256[](tokenCount), held: new uint256[](tokenCount)});
+            ledger.credit = new uint256[](tokenCount);
+            ledger.held = new uint256[](tokenCount);
         }
+        ledger.value = value;
         Leg memory leg;
         uint256 pos = SwapFlags.HEADER_SIZE + 20 * tokenCount;
         for (uint256 i = 0; i < legs; i++) {
@@ -323,7 +352,7 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
             if (leg.flags & SwapFlags.V4 != 0) {
                 amounts[i] = _v4Leg(leg, bytes32(key), band, vault, ledger);
             } else {
-                amounts[i] = _v3Leg(leg, _asAddress(key), band, vault, ledger, inUnlock);
+                amounts[i] = _v3Leg(leg, _asAddress(key), band, vault, ledger);
             }
         }
         if (plan.usesLedger) {
@@ -394,8 +423,7 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
         address pool,
         uint256 band,
         address vault,
-        Ledger memory ledger,
-        bool inUnlock
+        Ledger memory ledger
     )
         private
         returns (uint256)
@@ -404,7 +432,8 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
 
         bool held = leg.flags & SwapFlags.HELD != 0;
         bool park = leg.flags & SwapFlags.PARK != 0;
-        bool toManager = inUnlock && band & TO_MANAGER != 0;
+        // Set only when a later V4 leg spends this output, so only inside the swap unlock
+        bool toManager = band & TO_MANAGER != 0;
         address recipient = !park ? vault : toManager ? address(POOL_MANAGER) : address(this);
         // The output is settled at the start of the pool's callback, so sync now, before it arrives
         if (toManager) _sync(leg.tokenOut);
@@ -444,7 +473,7 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
             uint256 fromProxy = _spend(ledger, leg.inIndex, paid);
             if (fromProxy > 0) _payFromProxy(leg.tokenIn, fromProxy);
         } else if (paid > 0) {
-            if (leg.tokenIn == address(0)) _settleNative(paid);
+            if (leg.tokenIn == address(0)) _settleNative(ledger, paid);
             else _payFromVault(leg.tokenIn, vault, paid);
         }
 
@@ -622,6 +651,8 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
         }
         if (mode & MODE_TO_MANAGER != 0) require(_settle() == amountOut, UnexpectedSettlement());
         if (mode & MODE_HELD == 0) {
+            // The expected pool is only set while `_v3Swap` runs, inside a locked entry point (a canonical
+            // pool calls back before its `swap` returns), so the lock is held
             _transferFrom(tokenIn, _lockedBy(), msg.sender, amountToPay);
             return;
         }
@@ -707,21 +738,21 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
         require(_settle() == amount, UnexpectedSettlement());
     }
 
-    /// @dev Pays the PoolManager `amount` of `token` parked in the proxy; the settlement must match
+    /// @dev Pays the PoolManager `amount` of ERC20 `token` parked in the proxy; the settlement must
+    /// match. Never native ETH: only V3 outputs are parked in the proxy, and V3 legs have no native ETH.
     function _payFromProxy(address token, uint256 amount) private {
-        if (token == address(0)) {
-            _settleNative(amount);
-        } else {
-            _sync(token);
-            _transfer(token, address(POOL_MANAGER), amount);
-            require(_settle() == amount, UnexpectedSettlement());
-        }
+        _sync(token);
+        _transfer(token, address(POOL_MANAGER), amount);
+        require(_settle() == amount, UnexpectedSettlement());
     }
 
-    /// @dev Pays the PoolManager `amount` of ETH from the proxy's balance. `sync(address(0))` first, as
-    /// v4-core requires: an ERC20 left synced by anyone would make a native settle revert.
-    function _settleNative(uint256 amount) private {
-        require(address(this).balance >= amount, NotEnoughEthSent());
+    /// @dev Pays the PoolManager `amount` of ETH out of what is left of the caller's msg.value, never out
+    /// of anything else the proxy holds. `sync(address(0))` first, as v4-core requires: an ERC20 left
+    /// synced by anyone would make a native settle revert.
+    function _settleNative(Ledger memory ledger, uint256 amount) private {
+        uint256 value = ledger.value;
+        require(amount <= value, NotEnoughEthSent());
+        ledger.value = value - amount;
         _sync(address(0));
         address manager = address(POOL_MANAGER);
         assembly ("memory-safe") {

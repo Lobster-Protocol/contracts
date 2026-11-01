@@ -53,9 +53,10 @@ import {PoolAddress} from "./libraries/uniswapV3/PoolAddress.sol";
 /// vault's V4 Roles configuration. Funds: none between transactions. During a `swap` call it may hold,
 /// or be owed by the PoolManager, parked outputs, which the call must spend before returning, and the
 /// caller's msg.value; during `modifyLiquidityV4` the vault's msg.value; every entry point is
-/// `nonReentrant`, so nothing can reach either meanwhile. ETH force-fed to the proxy belongs to no
-/// one and is refunded to the next payable call's caller. Tokens transferred to it directly are not
-/// spent by anything.
+/// `nonReentrant`, so nothing can reach either meanwhile. Native input is paid from the caller's
+/// msg.value only, and only what is left of it is refunded: ETH force-fed to the proxy between calls
+/// belongs to no one and is neither spent nor refunded. Tokens transferred to it directly are not spent
+/// by anything.
 ///
 /// HOW A VAULT USES IT.
 /// - The vault's owners register its pools with `setPools` and set their price bands with

@@ -47,33 +47,34 @@ contract AuthorisationTest is ForkBase {
     // 1. Forged callbacks — calling the payment hooks directly
     // ---------------------------------------------------------------------------
 
-    /// @notice The mint callback, called by an EOA naming the approver as payer, reverts and moves nothing
-    /// @dev The mint callback takes `payer` from decoded calldata and transfers to `msg.sender`,
-    /// so `CallbackValidation` is what establishes that the caller is a real pool.
+    /// @notice The mint callback, called by an EOA, fails `CallbackValidation` and moves nothing, whether
+    /// its data is the old layout naming the approver as payer or the pool key `mint` writes
+    /// @dev The mint callback transfers to `msg.sender`, so `CallbackValidation` (the caller must be the
+    /// CREATE2 pool of the key in `data`) is what establishes that the caller is a real pool. It pays
+    /// for the account holding the reentrancy lock, never for anyone named in `data`: the old
+    /// `MintCallbackData{poolKey, payer}` still decodes, and its payer word is ignored. The check is a
+    /// bare `require`, so the revert carries no data, unlike the lock's `UnexpectedCallback`.
     function test_mintCallback_directFromEOA_reverts() public {
         uint256[4] memory before = _approverHoldings();
+        PoolAddress.PoolKey memory key = PoolAddress.PoolKey({token0: USDC, token1: WETH, fee: 500});
+        bytes[2] memory forged = [abi.encode(MintCallbackData({poolKey: key, payer: approver})), abi.encode(key)];
 
-        vm.prank(outsider);
-        vm.expectRevert();
-        proxy.uniswapV3MintCallback(
-            500_000e6,
-            100 ether,
-            abi.encode(
-                MintCallbackData({
-                    poolKey: PoolAddress.PoolKey({token0: USDC, token1: WETH, fee: 500}), payer: approver
-                })
-            )
-        );
+        for (uint256 i = 0; i < forged.length; i++) {
+            vm.prank(outsider);
+            vm.expectRevert(bytes("")); // CallbackValidation: not the pool
+            proxy.uniswapV3MintCallback(500_000e6, 100 ether, forged[i]);
+        }
 
         _assertApproverUntouched(before, "direct mint callback from EOA");
     }
 
-    /// @notice The same forged mint callback, from a contract, reverts and moves nothing
+    /// @notice The same forged mint callback, from a contract, fails `CallbackValidation` and moves
+    /// nothing
     function test_mintCallback_fromContract_reverts() public {
         uint256[4] memory before = _approverHoldings();
 
         vm.prank(outsider);
-        vm.expectRevert();
+        vm.expectRevert(bytes("")); // CallbackValidation: not the pool
         impersonator.callViaMintCallback(USDC, WETH, 500, approver, 500_000e6, 100 ether);
 
         _assertApproverUntouched(before, "mint callback from contract");
@@ -137,7 +138,7 @@ contract AuthorisationTest is ForkBase {
                 }
 
                 vm.prank(outsider);
-                vm.expectRevert();
+                vm.expectRevert(bytes("")); // CallbackValidation: not the pool
                 impersonator.callViaMintCallback(
                     tokens[i] < other ? tokens[i] : other,
                     tokens[i] < other ? other : tokens[i],
@@ -176,6 +177,38 @@ contract AuthorisationTest is ForkBase {
         }
 
         _assertApproverUntouched(before, "swap callback from a genuine pool");
+    }
+
+    /// @notice Even the genuine, factory-derived pool cannot call the mint callback outside a call to
+    /// the proxy: it reverts `UnexpectedCallback`, whatever payer its data names, and moves nothing
+    /// @dev The genuine pool passes `CallbackValidation`; what stops it is the payer. The callback pays
+    /// for the account holding the reentrancy lock, never for anyone named in `data`, and outside an
+    /// entry point nobody holds it. Tried with the old `MintCallbackData` layout naming the approver
+    /// as payer, which still decodes (the payer word is ignored), and with the data `mint` writes (the
+    /// pool key), for amounts the approver holds and has approved. Impersonating a live pool needs a
+    /// cheat code, so this is defence in depth, like the swap callback's case above.
+    function test_mintCallback_fromGenuinePoolOutsideACall_reverts() public {
+        uint256[4] memory before = _approverHoldings();
+        address[4] memory tokens = [USDC, WETH, USDT, DAI];
+        uint24[4] memory fees = [uint24(100), 500, 3000, 10000];
+
+        for (uint256 i = 0; i < tokens.length; i++) {
+            for (uint256 j = 0; j < fees.length; j++) {
+                address other = tokens[i] == WETH ? USDC : WETH;
+                PoolAddress.PoolKey memory key = PoolAddress.getPoolKey(tokens[i], other, fees[j]);
+                address pool = _poolFor(tokens[i], other, fees[j]);
+                bytes[2] memory forged =
+                    [abi.encode(MintCallbackData({poolKey: key, payer: approver})), abi.encode(key)];
+
+                for (uint256 k = 0; k < forged.length; k++) {
+                    vm.prank(pool);
+                    vm.expectRevert(IProxyErrors.UnexpectedCallback.selector);
+                    proxy.uniswapV3MintCallback(1e6, 1e6, forged[k]);
+                }
+            }
+        }
+
+        _assertApproverUntouched(before, "mint callback from a genuine pool");
     }
 
     /// @notice `unlockCallback` from anyone but the PoolManager reverts `NotPoolManager`, whatever the
@@ -240,8 +273,8 @@ contract AuthorisationTest is ForkBase {
         uint256[4] memory before = _approverHoldings();
         (int24 lower, int24 upper) = _rangeAroundSpot(USDC_WETH_500, 10);
 
-        // `mint` stamps payer = msg.sender into the callback data, and requires the recipient to be
-        // the caller.
+        // The mint callback is paid by the account holding the lock, i.e. `mint`'s own caller (its data
+        // is only the pool key), and `mint` requires the recipient to be the caller.
         vm.startPrank(outsider);
         IERC20(USDC).approve(address(proxy), type(uint256).max);
         IERC20(WETH).approve(address(proxy), type(uint256).max);
@@ -367,11 +400,16 @@ contract AuthorisationTest is ForkBase {
         _assertApproverUntouched(before, "fuzzed outsider swap");
     }
 
-    /// @notice Forged mint and swap callbacks, with fully caller-chosen data, never pay
-    /// @dev Same property, for the raw callbacks: any caller, a caller-chosen poolKey for the mint
-    /// callback, and for the swap callback any token, payment mode and claimed credit.
+    /// @notice Forged mint and swap callbacks, with fully caller-chosen data, always revert and never pay
+    /// @dev Same property, for the raw callbacks: any caller, a caller-chosen poolKey naming the
+    /// approver as payer for the mint callback, and for the swap callback any token, payment mode and
+    /// claimed credit. Each is refused by its own guard: a mint callback from anything but its key's
+    /// pool by `CallbackValidation` (a bare `require`, no revert data), from that pool (`asPool`: its
+    /// CREATE2 address, live or code-less) by the lock nobody holds; a swap callback by the expected
+    /// pool nobody set.
     function testFuzz_forgedCallbackNeverPays(
         address caller,
+        bool asPool,
         address otherToken,
         uint24 fee,
         uint256 amount,
@@ -380,23 +418,19 @@ contract AuthorisationTest is ForkBase {
     )
         public
     {
-        vm.assume(caller != address(0) && caller.code.length == 0);
         vm.assume(otherToken > USDC);
         amount = bound(amount, 1, 1e24);
+        PoolAddress.PoolKey memory key = PoolAddress.PoolKey({token0: USDC, token1: otherToken, fee: fee});
+        address keysPool = PoolAddress.computeAddress(V3_FACTORY, key);
+        if (asPool) caller = keysPool;
+        else vm.assume(caller != address(0) && caller.code.length == 0 && caller != keysPool);
 
         uint256[4] memory before = _approverHoldings();
 
         vm.prank(caller);
-        try proxy.uniswapV3MintCallback(
-            amount,
-            amount,
-            abi.encode(
-                MintCallbackData({
-                    poolKey: PoolAddress.PoolKey({token0: USDC, token1: otherToken, fee: fee}), payer: approver
-                })
-            )
-        ) {}
-            catch {}
+        if (asPool) vm.expectRevert(IProxyErrors.UnexpectedCallback.selector);
+        else vm.expectRevert(bytes("")); // CallbackValidation: not the pool
+        proxy.uniswapV3MintCallback(amount, amount, abi.encode(MintCallbackData({poolKey: key, payer: approver})));
 
         vm.prank(caller);
         vm.expectRevert(IProxyErrors.UnexpectedCallback.selector);
@@ -587,11 +621,13 @@ contract AuthorisationTest is ForkBase {
     // ---------------------------------------------------------------------------
 
     /// @notice Every plain ETH transfer to the proxy bounces, the PoolManager's included
-    /// @dev `_refundExcessNative` pays out `address(this).balance` — the whole balance, not the
-    /// caller's unspent share. That is only safe while the proxy cannot accumulate ETH between
-    /// calls. It has no `receive()` and no fallback, so ordinary sends bounce, from anyone: no path
-    /// makes even the PoolManager send it ETH any more (native outputs stay as credit or are taken
-    /// straight to the vault). Selfdestruct is the remaining route.
+    /// @dev `_refundExcessNative` refunds the proxy's balance above what it held before msg.value
+    /// arrived. That is exactly the caller's unspent msg.value only while no other ETH reaches the proxy
+    /// during a call, the invariant documented on it. It has no `receive()` and no fallback, so
+    /// ordinary sends bounce, from anyone: no path makes even the PoolManager send it ETH (native
+    /// outputs stay as credit or are taken straight to the vault). Selfdestruct and coinbase payments
+    /// are the remaining routes, and ETH arriving that way is neither spent nor refunded
+    /// (integration/V4Swap.t.sol).
     function test_proxyRejectsPlainEthTransfers() public {
         vm.deal(outsider, 2 ether);
         vm.deal(POOL_MANAGER, POOL_MANAGER.balance + 2 ether);
@@ -603,7 +639,7 @@ contract AuthorisationTest is ForkBase {
         for (uint256 i = 0; i < senders.length; i++) {
             vm.prank(senders[i]);
             (bool ok,) = address(proxy).call{value: 1 ether}("");
-            assertFalse(ok, "proxy accepted a plain ETH transfer; the refund sweep is now unsafe");
+            assertFalse(ok, "proxy accepted a plain ETH transfer; a refund may no longer be only unspent msg.value");
 
             // with calldata no function matches, so no fallback can take it either
             vm.prank(senders[i]);
@@ -717,6 +753,10 @@ contract AuthorisationTest is ForkBase {
             "lock error selector changed"
         );
         assertFalse(reentrant.directCallbackReentrySucceeded(), "re-entered raw mint callback succeeded");
+        // Mid-call the lock is held, so `CallbackValidation` (no revert data) is what refuses the token
+        assertEq(
+            reentrant.directCallbackRevertData(), bytes(""), "re-entered mint callback failed for an unexpected reason"
+        );
         assertFalse(reentrant.swapCallbackReentrySucceeded(), "re-entered raw swap callback succeeded");
         assertEq(
             reentrant.swapCallbackRevertData(),

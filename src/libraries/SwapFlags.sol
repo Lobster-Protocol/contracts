@@ -22,8 +22,10 @@ pragma solidity >=0.8.20;
 /// A call reverts with `MalformedSwap` unless: the token table fits; every leg fits and the data ends
 /// exactly where the last leg does; there is at least one leg and at most 255; no unknown flag is set;
 /// HELD is only used with exact input; indices are in the table; a leg's two tokens differ; a V3 leg
-/// names no address(0); a PRICE_LIMIT is not 0. Amounts are at most 2**128 - 1 (V4: 2**127 - 1, the
-/// PoolManager reverts above) and the deadline is a uint32 timestamp.
+/// names no address(0); a PRICE_LIMIT is not 0. Amounts are uint128, and so must be a HELD leg's input,
+/// everything the call parked of it (checked when that leg runs, `MalformedSwap`); on V4 what a leg
+/// actually swaps must also fit in int128, which the PoolManager enforces. The deadline is a uint32
+/// timestamp.
 library SwapFlags {
     /// @notice The leg runs on Uniswap V4 (else V3)
     uint8 internal constant V4 = 0x01;

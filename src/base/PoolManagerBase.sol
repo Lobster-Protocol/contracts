@@ -10,8 +10,10 @@ import {Guards} from "./Guards.sol";
 /// @notice Holds the PoolManager address, owns the single `unlockCallback`, and reads pool prices.
 /// @dev Two kinds of unlock reach `unlockCallback`, told apart by their first byte: `SWAP_TAG`
 /// ({UniswapSwapProxy}) and `LIQUIDITY_TAG` ({UniswapV4LiquidityProxy}). The PoolManager calls back
-/// whoever called `unlock`, with the data that caller passed, so the data is always the proxy's own and
-/// checking that the PoolManager is the caller is the whole authentication.
+/// whoever called `unlock`, with the data that caller passed, so once the PoolManager is checked to be
+/// the caller the data is the proxy's own. Each body also requires the entry point that opens its kind
+/// of unlock to be running (the swap body: the reentrancy lock is held; the liquidity body: its context
+/// is set), so an unlock the proxy did not open does nothing.
 abstract contract PoolManagerBase is Guards, IUnlockCallback {
     /// @dev v4-core TickMath.MIN_SQRT_PRICE / MAX_SQRT_PRICE, the same values as V3's
     /// MIN_SQRT_RATIO / MAX_SQRT_RATIO
@@ -73,15 +75,17 @@ abstract contract PoolManagerBase is Guards, IUnlockCallback {
         return _tickAt(_poolStateSlot(poolId));
     }
 
-    /// @dev Returns ETH that was sent in but not consumed.
-    /// The proxy is not meant to hold a balance between calls, so anything left here at the end of a
-    /// payable call is this caller's change. INVARIANT: this returns only the caller's own msg.value,
-    /// plus any ETH force-fed to the proxy (a selfdestruct, a coinbase payment), which belongs to no one,
-    /// because (1) the proxy has no `receive`, and no path makes the PoolManager send it ETH: native
-    /// outputs are credit in the PoolManager or are taken straight to the vault, and (2) no entry point
-    /// can run inside another (`nonReentrant`). Revisit both before changing either.
-    function _refundExcessNative() internal {
-        uint256 balance = address(this).balance;
-        if (balance > 0) TransferHelper.safeTransferETH(msg.sender, balance);
+    /// @dev Refunds what is left of the caller's msg.value: the proxy's balance above `heldBefore`, the
+    /// balance it had before the call received msg.value. Native input is paid from msg.value only, and
+    /// never more than msg.value in total, so ETH force-fed to the proxy between calls (a selfdestruct, a
+    /// coinbase payment), which belongs to no one, is neither spent nor refunded. INVARIANT: no call
+    /// sends the proxy ETH during a call (it has no `receive`, and no path makes the PoolManager send it
+    /// ETH: native outputs are credit in the PoolManager or are taken straight to the vault). Only a
+    /// selfdestruct run by the call itself (a token's hook, say) can push ETH in mid-call; that ETH is
+    /// refunded to this caller as change, which costs no one but its sender. Revisit before changing
+    /// any of this.
+    function _refundExcessNative(uint256 heldBefore) internal {
+        uint256 change = address(this).balance - heldBefore;
+        if (change > 0) TransferHelper.safeTransferETH(msg.sender, change);
     }
 }

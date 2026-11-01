@@ -28,10 +28,11 @@ library V3CallbackData {
 }
 
 /// @notice Invokes the proxy's pool callbacks directly from a contract.
-/// @dev The callbacks are `external`. The mint callback takes `payer` from decoded calldata, so
-/// `CallbackValidation` is the check that has to hold; the V3 swap callback is honoured only from the
-/// pool the proxy is calling at that moment, and `unlockCallback` only from the PoolManager. This exists
-/// to assert that each guard does.
+/// @dev The callbacks are `external`. The mint callback is honoured only from the CREATE2 pool of the
+/// key in its data (`CallbackValidation`, the check a contract like this one has to beat) and pays for
+/// the account holding the proxy's lock; the V3 swap callback is honoured only from the pool the proxy
+/// is calling at that moment, and `unlockCallback` only from the PoolManager. This exists to assert
+/// that each guard does.
 contract PoolImpersonator {
     LobsterProxy public immutable PROXY;
 
@@ -39,6 +40,8 @@ contract PoolImpersonator {
         PROXY = _proxy;
     }
 
+    /// @dev Forges the mint callback in the layout that named its payer (`MintCallbackData`), naming
+    /// `approver`: the proxy decodes only the pool key and ignores the payer word
     function callViaMintCallback(
         address token0,
         address token1,
@@ -176,8 +179,9 @@ contract ReentrantToken {
     ///  1. The entry point, as anyone would use it: a one-leg `swap` on the other pool. Its payer
     ///     would be msg.sender, THIS token, never the vault whose call is in progress, and in fact the
     ///     lock refuses it outright: the vault's call may hold parked funds.
-    ///  2. The raw mint callback, naming a third-party account as payer. Being mid-callback should
-    ///     not weaken `CallbackValidation`.
+    ///  2. The raw mint callback, in the layout that named its payer, naming a third-party account.
+    ///     The proxy ignores that word and would pay for the lock holder, the vault whose call is in
+    ///     progress, so being mid-call, with the lock held, must not weaken `CallbackValidation`.
     ///  3. The raw V3 swap callback, in the proxy's own format, asking to be paid by whoever holds the
     ///     lock. Only the pool the proxy is calling may use it, and only once.
     ///  4. The unlock callback, which only the PoolManager may call.

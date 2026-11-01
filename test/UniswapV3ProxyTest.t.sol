@@ -6,8 +6,13 @@ import {UniswapV3ProxyHarness} from "./Mocks/UniswapV3ProxyHarness.sol";
 import {LobsterProxy} from "../src/LobsterProxy.sol";
 import {SwapCalldata} from "./helpers/SwapCalldata.sol";
 import {SwapFlags} from "../src/libraries/SwapFlags.sol";
-import {MintParams, MintCallbackData} from "../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
+import {
+    MintParams,
+    MintCallbackData,
+    IUniswapV3MintCallback
+} from "../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
 import {IUniswapV3SwapCallback} from "../src/interfaces/uniswapV3/IUniswapV3SwapCallback.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MockERC20} from "./Mocks/MockERC20.sol";
 import {IUniswapV3PoolMinimal} from "../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {UniswapV3Infra} from "./Mocks/uniswapV3/UniswapV3Infra.sol";
@@ -82,10 +87,19 @@ contract DoubleCallbackPool {
     }
 }
 
+/// @notice A contract account with no receive and no fallback, so it cannot be sent plain ETH, as a
+/// vault or smart account may well be written. It calls `swap` itself, with the ETH it is given.
+contract NoEthReceiver {
+    function swap(LobsterProxy lobster, bytes calldata data) external payable returns (uint256[] memory) {
+        return lobster.swap{value: msg.value}(data);
+    }
+}
+
 /// @notice The Uniswap V3 mechanics of the proxy, against a real V3 factory and real pools.
 /// @dev Two contracts under test, split the way the code is:
 /// - mints go through {UniswapV3ProxyHarness}: the mint body and callback without the registry, so any
-///   pool and any recipient but address(0) and the harness itself;
+///   pool and any recipient but address(0) and the harness itself. The callback charges the account
+///   holding the harness's lock, the caller of `mint`, never a payer named in its data;
 /// - swaps go through {LobsterProxy-swap}, as one-leg calls built with {SwapCalldata} (two legs where a
 ///   property needs PARK and HELD). The swapping accounts register every pool they use with
 ///   PERMISSION_SWAP and a band that allows any price: registry and band rules have their own suite
@@ -410,7 +424,7 @@ contract UniswapV3ProxyTest is Test {
     // MINT -- happy paths
     // ===========================================================================
 
-    /// @notice A narrow mint charges the payer exactly the computed amounts and creates the expected
+    /// @notice A narrow mint charges its caller exactly the computed amounts and creates the expected
     /// position for the recipient
     function testMintSuccess() public {
         uint256 t0Before = token0.balanceOf(user);
@@ -492,7 +506,7 @@ contract UniswapV3ProxyTest is Test {
         assertEq(posLiq, expectedLiq);
     }
 
-    /// @notice The payer may mint to itself
+    /// @notice The caller, who pays, may mint to itself
     function testMintToSelfAsRecipient() public {
         (uint128 expectedLiq, uint256 expectedAmt0, uint256 expectedAmt1) =
             _computeExpectedMintAmounts(TICK_LOWER, TICK_UPPER, AMOUNT_DESIRED, AMOUNT_DESIRED);
@@ -653,7 +667,8 @@ contract UniswapV3ProxyTest is Test {
         proxy.mint(params);
     }
 
-    /// @notice The payer has not approved the harness: the mint callback cannot pull the tokens
+    /// @notice The caller, whom the mint callback charges, has not approved the harness: the callback
+    /// cannot pull the tokens
     function testMintRevertsWithoutApproval() public {
         address noApproval = makeAddr("noApproval");
         token0.mint(noApproval, AMOUNT_DESIRED);
@@ -678,7 +693,7 @@ contract UniswapV3ProxyTest is Test {
         proxy.mint(params);
     }
 
-    /// @notice The payer approved but cannot cover the deposit
+    /// @notice The caller approved the harness but cannot cover the deposit
     function testMintRevertsWithInsufficientBalance() public {
         address poor = makeAddr("poor");
         token0.mint(poor, 1);
@@ -1060,18 +1075,61 @@ contract UniswapV3ProxyTest is Test {
     }
 
     /// @notice The mint callback verifies its caller is the factory's pool for the key in the data
+    /// (CREATE2): this contract, which is no pool, is refused by that check, a bare require, even with
+    /// data in the old layout naming as payer the user, who approved the harness. The user pays nothing.
     function testMintCallbackRevertsFromNonPool() public {
-        vm.expectRevert();
-        proxy.uniswapV3MintCallback(
-            1,
-            1,
-            abi.encode(
-                MintCallbackData({
-                    poolKey: PoolAddress.PoolKey({token0: address(token0), token1: address(token1), fee: FEE}),
-                    payer: user
-                })
-            )
+        uint256 userT0Before = token0.balanceOf(user);
+        uint256 userT1Before = token1.balanceOf(user);
+        bytes memory data = abi.encode(
+            MintCallbackData({
+                poolKey: PoolAddress.PoolKey({token0: address(token0), token1: address(token1), fee: FEE}), payer: user
+            })
         );
+
+        (bool ok, bytes memory ret) =
+            address(proxy).call(abi.encodeCall(IUniswapV3MintCallback.uniswapV3MintCallback, (1, 1, data)));
+
+        assertFalse(ok, "a mint callback from a non-pool was honoured");
+        assertEq(ret.length, 0, "refused for another reason than the CREATE2 check");
+        assertEq(token0.balanceOf(user), userT0Before, "a forged mint callback moved token0");
+        assertEq(token1.balanceOf(user), userT1Before, "a forged mint callback moved token1");
+    }
+
+    /// @notice The mint callback charges the account holding the lock, the caller of `mint`, never
+    /// anyone named in its data, so even the genuine pool cannot make it pay outside a mint: called by
+    /// the pool outside any entry point, it passes the CREATE2 check and is refused
+    /// (`UnexpectedCallback`), with data in the old layout (`MintCallbackData`) naming as payer the
+    /// user, who holds the tokens and approved the harness, and with the data `mint` passes now (the
+    /// pool key alone); on the mint harness and on LobsterProxy alike. No token moves, not even in a
+    /// reverted frame.
+    function testMintCallbackRevertsFromTheGenuinePoolOutsideAMint() public {
+        _mintDefaultLiquidity();
+        PoolAddress.PoolKey memory key =
+            PoolAddress.PoolKey({token0: address(token0), token1: address(token1), fee: FEE});
+        bytes[2] memory datas = [abi.encode(MintCallbackData({poolKey: key, payer: user})), abi.encode(key)];
+        uint256[4] memory before = [
+            token0.balanceOf(user),
+            token1.balanceOf(user),
+            token0.balanceOf(address(pool)),
+            token1.balanceOf(address(pool))
+        ];
+
+        vm.expectCall(address(token0), abi.encodeWithSelector(IERC20.transferFrom.selector), 0);
+        vm.expectCall(address(token1), abi.encodeWithSelector(IERC20.transferFrom.selector), 0);
+        for (uint256 i = 0; i < datas.length; i++) {
+            vm.prank(address(pool));
+            vm.expectRevert(IProxyErrors.UnexpectedCallback.selector);
+            proxy.uniswapV3MintCallback(AMOUNT_DESIRED, AMOUNT_DESIRED, datas[i]);
+
+            vm.prank(address(pool));
+            vm.expectRevert(IProxyErrors.UnexpectedCallback.selector);
+            lobster.uniswapV3MintCallback(AMOUNT_DESIRED, AMOUNT_DESIRED, datas[i]);
+        }
+
+        assertEq(token0.balanceOf(user), before[0], "the named payer paid token0");
+        assertEq(token1.balanceOf(user), before[1], "the named payer paid token1");
+        assertEq(token0.balanceOf(address(pool)), before[2], "the pool was paid token0");
+        assertEq(token1.balanceOf(address(pool)), before[3], "the pool was paid token1");
     }
 
     /// @notice An attacker calling the swap callback directly, claiming a pool is owed: refused, and
@@ -1447,24 +1505,68 @@ contract UniswapV3ProxyTest is Test {
         _assertProxyHoldsNothing();
     }
 
-    /// @notice `swap` is payable (V4 legs may spend native ETH) but a V3 leg spends none: ETH sent
-    /// with a V3-only call comes back in full. ETH force-fed to the proxy beforehand belongs to no one
-    /// and goes to that caller too (documented behaviour).
+    /// @notice Replaces "force-fed ETH is swept to the caller". `swap` is payable (V4 legs may spend
+    /// native ETH) but a V3 leg spends none, and a call refunds exactly what is left of its own
+    /// msg.value: ETH sent with a V3-only call comes back in full, no more. ETH force-fed to the proxy
+    /// (a selfdestruct, a coinbase payment; `vm.deal` here) belongs to no one: a call attaching more
+    /// ETH than that, less, or none neither spends nor refunds it, so it stays in the proxy, call after
+    /// call, while every swap runs.
     function testV3SwapRefundsAnyEthSent() public {
         _mintDefaultLiquidity();
         bytes memory data = _data(_exactIn(address(token0), address(token1), SWAP_AMOUNT, 0));
         uint256 ethBefore = user.balance;
+        uint256 userT1Before = token1.balanceOf(user);
 
+        // nothing held: the whole msg.value comes back
         vm.prank(user);
-        lobster.swap{value: 1 ether}(data);
+        uint256 received = lobster.swap{value: 1 ether}(data)[0];
         assertEq(user.balance, ethBefore, "the swap kept ETH");
         assertEq(address(lobster).balance, 0, "the proxy kept ETH");
 
         vm.deal(address(lobster), 0.5 ether);
-        vm.prank(user);
-        lobster.swap{value: 1 ether}(data);
-        assertEq(user.balance, ethBefore + 0.5 ether, "force-fed ETH was not swept to the caller");
-        assertEq(address(lobster).balance, 0, "the proxy kept ETH");
+        uint256[3] memory values = [uint256(1 ether), 1, 0];
+        for (uint256 i = 0; i < values.length; i++) {
+            vm.prank(user);
+            received += lobster.swap{value: values[i]}(data)[0];
+            string memory which = string.concat("call ", vm.toString(i));
+            assertEq(user.balance, ethBefore, string.concat(which, ": not refunded exactly its msg.value"));
+            assertEq(address(lobster).balance, 0.5 ether, string.concat(which, ": the force-fed ETH moved"));
+        }
+        assertEq(token1.balanceOf(user), userT1Before + received, "a swap did not deliver");
+        assertEq(token0.balanceOf(address(lobster)), 0, "proxy holds token0");
+        assertEq(token1.balanceOf(address(lobster)), 0, "proxy holds token1");
+    }
+
+    /// @notice A call that sends no ETH gets none back, so ETH force-fed to the proxy cannot block a
+    /// caller that cannot receive ETH (with the old sweep, one force-fed wei made every swap of such a
+    /// caller revert "STE"): a contract with no receive and no fallback swaps with no msg.value while
+    /// the proxy holds force-fed ETH, pays and receives exactly its swap, is sent no ETH, and the
+    /// force-fed ETH stays in the proxy. The refund path is live: the same caller attaching ETH that no
+    /// leg spends is refunded it, cannot receive it, and that call reverts ("STE") with nothing moved.
+    function testForceFedEthCannotBlockACallerThatCannotReceiveEth() public {
+        _mintDefaultLiquidity();
+        NoEthReceiver caller = new NoEthReceiver();
+        (bool accepted,) = address(caller).call{value: 1}("");
+        assertFalse(accepted, "the caller accepts ETH: the test proves nothing");
+        token0.mint(address(caller), SWAP_AMOUNT);
+        vm.prank(address(caller));
+        token0.approve(address(lobster), type(uint256).max);
+        _allow(address(caller), address(pool));
+        vm.deal(address(lobster), 0.5 ether);
+        bytes memory data = _data(_exactIn(address(token0), address(token1), SWAP_AMOUNT, 0));
+
+        vm.expectRevert(_stringError("STE"));
+        caller.swap{value: 1}(lobster, data);
+        assertEq(token0.balanceOf(address(caller)), SWAP_AMOUNT, "a reverted swap moved the caller's tokens");
+        assertEq(address(lobster).balance, 0.5 ether, "a reverted swap moved the proxy's ETH");
+
+        uint256[] memory amounts = caller.swap(lobster, data);
+
+        assertGt(amounts[0], 0, "the swap did not deliver");
+        assertEq(token0.balanceOf(address(caller)), 0, "the caller did not pay exactly its input");
+        assertEq(token1.balanceOf(address(caller)), amounts[0], "the caller did not receive its output");
+        assertEq(address(caller).balance, 0, "the caller was sent ETH");
+        assertEq(address(lobster).balance, 0.5 ether, "the force-fed ETH left the proxy");
     }
 
     // ===========================================================================
@@ -1692,6 +1794,57 @@ contract UniswapV3ProxyTest is Test {
         }
         assertEq(token0.balanceOf(user), userT0Before, "another account paid");
         assertEq(token1.balanceOf(user), userT1Before, "another account was touched");
+    }
+
+    /// @notice A harness mint is paid by its caller, the account holding the lock, and by no one else:
+    /// not by tx.origin, nor by the position's recipient, here one account that holds both tokens and
+    /// approved the harness. A caller that has not approved the harness is refused ("STF") although that
+    /// account could pay; once it approves, it pays exactly the amounts the call reports, the pool
+    /// receives exactly them, and the position is the recipient's.
+    function testMintIsPaidByItsCallerOnly() public {
+        address vault = makeAddr("vault");
+        token0.mint(vault, AMOUNT_DESIRED);
+        token1.mint(vault, AMOUNT_DESIRED);
+        MintParams memory params = MintParams({
+            token0: address(token0),
+            token1: address(token1),
+            fee: FEE,
+            tickLower: TICK_LOWER,
+            tickUpper: TICK_UPPER,
+            amount0Desired: AMOUNT_DESIRED,
+            amount1Desired: AMOUNT_DESIRED,
+            amount0Min: 0,
+            amount1Min: 0,
+            recipient: user,
+            deadline: vm.getBlockTimestamp() + 3600
+        });
+        uint256 userT0Before = token0.balanceOf(user);
+        uint256 userT1Before = token1.balanceOf(user);
+
+        vm.prank(vault, user);
+        vm.expectRevert(_stringError("STF"));
+        proxy.mint(params);
+
+        vm.startPrank(vault);
+        token0.approve(address(proxy), type(uint256).max);
+        token1.approve(address(proxy), type(uint256).max);
+        vm.stopPrank();
+        uint256 poolT0Before = token0.balanceOf(address(pool));
+        uint256 poolT1Before = token1.balanceOf(address(pool));
+
+        vm.prank(vault, user);
+        (uint256 amount0, uint256 amount1) = proxy.mint(params);
+
+        assertGt(amount0, 0, "nothing was deposited: the test proves nothing");
+        assertGt(amount1, 0, "nothing was deposited: the test proves nothing");
+        assertEq(token0.balanceOf(vault), AMOUNT_DESIRED - amount0, "the caller did not pay exactly amount0");
+        assertEq(token1.balanceOf(vault), AMOUNT_DESIRED - amount1, "the caller did not pay exactly amount1");
+        assertEq(token0.balanceOf(address(pool)), poolT0Before + amount0, "the pool was not paid exactly amount0");
+        assertEq(token1.balanceOf(address(pool)), poolT1Before + amount1, "the pool was not paid exactly amount1");
+        assertEq(token0.balanceOf(user), userT0Before, "tx.origin, the recipient, paid token0");
+        assertEq(token1.balanceOf(user), userT1Before, "tx.origin, the recipient, paid token1");
+        (uint128 liquidity,,,,) = pool.positions(keccak256(abi.encodePacked(user, TICK_LOWER, TICK_UPPER)));
+        assertGt(liquidity, 0, "the recipient does not own the position");
     }
 
     // ===========================================================================

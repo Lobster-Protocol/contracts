@@ -431,6 +431,50 @@ contract LobsterProxyV4BatchTest is BatchSwapFixture {
         _assertNothingParked();
     }
 
+    /// @notice The native-input legs of a call share its msg.value: each is paid from what the legs
+    /// before it left. Two legs of 1 ETH (ETH -> token1, ETH -> tokenC) each fit in 1.5 ETH alone, but
+    /// not together: the call reverts NotEnoughEthSent, and ETH force-fed to the proxy does not make up
+    /// the difference. With exactly 2 ETH both run and the vault gets no change back.
+    function test_nativeInputLegs_shareOneMsgValueBudget() public {
+        SwapCalldata.Leg[] memory s = _batch(_leg(E_V4_E1, ETH, 1e18, false), _leg(E_V4_EC, ETH, 1e18, false));
+        uint256[2] memory strays = [uint256(0), 5e18];
+        for (uint256 i = 0; i < strays.length; i++) {
+            uint256 snap = vm.snapshotState();
+            vm.deal(address(lobster), strays[i]);
+            uint256[4] memory before = _who(user);
+
+            // Each leg alone: paid out of 1.5 ETH, the rest refunded
+            for (uint256 j = 0; j < s.length; j++) {
+                uint256 legSnap = vm.snapshotState();
+                vm.prank(user);
+                lobster.swap{value: 1.5e18}(_data(_batch(s[j])));
+                assertEq(user.balance + 1e18, before[3], "one leg: the vault paid other than its input");
+                assertEq(address(lobster).balance, strays[i], "one leg: the stray ETH moved");
+                vm.revertToState(legSnap);
+            }
+
+            // Both legs out of the same 1.5 ETH: the second finds 0.5 ETH left
+            vm.prank(user);
+            vm.expectRevert(IProxyErrors.NotEnoughEthSent.selector);
+            lobster.swap{value: 1.5e18}(_data(s));
+            _assertUnchanged(before, user, "a rejected call moved the vault's funds");
+            assertEq(address(lobster).balance, strays[i], "rejected call: the stray ETH moved");
+
+            // Exactly enough: both run, the whole msg.value is spent, nothing comes back
+            vm.prank(user);
+            uint256[] memory amounts = lobster.swap{value: 2e18}(_data(s));
+            uint256[4] memory nowHeld = _who(user);
+            assertEq(nowHeld[3] + 2e18, before[3], "the vault paid other than its msg.value, or got change");
+            assertEq(nowHeld[1], before[1] + amounts[0], "token1 output");
+            assertEq(nowHeld[2], before[2] + amounts[1], "tokenC output");
+            assertEq(nowHeld[0], before[0], "token0 moved");
+            _assertUnchanged(
+                [uint256(0), 0, 0, strays[i]], address(lobster), "the proxy holds other than the stray ETH"
+            );
+            vm.revertToState(snap);
+        }
+    }
+
     // ---------------------------------------------------------------------------
     // Multi-leg calls: validation happens before anything runs
     // ---------------------------------------------------------------------------

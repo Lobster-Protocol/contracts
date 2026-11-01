@@ -23,25 +23,41 @@ import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 
 /// @notice A token that, the first time it is transferred to `trigger`, calls `target` with `attack`
 /// and records what happened: before the transfer, or right after it with `afterTransfer` (once the
-/// recipient's balance holds the amount).
+/// recipient's balance holds the amount). The call can carry ETH of the token's own, and the token
+/// accepts ETH, so it can be paid a refund like any caller of a payable entry point.
 contract ReentrantERC20 is MockERC20 {
     address public trigger;
     address public target;
     bytes public attack;
     bool public afterTransfer;
+    /// @dev ETH sent with the attack, out of the token's own balance
+    uint256 public attackValue;
     bool public armed;
     uint256 public attempts;
     bool public attackSucceeded;
     bytes public attackRevertData;
+    /// @dev `target`'s ETH balance when the attack fired: what was within reach of the call
+    uint256 public targetEthWhenFired;
 
     constructor() MockERC20("Reentrant", "RENT", 18) {}
 
+    receive() external payable {}
+
     function arm(address _trigger, address _target, bytes calldata _attack, bool _afterTransfer) external {
-        trigger = _trigger;
-        target = _target;
-        attack = _attack;
-        afterTransfer = _afterTransfer;
-        armed = true;
+        _arm(_trigger, _target, _attack, _afterTransfer, 0);
+    }
+
+    /// @dev As {arm}, the attack sending `_value` wei of the token's own ETH
+    function armWithValue(
+        address _trigger,
+        address _target,
+        bytes calldata _attack,
+        bool _afterTransfer,
+        uint256 _value
+    )
+        external
+    {
+        _arm(_trigger, _target, _attack, _afterTransfer, _value);
     }
 
     function transfer(address to, uint256 amount) public override returns (bool ok) {
@@ -52,9 +68,27 @@ contract ReentrantERC20 is MockERC20 {
         if (fire && afterTransfer) _fire();
     }
 
+    function _arm(
+        address _trigger,
+        address _target,
+        bytes calldata _attack,
+        bool _afterTransfer,
+        uint256 _value
+    )
+        private
+    {
+        trigger = _trigger;
+        target = _target;
+        attack = _attack;
+        afterTransfer = _afterTransfer;
+        attackValue = _value;
+        armed = true;
+    }
+
     function _fire() private {
         attempts++;
-        (attackSucceeded, attackRevertData) = target.call(attack);
+        targetEthWhenFired = target.balance;
+        (attackSucceeded, attackRevertData) = target.call{value: attackValue}(attack);
     }
 }
 
@@ -742,24 +776,40 @@ contract LobsterChainingTest is BatchSwapFixture {
         _assertNothingParked();
     }
 
-    /// @notice An exact-output leg can park its exact amount for the next leg to spend
+    /// @notice An exact-output leg can park its exact amount for the next leg to spend: the HELD leg
+    /// spends exactly the 2 token1 parked in the proxy, which pays them to the next pool
     function test_chain_exactOutputLegFeedsTheNext() public {
-        _assertChainMatchesManual(
-            _batch(
-                _out(E_V3_01, address(token0), 2e18, type(uint256).max, PARKED),
-                _held(E_V3_1C, address(token1), TO_CALLER)
-            )
+        SwapCalldata.Leg[] memory legs = _batch(
+            _out(E_V3_01, address(token0), 2e18, type(uint256).max, PARKED), _held(E_V3_1C, address(token1), TO_CALLER)
         );
+        Reference memory ref = _reference(legs);
+        assertEq(ref.paid[1], 2e18, "the HELD leg spends exactly the 2 parked token1");
+        vm.expectCall(address(token1), abi.encodeCall(IERC20Minimal.transfer, (address(pool1C), 2e18)), 1);
+
+        _assertChainMatches(legs, ref, 0);
+        _assertNothingParked();
     }
 
-    /// @notice An exact-output V4 leg can open a chain: its exact output is parked as credit and spent
+    /// @notice An exact-output V4 leg can open a chain: its exact output is parked as credit, and the
+    /// HELD leg swaps exactly that, the 2 token1, on the PoolManager
     function test_v4Chain_openedByAnExactOutputLeg() public {
-        _assertChainMatchesManual(
-            _batch(
-                _out(E_V4_01, address(token0), 2e18, type(uint256).max, PARKED), // exactly 2 token1 out
-                _held(E_V4_E1, address(token1), TO_CALLER)
-            )
+        SwapCalldata.Leg[] memory legs = _batch(
+            _out(E_V4_01, address(token0), 2e18, type(uint256).max, PARKED), // exactly 2 token1 out
+            _held(E_V4_E1, address(token1), TO_CALLER)
         );
+        Reference memory ref = _reference(legs);
+        assertEq(ref.paid[1], 2e18, "the HELD leg spends exactly the 2 parked token1");
+        // token1 -> ETH, exact input (a negative amount), no price limit (V4's MAX_SQRT_PRICE is V3's
+        // MAX_SQRT_RATIO)
+        IPoolManager.SwapParams memory spend = IPoolManager.SwapParams({
+            zeroForOne: false, amountSpecified: -2e18, sqrtPriceLimitX96: TickMath.MAX_SQRT_RATIO - 1
+        });
+        vm.expectCall(
+            address(manager), abi.encodeCall(IPoolManager.swap, (_v4CoreKey(ETH, address(token1)), spend, "")), 1
+        );
+
+        _assertChainMatches(legs, ref, 0);
+        _assertNothingParked();
     }
 
     /// @notice An exact-output V3 leg feeding a V4 leg: its pool pays exactly the amount out to the
@@ -1021,8 +1071,9 @@ contract LobsterChainingTest is BatchSwapFixture {
     }
 
     /// @notice Tokens sent straight to the proxy, and ETH force-fed to it, are never spent by a HELD leg,
-    /// which spends exactly what its own call parked (KNOWN BEHAVIOUR). The ETH is swept to the next
-    /// caller by the end-of-call refund, as documented; the tokens stay.
+    /// which spends exactly what its own call parked (KNOWN BEHAVIOUR). Nor are they paid out: the
+    /// end-of-call refund returns only what is left of the caller's own msg.value, so a call that sends
+    /// no ETH gets none. Both stay in the proxy.
     function test_fundsSentToTheProxy_areNeverSpentByAHeldLeg() public {
         token1.mint(address(proxy), 5e18);
         vm.deal(address(proxy), 1e18);
@@ -1038,8 +1089,8 @@ contract LobsterChainingTest is BatchSwapFixture {
         _assertChainMatches(legs, ref, 0);
 
         assertEq(token1.balanceOf(address(proxy)), 5e18, "a HELD leg spent tokens its call did not park");
-        assertEq(user.balance, ethBefore + 1e18, "the force-fed ETH was not swept to the caller");
-        assertEq(address(proxy).balance, 0, "proxy holds ETH");
+        assertEq(user.balance, ethBefore, "the force-fed ETH was paid to a caller that sent none");
+        assertEq(address(proxy).balance, 1e18, "the force-fed ETH left the proxy");
     }
 
     /// @notice An exact-output leg cannot spend parked funds: HELD with EXACT_OUT is malformed, on either
@@ -1127,6 +1178,30 @@ contract LobsterChainingTest is BatchSwapFixture {
         );
     }
 
+    /// @notice ETH force-fed to the proxy (a selfdestruct, a coinbase payment) belongs to no one. The
+    /// native legs of a chain share one msg.value and never draw on that ETH, even where it would cover
+    /// what msg.value lacks, down to the last wei; the caller gets back exactly what is left of its
+    /// msg.value, and the force-fed ETH stays in the proxy.
+    function test_chain_nativeLegs_neverDrawOnForceFedEth() public {
+        vm.deal(address(proxy), 1e18);
+        SwapCalldata.Leg[] memory legs = _batch(
+            _in(E_V4_E1, ETH, 1e18, PARKED), // 1 ETH out of msg.value
+            _held(E_V3_1C, address(token1), TO_CALLER),
+            _in(E_V4_EC, ETH, 0.5e18, TO_CALLER) // 0.5 ETH out of what is left of it
+        );
+        uint256[] memory before = _balances();
+
+        // The force-fed ETH would make up the rest of the first leg, or the last wei of the second
+        _assertSwapReverts(legs, 0.5e18, IProxyErrors.NotEnoughEthSent.selector);
+        _assertSwapReverts(legs, 1.5e18 - 1, IProxyErrors.NotEnoughEthSent.selector);
+        _assertBalancesEq(_balances(), before, "a rejected call moved funds");
+
+        uint256 ethBefore = user.balance;
+        _assertChainMatches(legs, _reference(legs), 0.25e18);
+        assertEq(ethBefore - user.balance, 1.5e18, "the caller did not pay exactly the native input");
+        assertEq(address(proxy).balance, 1e18, "the force-fed ETH was spent or refunded");
+    }
+
     /// @notice The proxy has no `receive`: every plain ETH transfer is refused, the PoolManager's
     /// included (parked ETH stays credit, native outputs are taken straight to the vault)
     function test_plainEthTransfersAreRejected_evenFromThePoolManager() public {
@@ -1170,13 +1245,15 @@ contract LobsterChainingTest is BatchSwapFixture {
     }
 
     // ---------------------------------------------------------------------------
-    // Reentrancy: parked funds cannot be reached mid-call
+    // Reentrancy: neither parked funds nor the caller's ETH can be reached mid-call
     // ---------------------------------------------------------------------------
 
-    /// @notice The attack the lock exists for. The victim's call parks token1 in the proxy, then swaps into
-    /// a token that calls back into the proxy the moment the pool delivers it. The callback tries to run
-    /// its own call spending the parked token1, from an account that registered the pool, so that only
-    /// the lock stands in its way. It must be refused, and the victim's call must complete normally.
+    /// @notice The victim's call parks token1 in the proxy, then swaps into a token that calls back into
+    /// the proxy the moment the pool delivers it. The callback tries to run its own call spending the
+    /// parked token1, from an account that registered the pool, so that no registry check stops it. The
+    /// lock refuses it, and the victim's call completes normally. The lock is not the only guard here:
+    /// a call's ledger is its own, so past the lock the re-entrant HELD leg would find nothing parked
+    /// (NothingHeld), as for tokens sent to the proxy ({test_fundsSentToTheProxy_areNeverSpentByAHeldLeg}).
     function test_reentrantTokenCannotSpendParkedFunds() public {
         ReentrantERC20 evil = _deployReentrantToken();
         _allow(address(evil), proxy.v3Key(address(v3Pool)), SWAP);
@@ -1208,7 +1285,9 @@ contract LobsterChainingTest is BatchSwapFixture {
 
     /// @notice The same attack while the parked funds are PoolManager credit: the victim's call parks
     /// token1 as V4 credit, and inside the same unlock a V3 leg delivers the re-entrant token to the proxy.
-    /// Its callback tries to spend that credit: refused by the lock.
+    /// Its callback tries to spend that credit: refused by the lock. Past the lock it would still fail:
+    /// the PoolManager refuses a second unlock while the victim's is open (AlreadyUnlocked), and the
+    /// re-entrant call's own ledger holds nothing.
     function test_reentrantTokenCannotSpendParkedCredit() public {
         ReentrantERC20 evil = _deployReentrantToken();
         _allow(address(evil), proxy.v4Key(nativeKey), SWAP);
@@ -1238,6 +1317,73 @@ contract LobsterChainingTest is BatchSwapFixture {
         assertEq(user.balance - ethBefore, amounts[3], "the victim did not get the ETH");
         assertEq(evil.balanceOf(address(proxy)), 0, "proxy holds EVIL");
         _assertNothingParked();
+    }
+
+    /// @notice What is left of the caller's msg.value sits in the proxy while its call runs, and two
+    /// guards keep a re-entrant call from taking it. The victim sends 1.5 ETH, a V4 leg spends 1, and a
+    /// later leg pays the re-entrant token to its pool from the proxy: the token's hook then makes its
+    /// own call, `swap{value: 1}`, a V3-only call it is registered for, while the proxy holds the
+    /// victim's other 0.5 ETH. The lock refuses it, and the victim gets the 0.5 ETH back. The second guard
+    /// is exact accounting: the same call, made outside any call while the proxy holds ETH it was not
+    /// sent, runs and gets back only its own msg.value. (When every refund paid out the proxy's whole
+    /// balance, the lock alone kept the victim's ETH from the attacker.)
+    function test_reentrantCallCannotSweepTheCallersEth() public {
+        ReentrantERC20 evil = _deployReentrantToken();
+        // The attacker's own call: a token0 -> token1 swap on a pool it registered, paid with its own
+        // token0. It sends 1 wei that no leg spends, so its end-of-call refund runs.
+        _allow(address(evil), proxy.v3Key(address(v3Pool)), SWAP);
+        token0.mint(address(evil), 1e18);
+        vm.prank(address(evil));
+        token0.approve(address(proxy), type(uint256).max);
+        vm.deal(address(evil), 1);
+        bytes memory attack = _packed(_batch(_in(E_V3_01, address(token0), 1e15, TO_CALLER)));
+        // Fired when the proxy pays EVIL to its pool, in the HELD leg's callback: the proxy has already
+        // cleared the pool it expects there, so the victim's call would complete whatever the attack did
+        evil.armWithValue(
+            address(_v3PoolFor(address(token0), address(evil))),
+            address(proxy),
+            abi.encodeCall(proxy.swap, (attack)),
+            false,
+            1
+        );
+
+        bytes memory victim = _packed(
+            _batch(
+                _in(E_V4_E1, ETH, 1e18, TO_CALLER), // spends 1 of the 1.5 ETH sent
+                _v3Leg(address(token0), address(evil), 1e18, PARKED),
+                _v3Held(address(evil), address(token0), TO_CALLER) // its payment to the pool fires the attack
+            )
+        );
+        uint256 victimEth = user.balance;
+        uint256 managerEth = address(manager).balance;
+        vm.prank(user);
+        uint256[] memory amounts = proxy.swap{value: 1.5e18}(victim);
+
+        assertEq(evil.attempts(), 1, "the attack never fired; test proves nothing");
+        assertEq(evil.targetEthWhenFired(), 0.5e18, "the victim's ETH was not in the proxy; test proves nothing");
+        assertFalse(evil.attackSucceeded(), "re-entrant call succeeded");
+        assertEq(
+            evil.attackRevertData(),
+            abi.encodeWithSelector(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector),
+            "re-entrant call failed for an unexpected reason"
+        );
+        assertEq(address(evil).balance, 1, "the attacker's ETH changed");
+        assertEq(victimEth - user.balance, 1e18, "the victim did not pay exactly its native input");
+        assertEq(address(manager).balance - managerEth, 1e18, "the PoolManager was not paid the native input");
+        assertGt(amounts[0], 0, "the victim's native leg did not run");
+        assertGt(amounts[2], 0, "the victim's chain did not complete");
+        assertEq(evil.balanceOf(address(proxy)), 0, "proxy holds EVIL");
+        _assertNothingParked();
+
+        // The second guard, outside any call: ETH in the proxy that this call did not send stays there
+        vm.deal(address(proxy), 0.5e18);
+        vm.prank(address(evil));
+        uint256[] memory got = proxy.swap{value: 1}(attack);
+
+        assertGt(got[0], 0, "the attacker's call did not run; test proves nothing");
+        assertEq(token1.balanceOf(address(evil)), got[0], "the attacker did not get its output");
+        assertEq(address(evil).balance, 1, "the attacker got back more than its own msg.value");
+        assertEq(address(proxy).balance, 0.5e18, "ETH the proxy held was paid to a caller that did not send it");
     }
 
     /// @notice The lock covers every entry point, not only `swap`, for the whole call: inside the
@@ -1428,18 +1574,19 @@ contract LobsterChainingTest is BatchSwapFixture {
         _assertBalancesEq(_balances(), before, "a rejected call moved funds");
     }
 
-    /// @notice Forged swap-unlock data is refused like any other: only the PoolManager may call
-    /// `unlockCallback`. The payload follows the proxy's own format (SWAP_TAG | legs | usesLedger | plan
-    /// words | data), whose plan could name any contract as a V3 leg's pool, with any band. Forged V3 swap
-    /// callbacks in the chain modes (pay from parked credit, settle a hand-off) are refused too: only the
-    /// pool the proxy is calling right now may call it, and no call is running.
+    /// @notice Forged swap-unlock data is refused like any other. The payload follows the proxy's own
+    /// format (SWAP_TAG | legs | msg.value << 1 | usesLedger | plan words | data), whose plan could name
+    /// any contract as a V3 leg's pool, with any band. Only the PoolManager may call `unlockCallback`, and
+    /// even the PoolManager only while `swap` is running: outside it the payload never runs. Forged V3
+    /// swap callbacks in the chain modes (pay from parked credit, settle a hand-off) are refused too: only
+    /// the pool the proxy is calling right now may call it, and no call is running.
     function test_forgedChainCallbackIsRefused() public {
         address attacker = makeAddr("attacker");
         bytes memory forged = bytes.concat(
             bytes1(0x01), // SWAP_TAG
             abi.encode(
                 uint256(1), // legs
-                uint256(1), // usesLedger
+                uint256(1), // msg.value << 1 | usesLedger: no ETH, uses the ledger
                 uint256(uint160(attacker)), // the leg's "pool"
                 _bandWord(TickMath.MIN_TICK, TickMath.MAX_TICK)
             ),
@@ -1455,6 +1602,12 @@ contract LobsterChainingTest is BatchSwapFixture {
             vm.expectRevert(IProxyErrors.NotPoolManager.selector);
             proxy.unlockCallback(forged);
         }
+        // The PoolManager itself, with no `swap` running: refused before the plan runs (its "pool" is
+        // never called)
+        vm.expectCall(attacker, "", 0);
+        vm.prank(address(manager));
+        vm.expectRevert(IProxyErrors.UnexpectedCallback.selector);
+        proxy.unlockCallback(forged);
         address[2] memory pools = [attacker, address(v3Pool)];
         for (uint256 i = 0; i < 2; i++) {
             vm.prank(pools[i]);

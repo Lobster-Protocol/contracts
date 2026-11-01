@@ -245,6 +245,40 @@ contract BatchSwapTest is ForkBase {
         assertEq(address(proxy).balance, 0, "proxy retained ETH");
     }
 
+    /// @notice The native-input legs of one call share its msg.value: together they can spend no more
+    /// than it, whatever ETH the proxy holds
+    /// @dev Each native-input leg is paid out of what is left of msg.value, never out of the proxy's
+    /// balance. Two legs that each fit the value but together exceed it by one wei revert
+    /// `NotEnoughEthSent`, although ETH force-fed to the proxy would cover the difference; with
+    /// msg.value covering both, both run and the caller pays exactly their inputs.
+    function test_nativeInputLegs_shareOneMsgValue() public {
+        SwapCalldata.Leg[] memory legs = new SwapCalldata.Leg[](2);
+        legs[0] = _v4In(true, tradeWeth, 0);
+        legs[1] = _v4In(true, tradeWeth, 0);
+        uint256 bothInputs = 2 * uint256(tradeWeth);
+        vm.deal(address(proxy), 10 ether);
+        uint256 forceFed = address(proxy).balance;
+        uint256[4] memory before = _approverHoldings();
+        uint256 ethBefore = approver.balance;
+        bytes memory data = _swapData(legs);
+
+        vm.prank(approver);
+        vm.expectRevert(IProxyErrors.NotEnoughEthSent.selector);
+        proxy.swap{value: bothInputs - 1}(data);
+
+        _assertApproverUntouched(before, "native legs over msg.value");
+        assertEq(approver.balance, ethBefore, "ETH moved on a refused call");
+        assertEq(address(proxy).balance, forceFed, "force-fed ETH was spent");
+
+        vm.prank(approver);
+        uint256[] memory amounts = proxy.swap{value: bothInputs}(data);
+
+        assertGt(amounts[1], 0, "the second native-input leg did not run");
+        assertEq(IERC20(USDC).balanceOf(approver), before[0] + amounts[0] + amounts[1], "USDC output");
+        assertEq(approver.balance, ethBefore - bothInputs, "the caller did not pay exactly both inputs");
+        assertEq(address(proxy).balance, forceFed, "force-fed ETH was spent");
+    }
+
     /// @notice An outsider's batch cannot spend the approver's allowance: without an approval of its
     /// own it fails at its own payment ("STF"), and with one it pays everything itself
     /// @dev The Authorisation suite's invariant, restated for multi-leg calls: every leg is paid by

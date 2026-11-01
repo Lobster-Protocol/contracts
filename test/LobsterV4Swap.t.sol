@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.20;
 
+import {VmSafe} from "forge-std/Vm.sol";
 import {BatchSwapFixture} from "./helpers/BatchSwapFixture.sol";
 import {SwapCalldata} from "./helpers/SwapCalldata.sol";
 import {TickMath} from "../src/libraries/uniswapV3/TickMath.sol";
 import {IProxyErrors} from "../src/interfaces/IProxyErrors.sol";
 import {PoolKey as ProxyPoolKey} from "../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
+import {IUnlockCallback} from "../src/interfaces/uniswapV4/IUnlockCallback.sol";
+import {IUniswapV3PoolMinimal} from "../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
@@ -17,6 +20,9 @@ import {Hooks} from "v4-core/src/libraries/Hooks.sol";
 import {DeltaReturningHook} from "v4-core/src/test/DeltaReturningHook.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
+/// @notice A caller that cannot receive ETH: no `receive` and no `fallback`, so any ETH sent to it reverts
+contract CannotReceiveEth {}
+
 /// @notice LobsterProxy's V4 single swaps against a real PoolManager. A single swap is a one-leg `swap`
 /// call ({SwapCalldata}); the suite covers exact input and output, native ETH in and out with refunds,
 /// slippage bounds, the deadline, price bands, and why hooked pools are out of reach. The user (the
@@ -26,6 +32,10 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 /// pool on the same currencies, fee and tickSpacing as `cleanKey`: initialized, with real liquidity, and
 /// with a DeltaReturningHook attached.
 contract LobsterV4SwapTest is BatchSwapFixture {
+    /// @dev UniswapSwapProxy's TO_MANAGER: the bit of a leg's band word, in the swap unlock payload, that
+    /// sends that V3 leg's parked output straight to the PoolManager
+    uint256 constant TO_MANAGER = 1 << 48;
+
     DeltaReturningHook public hook;
     /// @dev token0 / token1, same fee and tickSpacing as `cleanKey`, DeltaReturningHook attached
     ProxyPoolKey public hookedKey;
@@ -167,6 +177,95 @@ contract LobsterV4SwapTest is BatchSwapFixture {
         return (_v4In(nativeKey, false, amount, 0), 0);
     }
 
+    /// @dev The premise of the hooked-pool tests: the vault really did register the hooked PoolId, which
+    /// is not the hookless pool's, with SWAP, and with a band (`bandSet`) or, in a test that clears it on
+    /// purpose, with none. So a refusal comes from a leg being unable to name the hooked pool, never from
+    /// the registry missing it.
+    function _assertHookedPoolRegistered(bool bandSet) internal view {
+        bytes32 hookedId = proxy.v4Key(hookedKey);
+        assertTrue(hookedId != proxy.v4Key(cleanKey), "fixture: the hooked PoolId is the hookless one");
+        assertEq(proxy.permissionsOf(user, hookedId), SWAP, "fixture: the hooked pool is not registered");
+        (int24 lo, int24 hi) = proxy.priceBandOf(user, hookedId);
+        if (bandSet) assertLt(lo, hi, "fixture: the hooked pool has no band");
+        else assertTrue(lo == 0 && hi == 0, "fixture: the hooked pool's band is not cleared");
+    }
+
+    /// @dev The `unlockCallback` calldata the PoolManager sends the proxy while `user` runs `legs` with
+    /// `value` wei: the payload the proxy itself writes, captured from a real call that is then rewound
+    function _capturedSwapCallback(
+        SwapCalldata.Leg[] memory legs,
+        uint256 value
+    )
+        internal
+        returns (bytes memory callback)
+    {
+        uint256 snap = vm.snapshotState();
+        vm.startStateDiffRecording();
+        vm.prank(user);
+        proxy.swap{value: value}(SwapCalldata.encode(vm.getBlockTimestamp(), legs));
+        VmSafe.AccountAccess[] memory accesses = vm.stopAndReturnStateDiff();
+        vm.revertToState(snap);
+
+        uint256 found = 0;
+        for (uint256 i = 0; i < accesses.length; i++) {
+            VmSafe.AccountAccess memory access = accesses[i];
+            if (
+                access.kind == VmSafe.AccountAccessKind.Call && access.accessor == address(manager)
+                    && access.account == address(proxy)
+            ) {
+                callback = access.data;
+                found++;
+            }
+        }
+        assertEq(found, 1, "fixture: the PoolManager did not call the proxy exactly once");
+        bytes4 selector;
+        assembly ("memory-safe") {
+            selector := and(mload(add(callback, 0x20)), shl(224, 0xffffffff))
+        }
+        assertEq(selector, IUnlockCallback.unlockCallback.selector, "fixture: not an unlockCallback");
+        assertEq(callback[68], bytes1(0x01), "fixture: not a swap unlock (SWAP_TAG)");
+    }
+
+    /// @dev Word `i` of the swap payload in `callback`, an `unlockCallback` calldata (selector, offset and
+    /// length of `data`, then SWAP_TAG and the words): 0 = legs, 1 = msg.value << 1 | usesLedger, then per
+    /// leg its pool's registry key and its band word
+    function _payloadWord(bytes memory callback, uint256 i) internal pure returns (uint256 word) {
+        assertGe(callback.length, 101 + 32 * i, "fixture: payload too short");
+        assembly ("memory-safe") {
+            word := mload(add(add(callback, 0x65), shl(5, i)))
+        }
+    }
+
+    /// @dev `callback`, sent by the real PoolManager outside any call, is refused with UnexpectedCallback
+    /// before anything runs: no unlock, swap, sync, settle or take on the PoolManager, no V3 swap, no token
+    /// pulled, and every balance and price stays where it was, the proxy's ETH included
+    function _assertForgedSwapCallbackDoesNothing(bytes memory callback) internal {
+        uint256[3] memory userBefore = _balances(user);
+        uint256[3] memory proxyBefore = _balances(address(proxy));
+        uint256[3] memory managerBefore = _balances(address(manager));
+        uint160[3] memory pricesBefore = [_sqrtPriceOf(cleanKey), _sqrtPriceOf(nativeKey), _v3Price()];
+        _expectNothingRuns();
+        vm.expectCall(address(manager), abi.encodeWithSelector(IPoolManager.sync.selector), 0);
+        vm.expectCall(address(manager), abi.encodeWithSelector(IPoolManager.settle.selector), 0);
+        vm.expectCall(address(manager), abi.encodeWithSelector(IPoolManager.take.selector), 0);
+        vm.expectCall(address(v3Pool), abi.encodeWithSelector(IUniswapV3PoolMinimal.swap.selector), 0);
+        vm.expectCall(address(token0), abi.encodeWithSelector(token0.transferFrom.selector), 0);
+        vm.expectCall(address(token1), abi.encodeWithSelector(token1.transferFrom.selector), 0);
+
+        vm.prank(address(manager));
+        (bool ok, bytes memory ret) = address(proxy).call(callback);
+
+        assertFalse(ok, "a swap unlock ran outside any call");
+        assertEq(ret, abi.encodeWithSelector(IProxyErrors.UnexpectedCallback.selector), "refused for another reason");
+        _assertBalancesEq(_balances(user), userBefore, "the user");
+        _assertBalancesEq(_balances(address(proxy)), proxyBefore, "the proxy");
+        _assertBalancesEq(_balances(address(manager)), managerBefore, "the PoolManager");
+        uint160[3] memory pricesAfter = [_sqrtPriceOf(cleanKey), _sqrtPriceOf(nativeKey), _v3Price()];
+        for (uint256 i = 0; i < 3; i++) {
+            assertEq(pricesAfter[i], pricesBefore[i], string.concat("pool ", vm.toString(i), ": price moved"));
+        }
+    }
+
     // ---------------------------------------------------------------------------
     // Happy path: a single swap is a one-leg call, inside exactly one unlock
     // ---------------------------------------------------------------------------
@@ -226,6 +325,7 @@ contract LobsterV4SwapTest is BatchSwapFixture {
         _expectNothingRuns();
         _expectHookNeverCalled();
 
+        _assertHookedPoolRegistered({bandSet: true});
         vm.prank(user);
         vm.expectRevert(IProxyErrors.PoolNotAllowed.selector);
         proxy.swap(_data(_batch(_v4In(hookedKey, true, 1e18, 0))));
@@ -242,6 +342,7 @@ contract LobsterV4SwapTest is BatchSwapFixture {
         _expectNothingRuns();
         _expectHookNeverCalled();
 
+        _assertHookedPoolRegistered({bandSet: true});
         vm.prank(user);
         vm.expectRevert(IProxyErrors.PoolNotAllowed.selector);
         proxy.swap(_data(_batch(_v4Out(hookedKey, true, 1e18, 2e18))));
@@ -266,6 +367,7 @@ contract LobsterV4SwapTest is BatchSwapFixture {
         // amountOutMinimum is deliberately zero here: the registry, not the slippage bound, is what has
         // to stop this
         _register(cleanKey, 0);
+        _assertHookedPoolRegistered({bandSet: true});
         vm.prank(user);
         vm.expectRevert(IProxyErrors.PoolNotAllowed.selector);
         proxy.swap(_data(_batch(_v4In(hookedKey, true, 1e18, 0))));
@@ -273,6 +375,7 @@ contract LobsterV4SwapTest is BatchSwapFixture {
         assertEq(token1.balanceOf(user), t1Before, "victim's balance changed");
 
         _register(cleanKey, SWAP);
+        _assertHookedPoolRegistered({bandSet: true});
         uint256 amountOut = _swapAs(user, _batch(_v4In(hookedKey, true, 1e18, 0)))[0];
         assertGt(amountOut, 0, "no output");
         assertEq(token1.balanceOf(user) - t1Before, amountOut, "output not delivered whole");
@@ -293,6 +396,7 @@ contract LobsterV4SwapTest is BatchSwapFixture {
         _expectNothingRuns();
         _expectHookNeverCalled();
 
+        _assertHookedPoolRegistered({bandSet: true});
         vm.prank(user);
         vm.expectRevert(IProxyErrors.PoolNotAllowed.selector);
         proxy.swap(_data(_batch(_v4In(hookedKey, true, 1e18, 0))));
@@ -307,12 +411,14 @@ contract LobsterV4SwapTest is BatchSwapFixture {
     function test_v4Swap_hookedPoolsEntryIsNeverConsulted() public {
         // The hooked pool's band cleared: irrelevant, the swap runs on the hookless pool
         _setBand(hookedKey, 0, 0);
+        _assertHookedPoolRegistered({bandSet: false});
         uint256 amountOut = _swapAs(user, _batch(_v4In(hookedKey, true, 1e18, 0)))[0];
         assertGt(amountOut, 0, "the hooked pool's band blocked a hookless swap");
 
         // The hooked pool's band wide open, the hookless pool's cleared: refused, for the hookless one
         _setBand(hookedKey, TickMath.MIN_TICK, TickMath.MAX_TICK);
         _setBand(cleanKey, 0, 0);
+        _assertHookedPoolRegistered({bandSet: true});
         vm.prank(user);
         vm.expectRevert(IProxyErrors.PriceBandNotSet.selector);
         proxy.swap(_data(_batch(_v4In(hookedKey, true, 1e18, 0))));
@@ -417,6 +523,47 @@ contract LobsterV4SwapTest is BatchSwapFixture {
         vm.prank(address(manager));
         vm.expectRevert(IProxyErrors.UnexpectedCallback.selector);
         proxy.unlockCallback(hex"03");
+    }
+
+    /// @notice The swap body of `unlockCallback` runs only inside a `swap` call. The PoolManager itself, the
+    /// one caller `unlockCallback` accepts, calling it outside any call with the very payload the proxy
+    /// writes for a swap on a pool the user registered, is refused with UnexpectedCallback before anything
+    /// runs, and nothing moves
+    function test_unlockCallback_swapPayloadOutsideASwap_reverts() public {
+        bytes memory callback = _capturedSwapCallback(_batch(_v4In(cleanKey, true, 1e18, 0)), 0);
+        // One leg on the hookless pool the user registered, no msg.value, no ledger
+        bytes32 key = proxy.v4Key(cleanKey);
+        assertEq(_payloadWord(callback, 0), 1, "fixture: legs");
+        assertEq(_payloadWord(callback, 1), 0, "fixture: msg.value and ledger");
+        assertEq(bytes32(_payloadWord(callback, 2)), key, "fixture: not the registered pool");
+        assertEq(proxy.permissionsOf(user, key), SWAP, "fixture: the pool is not registered");
+
+        _assertForgedSwapCallbackDoesNothing(callback);
+    }
+
+    /// @notice The same with a payload that has native and TO_MANAGER legs and claims a msg.value: a V3
+    /// output paid straight to the PoolManager for the HELD V4 leg that spends it (ETH out), then ETH in,
+    /// paid from the msg.value the payload claims. With the proxy holding more force-fed ETH than that,
+    /// nothing runs either, and the ETH stays in the proxy.
+    function test_unlockCallback_nativeAndToManagerPayloadOutsideASwap_reverts() public {
+        SwapCalldata.Leg[] memory legs = new SwapCalldata.Leg[](3);
+        legs[0] = _v3In(address(token0), address(token1), 1e18, 0);
+        legs[0].park = true; // spent by a V4 leg, so paid by the V3 pool straight to the PoolManager
+        legs[1] = _v4In(nativeKey, false, 0, 0); // token1, all leg 0 parked, in; ETH out
+        legs[1].held = true;
+        legs[2] = _v4In(nativeKey, true, 0.5e18, 0); // ETH in, from msg.value
+        uint256 value = 1e18;
+        bytes memory callback = _capturedSwapCallback(legs, value);
+        assertEq(_payloadWord(callback, 0), 3, "fixture: legs");
+        assertEq(_payloadWord(callback, 1), (value << 1) | 1, "fixture: claimed msg.value and ledger");
+        assertEq(bytes32(_payloadWord(callback, 2)), proxy.v3Key(address(v3Pool)), "fixture: leg 0's pool");
+        assertTrue(_payloadWord(callback, 3) & TO_MANAGER != 0, "fixture: leg 0 not paid to the PoolManager");
+        assertEq(bytes32(_payloadWord(callback, 4)), proxy.v4Key(nativeKey), "fixture: leg 1's pool");
+        assertEq(bytes32(_payloadWord(callback, 6)), proxy.v4Key(nativeKey), "fixture: leg 2's pool");
+
+        // More ETH than the payload claims, force-fed: the only ETH a forged native leg could pay with
+        vm.deal(address(proxy), 3 * value);
+        _assertForgedSwapCallbackDoesNothing(callback);
     }
 
     /// @notice The deadline is one uint32 for the whole call: past it, exact input and exact output alike
@@ -564,27 +711,83 @@ contract LobsterV4SwapTest is BatchSwapFixture {
         assertEq(address(proxy).balance, 0, "proxy retained ETH");
     }
 
-    /// @notice KNOWN BEHAVIOUR (see UniswapSwapProxy): the proxy's whole ETH balance goes back to the
-    /// caller at the end of every call. That is msg.value no leg spent, on a call with no native leg too,
-    /// and ETH force-fed to the proxy, which belongs to no one; force-fed ETH can also pay a native input.
-    function test_swap_refundsEveryWeiTheProxyHolds_forceFedIncluded() public {
+    /// @notice KNOWN BEHAVIOUR (see UniswapSwapProxy), which replaced the sweep of the proxy's whole
+    /// balance: the caller gets back exactly what its legs left of its own msg.value, all of it on a call
+    /// with no native leg, and nothing else. ETH force-fed to the proxy (a selfdestruct, a coinbase
+    /// payment) belongs to no one and stays where it is: a call that sends no ETH gets none back, so even
+    /// a caller that cannot receive ETH can still swap.
+    function test_swap_refundsExactlyTheUnspentValue_forceFedEthStays() public {
         uint256 ethBefore = user.balance;
 
         // msg.value on a call that spends no ETH: refunded whole
         _swapWithValue(_batch(_v4In(cleanKey, true, 1e18, 0)), 1e18);
         assertEq(user.balance, ethBefore, "unspent msg.value kept");
-
-        // ETH force-fed to the proxy (a selfdestruct, a coinbase payment): swept to the next caller
-        vm.deal(address(proxy), 3e18);
-        _swapWithValue(_batch(_v4In(cleanKey, true, 1e18, 0)), 0);
-        assertEq(user.balance - ethBefore, 3e18, "force-fed ETH not swept to the caller");
-
-        // ...even when it pays the caller's native input
-        vm.deal(address(proxy), 1e18);
-        uint256 amountOut = _swapWithValue(_batch(_v4In(nativeKey, true, 0.4e18, 0)), 0)[0];
-        assertGt(amountOut, 0, "no output");
-        assertEq(user.balance - ethBefore, 3.6e18, "force-fed ETH: input not paid from it, or rest not swept");
         assertEq(address(proxy).balance, 0, "proxy retained ETH");
+
+        // ETH force-fed to the proxy: a call that sends none gets none of it
+        uint256 forceFed = 3e18;
+        vm.deal(address(proxy), forceFed);
+        _swapWithValue(_batch(_v4In(cleanKey, true, 1e18, 0)), 0);
+        assertEq(user.balance, ethBefore, "force-fed ETH paid to a caller that sent none");
+        assertEq(address(proxy).balance, forceFed, "force-fed ETH left the proxy");
+
+        // ... and a call that sends some but has no native leg gets back exactly its msg.value
+        _swapWithValue(_batch(_v4In(cleanKey, true, 1e18, 0)), 1e18);
+        assertEq(user.balance, ethBefore, "no native leg: refund != msg.value");
+        assertEq(address(proxy).balance, forceFed, "force-fed ETH left the proxy");
+
+        // A call that sends some gets back exactly its own change, msg.value minus what its leg spent,
+        // exact input and exact output alike
+        _swapWithValue(_batch(_v4In(nativeKey, true, 0.4e18, 0)), 1e18);
+        assertEq(ethBefore - user.balance, 0.4e18, "exact input: refund != msg.value - amountIn");
+        uint256 amountIn = _swapWithValue(_batch(_v4Out(nativeKey, true, 0.4e18, 1e18)), 1e18)[0];
+        assertEq(ethBefore - user.balance, 0.4e18 + amountIn, "exact output: refund != msg.value - amountIn");
+        assertEq(address(proxy).balance, forceFed, "force-fed ETH spent or refunded");
+
+        // A caller that cannot receive ETH is not blocked by it: a call without value is sent nothing
+        address noEth = address(new CannotReceiveEth());
+        (bool accepted,) = noEth.call{value: 1}("");
+        assertFalse(accepted, "fixture: the caller accepts ETH");
+        _newVault(noEth);
+        vm.prank(noEth);
+        uint256 amountOut = proxy.swap(_data(_batch(_v4In(cleanKey, true, 1e18, 0))))[0];
+        assertGt(amountOut, 0, "no output");
+        assertEq(address(proxy).balance, forceFed, "force-fed ETH left the proxy");
+    }
+
+    /// @notice A native input is paid from msg.value only: a leg needing more than the caller sent
+    /// reverts NotEnoughEthSent although the proxy holds enough force-fed ETH to cover it, without
+    /// msg.value or with too little, exact input and exact output alike; and once one native leg has used
+    /// up msg.value, the next cannot dip into it either (one call, one msg.value). The caller keeps its
+    /// ETH, the force-fed ETH stays, and the same legs, paid in full, run.
+    function test_swap_nativeInputCannotUseForceFedEth() public {
+        uint256 forceFed = 3e18;
+        vm.deal(address(proxy), forceFed);
+        uint256 ethBefore = user.balance;
+        uint160 priceBefore = _sqrtPriceOf(nativeKey);
+        SwapCalldata.Leg memory ethIn = _v4In(nativeKey, true, 1e18, 0);
+
+        vm.prank(user);
+        vm.expectRevert(IProxyErrors.NotEnoughEthSent.selector);
+        proxy.swap(_data(_batch(ethIn)));
+        vm.prank(user);
+        vm.expectRevert(IProxyErrors.NotEnoughEthSent.selector);
+        proxy.swap{value: 1e18 - 1}(_data(_batch(ethIn)));
+        vm.prank(user);
+        vm.expectRevert(IProxyErrors.NotEnoughEthSent.selector);
+        proxy.swap{value: 1e18}(_data(_batch(_v4Out(nativeKey, true, 1e18, 2e18)))); // costs more than 1e18
+        // Two native legs, msg.value enough for the first only
+        vm.prank(user);
+        vm.expectRevert(IProxyErrors.NotEnoughEthSent.selector);
+        proxy.swap{value: 1.5e18}(_data(_batch(ethIn, ethIn)));
+
+        assertEq(user.balance, ethBefore, "caller lost ETH");
+        assertEq(address(proxy).balance, forceFed, "force-fed ETH spent");
+        assertEq(_sqrtPriceOf(nativeKey), priceBefore, "a refused swap moved the price");
+
+        _swapWithValue(_batch(ethIn, ethIn), 2e18);
+        assertEq(ethBefore - user.balance, 2e18, "paid != the two legs' inputs");
+        assertEq(address(proxy).balance, forceFed, "force-fed ETH spent or refunded");
     }
 
     // ---------------------------------------------------------------------------

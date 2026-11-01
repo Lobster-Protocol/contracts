@@ -16,6 +16,7 @@ import {
 import {BatchSwapFixture} from "./helpers/BatchSwapFixture.sol";
 import {SwapCalldata} from "./helpers/SwapCalldata.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IProxyErrors} from "../src/interfaces/IProxyErrors.sol";
 
 import {PoolId} from "v4-core/src/types/PoolId.sol";
@@ -73,17 +74,19 @@ contract LobsterBatchSwapTest is BatchSwapFixture {
     }
 
     /// @notice Every swap kind (V3 and V4, exact input and exact output), on all three pools, in one
-    /// call: each leg executes, exact-output legs deliver exactly their amount, the proxy keeps nothing
+    /// call: each leg executes, exact-output legs deliver exactly their amount, the proxy keeps nothing.
+    /// The three exact-output legs buy three different assets (token1, token0, ETH), so reconciling
+    /// each asset's net change with every leg pins each one's delivery.
     function test_everySwapKind_onEveryPool_runsInOneCall() public {
         SwapCalldata.Leg[] memory legs = new SwapCalldata.Leg[](7);
         legs[0] = _v3In(address(token0), address(token1), 1e18, 0);
         legs[1] = _v3In(address(token1), address(token0), 1e18, 0);
         legs[2] = _v4In(cleanKey, true, 1e18, 0);
         legs[3] = _v4In(nativeKey, false, 1e18, 0); // token1 -> ETH
-        legs[4] = _v3Out(address(token0), address(token1), 1e18, type(uint256).max);
+        legs[4] = _v3Out(address(token0), address(token1), 1e18, type(uint256).max); // token0 -> exactly 1 token1
         legs[5] = _v4Out(cleanKey, false, 1e18, type(uint128).max); // token1 -> exactly 1 token0
         legs[6] = _v4Out(nativeKey, false, 1e18, type(uint128).max); // token1 -> exactly 1 ETH
-        uint256 ethBefore = user.balance;
+        uint256[6] memory before = _holdings();
 
         uint256[] memory amounts = _swapAs(user, legs);
 
@@ -91,7 +94,19 @@ contract LobsterBatchSwapTest is BatchSwapFixture {
         for (uint256 i = 0; i < amounts.length; i++) {
             assertGt(amounts[i], 0, "leg did not execute");
         }
-        assertEq(user.balance, ethBefore + amounts[3] + 1e18, "ETH outputs");
+        // An exact-input leg pays its 1e18 and receives amounts[i]; an exact-output leg pays amounts[i]
+        // and receives exactly its 1e18. Per asset: what was paid on the left, what was received on the right.
+        assertEq(
+            token0.balanceOf(user) + 1e18 + 1e18 + amounts[4], // paid by legs 0, 2, 4
+            before[0] + amounts[1] + 1e18, // received by legs 1, 5
+            "token0: received minus paid"
+        );
+        assertEq(
+            token1.balanceOf(user) + 1e18 + 1e18 + amounts[5] + amounts[6], // paid by legs 1, 3, 5, 6
+            before[1] + amounts[0] + amounts[2] + 1e18, // received by legs 0, 2, 4
+            "token1: received minus paid"
+        );
+        assertEq(user.balance, before[2] + amounts[3] + 1e18, "ETH: received by legs 3, 6"); // no leg pays ETH
         _assertProxyHoldsNothing();
     }
 
@@ -181,7 +196,9 @@ contract LobsterBatchSwapTest is BatchSwapFixture {
     /// flip exact input into exact output (or back). Even the largest one the format carries keeps its
     /// direction inside a multi-leg call: a V3 pool is asked for +(2**128 - 1) as an exact input and
     /// -(2**128 - 1) as an exact output, the PoolManager (opposite sign convention) for -(2**128 - 1)
-    /// as an exact input, and an exact output without a price limit must still fill completely.
+    /// as an exact input and +(2**128 - 1) as an exact output. Each of the four runs when a price limit
+    /// stops it (on V4 only what a leg actually swaps must fit in int128, SwapFlags), and an exact
+    /// output without a price limit must still fill completely.
     /// Replaces the SafeCast revert on 2**255, which the format cannot express any more.
     function test_largestEncodableAmount_keepsItsSwapDirection() public {
         SwapCalldata.Leg memory validLeg = _v4In(cleanKey, true, 1e18, 0);
@@ -231,6 +248,22 @@ contract LobsterBatchSwapTest is BatchSwapFixture {
         );
         amounts = _swapAs(user, _batch(v4ExactIn, _v3In(address(token0), address(token1), 1e18, 0)));
         assertGt(amounts[0], 0, "V4 exact input of the maximum did not execute");
+        _assertProxyHoldsNothing();
+
+        // V4 exact output of the maximum, stopped by a sqrt price limit 1% up: the PoolManager sees a
+        // positive amount
+        (v4Price,,,) = StateLibrary.getSlot0(manager, PoolId.wrap(proxy.v4Key(cleanKey)));
+        SwapCalldata.Leg memory v4ExactOut = _v4Out(cleanKey, false, max, max); // token1 -> token0
+        v4ExactOut.sqrtPriceLimitX96 = v4Price / 100 * 101;
+        vm.expectCall(
+            address(manager),
+            abi.encodeWithSelector(
+                IPoolManagerMinimal.swap.selector, key, false, maxSigned, v4ExactOut.sqrtPriceLimitX96
+            ),
+            1
+        );
+        amounts = _swapAs(user, _batch(v4ExactOut, _v3In(address(token0), address(token1), 1e18, 0)));
+        assertGt(amounts[0], 0, "V4 exact output of the maximum did not execute");
         _assertProxyHoldsNothing();
 
         // Without a price limit, an exact output that the pool cannot fill is refused
@@ -318,6 +351,52 @@ contract LobsterBatchSwapTest is BatchSwapFixture {
         );
 
         _assertHoldingsEq(_holdings(), before, "rejected call");
+    }
+
+    /// @notice "HELD only with exact input" is a rule of its own, not a side effect of a broken layout:
+    /// a HELD exact-output leg laid out exactly as a HELD leg (22 bytes on V3, 25 on V4, as the encoder
+    /// emits it), after a valid PARK leg that it would spend, is refused before anything runs: no pool
+    /// swap, no unlock. The same data with only EXACT_OUT cleared is a valid chain, which runs.
+    function test_wellFormedHeldExactOutputLeg_isRejectedBeforeAnythingRuns() public {
+        address[] memory two = _table(address(token0), address(token1));
+        // token0 -> token1 parked, then a HELD leg back to token0: on the V3 pool, then on the V4 one
+        SwapCalldata.Leg[2] memory parkLegs =
+            [_v3In(address(token0), address(token1), 1e18, 0), _v4In(cleanKey, true, 1e18, 0)];
+        SwapCalldata.Leg[2] memory heldLegs =
+            [_v3In(address(token1), address(token0), 0, 0), _v4In(cleanKey, false, 0, 0)];
+        uint256[2] memory heldSizes = [uint256(22), 25];
+        string[2] memory version = ["V3", "V4"];
+        bytes[2] memory heldExactOut;
+        for (uint256 i = 0; i < 2; i++) {
+            parkLegs[i].park = true;
+            heldLegs[i].held = true;
+            bytes memory park = SwapCalldata.encodeLeg(parkLegs[i], 0, 1);
+            bytes memory heldIn = SwapCalldata.encodeLeg(heldLegs[i], 1, 0);
+            heldLegs[i].exactOut = true;
+            bytes memory heldOut = SwapCalldata.encodeLeg(heldLegs[i], 1, 0);
+            assertEq(heldOut.length, heldSizes[i], string.concat("fixture: not the ", version[i], " HELD layout"));
+            assertEq(uint8(heldOut[0]), uint8(heldIn[0]) | SwapFlags.EXACT_OUT, "fixture: flags");
+            assertEq(_slice(heldOut, 1, heldOut.length), _slice(heldIn, 1, heldIn.length), "fixture: fields differ");
+
+            // Control: as exact input, the HELD leg completes a chain that runs
+            vm.prank(user);
+            uint256[] memory amounts = proxy.swap(_withTable(two, bytes.concat(park, heldIn)));
+            assertGt(amounts[1], 0, string.concat("fixture: the ", version[i], " chain did not run"));
+
+            heldExactOut[i] = _withTable(two, bytes.concat(park, heldOut));
+        }
+
+        uint256[6] memory before = _holdings();
+        uint160 priceBefore = _v3Price();
+        vm.expectCall(address(v3Pool), abi.encodeWithSelector(IUniswapV3PoolMinimal.swap.selector), 0);
+        vm.expectCall(address(manager), abi.encodeWithSelector(IPoolManagerMinimal.unlock.selector), 0);
+
+        for (uint256 i = 0; i < 2; i++) {
+            _expectMalformed(heldExactOut[i], string.concat(version[i], " HELD exact-output leg"));
+        }
+
+        _assertHoldingsEq(_holdings(), before, "rejected calls");
+        assertEq(_v3Price(), priceBefore, "a rejected call moved the pool");
     }
 
     /// @notice The data must end exactly where its last leg does: every prefix of a valid two-leg
@@ -480,38 +559,87 @@ contract LobsterBatchSwapTest is BatchSwapFixture {
     }
 
     /// @notice ETH force-fed to the proxy (a selfdestruct, a coinbase payment; it has no `receive`)
-    /// belongs to no one, and every `swap` call refunds the proxy's whole balance to its caller, so the
-    /// next caller collects it, whatever its legs; a native-input leg draws on it like on msg.value
-    /// (documented behaviour; replaces the old rule that a batch never touched it).
-    function test_forceFedEth_isSweptToTheNextCaller() public {
-        uint256 userEthBefore = user.balance;
+    /// belongs to no one, and no call spends it or refunds it. Without a native leg, a call gets back
+    /// exactly its own msg.value (nothing if it sent none), with or without an unlock. A native-input
+    /// leg is paid from msg.value only: short of its input it reverts NotEnoughEthSent although the
+    /// stray ETH would cover it, and with a surplus the caller pays exactly the input and gets the
+    /// surplus back. After every call the proxy holds exactly the stray ETH. Replaces the sweep of the
+    /// stray ETH to the next caller, which also let a native-input leg spend it.
+    function test_forceFedEth_isNeitherSpentNorRefunded() public {
+        uint256 stray = 5e18;
+        vm.deal(address(proxy), stray);
+        uint256 ethBefore = user.balance;
 
-        vm.deal(address(proxy), 5e18);
-        _swapAs(user, _batch(_v3In(address(token0), address(token1), 1e18, 0)));
-        assertEq(user.balance, userEthBefore + 5e18, "V3-only call: stray ETH not swept to the caller");
+        // No native leg: msg.value 0 or 1 ETH, on a V3-only call and on a call with an unlock
+        SwapCalldata.Leg[2] memory nonNative =
+            [_v3In(address(token0), address(token1), 1e18, 0), _v4In(cleanKey, true, 1e18, 0)];
+        string[2] memory kind = ["V3-only call", "call with an unlock"];
+        uint256[2] memory values = [uint256(0), 1e18];
+        for (uint256 i = 0; i < nonNative.length; i++) {
+            for (uint256 j = 0; j < values.length; j++) {
+                string memory ctx = string.concat(kind[i], " with msg.value ", vm.toString(values[j]));
+                vm.prank(user);
+                proxy.swap{value: values[j]}(_data(_batch(nonNative[i])));
+                assertEq(user.balance, ethBefore, string.concat(ctx, ": refund other than msg.value"));
+                assertEq(address(proxy).balance, stray, string.concat(ctx, ": the stray ETH moved"));
+            }
+        }
 
-        vm.deal(address(proxy), 3e18);
-        _swapAs(user, _batch(_v4In(cleanKey, true, 1e18, 0)));
-        assertEq(user.balance, userEthBefore + 8e18, "call with an unlock: stray ETH not swept to the caller");
+        // A native-input leg (1 ETH -> token1) with msg.value short of its input, the stray ETH being enough
+        SwapCalldata.Leg[] memory native = _batch(_v4In(nativeKey, true, 1e18, 0));
+        uint256[2] memory short = [uint256(0), 1e18 - 1];
+        for (uint256 i = 0; i < short.length; i++) {
+            vm.prank(user);
+            vm.expectRevert(IProxyErrors.NotEnoughEthSent.selector);
+            proxy.swap{value: short[i]}(_data(native));
+            assertEq(address(proxy).balance, stray, "short msg.value: the stray ETH moved");
+        }
+        assertEq(user.balance, ethBefore, "short msg.value: the caller's ETH moved");
 
-        // No msg.value: the stray ETH pays the native leg, the rest is the caller's change
-        vm.deal(address(proxy), 2e18);
+        // msg.value = input + surplus: the caller pays exactly the input and gets the surplus back
         uint256 token1Before = token1.balanceOf(user);
-        uint256[] memory amounts = _swapAs(user, _batch(_v4In(nativeKey, true, 1e18, 0)));
-        assertEq(user.balance, userEthBefore + 9e18, "stray ETH not spent before the caller's change");
+        vm.prank(user);
+        uint256[] memory amounts = proxy.swap{value: 1e18 + 0.5e18}(_data(native));
+        assertEq(user.balance + 1e18, ethBefore, "native leg: the caller paid other than its input");
         assertEq(token1.balanceOf(user), token1Before + amounts[0], "native leg output");
+        assertEq(address(proxy).balance, stray, "native leg: the stray ETH moved");
+        assertEq(token0.balanceOf(address(proxy)), 0, "proxy retained token0");
+        assertEq(token1.balanceOf(address(proxy)), 0, "proxy retained token1");
+    }
 
-        _assertProxyHoldsNothing();
+    /// @notice A caller that cannot receive ETH (a contract with no `receive` and no `fallback`) is not
+    /// blocked by ETH force-fed to the proxy: a call that sends no ETH gets none back, so its V3-only
+    /// call and its call with a V4 leg (ERC20 only) both succeed, it receives no ETH, and the stray
+    /// ETH stays in the proxy. (While every call swept the proxy's balance to its caller, force-feeding
+    /// the proxy made such a caller's swaps revert.)
+    function test_callerThatCannotReceiveEth_isNotBlockedByForceFedEth() public {
+        EthRejectingVault vault = new EthRejectingVault();
+        token0.mint(address(vault), 10e18);
+        vault.approve(address(token0), address(proxy));
+        _allow(address(vault), proxy.v3Key(address(v3Pool)), SWAP);
+        _allow(address(vault), proxy.v4Key(cleanKey), SWAP);
+        vm.deal(address(proxy), 5e18);
+        (bool accepted,) = address(vault).call{value: 1}("");
+        assertFalse(accepted, "fixture: the vault accepts ETH");
+
+        uint256[] memory v3Only = vault.swap(proxy, _data(_batch(_v3In(address(token0), address(token1), 1e18, 0))));
+        uint256[] memory withUnlock = vault.swap(proxy, _data(_batch(_v4In(cleanKey, true, 1e18, 0))));
+
+        assertEq(token0.balanceOf(address(vault)), 8e18, "the vault paid other than its two inputs");
+        assertEq(token1.balanceOf(address(vault)), v3Only[0] + withUnlock[0], "the vault did not receive its outputs");
+        assertEq(address(vault).balance, 0, "the vault received ETH");
+        assertEq(address(proxy).balance, 5e18, "the stray ETH moved");
     }
 
     /// @notice Funds that reached the proxy outside a call (a direct token transfer, force-fed ETH)
     /// are never spent by a HELD leg, which spends exactly what earlier legs of the same call parked:
     /// with nothing parked it reverts NothingHeld, and a chain through a token the proxy happens to
-    /// hold leaves that stray balance untouched. Replaces `HELD_BALANCE`, which spent the whole
-    /// stranded balance.
+    /// hold, ETH included, leaves that stray balance untouched. The stray ETH is not refunded either:
+    /// it stays in the proxy. Replaces `HELD_BALANCE`, which spent the whole stranded balance.
     function test_heldLegs_neverSpendStrayFunds() public {
         token1.transfer(address(proxy), 7e18);
         vm.deal(address(proxy), 5e18);
+        uint256 ethBefore = user.balance;
 
         SwapCalldata.Leg[3] memory heldLegs = [
             _v3In(address(token1), address(token0), 0, 0),
@@ -538,7 +666,16 @@ contract LobsterBatchSwapTest is BatchSwapFixture {
         _swapAs(user, _batch(parkV4, heldLegs[1]));
         assertEq(token1.balanceOf(address(proxy)), 7e18, "the V4 chain spent stray token1");
 
-        assertEq(address(proxy).balance, 0, "stray ETH not refunded at the end of the call");
+        // token1 -V4-> ETH -V4-> token1: the parked ETH is PoolManager credit, which the native HELD
+        // leg spends, never the proxy's stray ETH
+        SwapCalldata.Leg memory parkEth = _v4In(nativeKey, false, 1e18, 0);
+        parkEth.park = true;
+        uint256[] memory amounts = _swapAs(user, _batch(parkEth, heldLegs[2]));
+        assertGt(amounts[1], 0, "the ETH chain did not run");
+        assertEq(token1.balanceOf(address(proxy)), 7e18, "the ETH chain spent stray token1");
+
+        assertEq(address(proxy).balance, 5e18, "the stray ETH was spent or refunded");
+        assertEq(user.balance, ethBefore, "the caller's ETH changed");
         assertEq(token0.balanceOf(address(proxy)), 0, "proxy retained token0");
     }
 
@@ -552,6 +689,7 @@ contract LobsterBatchSwapTest is BatchSwapFixture {
         address[3] memory senders = [user, outsider, address(manager)];
 
         for (uint256 i = 0; i < senders.length; i++) {
+            assertGe(senders[i].balance, 1e18, "fixture: sender cannot fund the transfer");
             vm.prank(senders[i]);
             (bool ok,) = address(proxy).call{value: 1e18}("");
             assertFalse(ok, string.concat("plain ETH transfer accepted from ", vm.toString(senders[i])));
@@ -674,5 +812,17 @@ contract LobsterBatchSwapTest is BatchSwapFixture {
         for (uint256 i = 0; i < out.length; i++) {
             out[i] = unit[i % unit.length];
         }
+    }
+}
+
+/// @notice A vault that cannot receive ETH: a contract with no `receive` and no `fallback`, which
+/// approves the proxy and calls `swap` itself
+contract EthRejectingVault {
+    function approve(address token, address spender) external {
+        require(IERC20(token).approve(spender, type(uint256).max), "approve failed");
+    }
+
+    function swap(UniswapSwapProxy proxy, bytes calldata data) external returns (uint256[] memory) {
+        return proxy.swap(data);
     }
 }
