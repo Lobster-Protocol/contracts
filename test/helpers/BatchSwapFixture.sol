@@ -302,7 +302,7 @@ abstract contract BatchSwapFixture is Test {
     function _randomSwap(uint256 r) internal view returns (SwapCalldata.Leg memory) {
         uint256 kind = r % 4;
         bool zeroForOne = (r >> 8) & 1 == 1;
-        uint128 amount = uint128(bound(r >> 16, 1e6, 10e18));
+        uint128 amount = SafeCast.toUint128(bound(r >> 16, 1e6, 10e18));
 
         if (kind < 2) {
             (address tokenIn, address tokenOut) =

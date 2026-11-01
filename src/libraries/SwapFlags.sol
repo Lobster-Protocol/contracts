@@ -26,6 +26,9 @@ pragma solidity >=0.8.20;
 /// everything the call parked of it (checked when that leg runs, `MalformedSwap`); on V4 what a leg
 /// actually swaps must also fit in int128, which the PoolManager enforces. The deadline is a uint32
 /// timestamp.
+///
+/// List each token once: parked amounts are kept per table index, so a token listed twice is two
+/// separate balances, and a HELD leg spends only what was parked under its own index.
 library SwapFlags {
     /// @notice The leg runs on Uniswap V4 (else V3)
     uint8 internal constant V4 = 0x01;

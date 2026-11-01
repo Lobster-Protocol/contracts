@@ -55,8 +55,8 @@ import {PoolAddress} from "./libraries/uniswapV3/PoolAddress.sol";
 /// caller's msg.value; during `modifyLiquidityV4` the vault's msg.value; every entry point is
 /// `nonReentrant`, so nothing can reach either meanwhile. Native input is paid from the caller's
 /// msg.value only, and only what is left of it is refunded: ETH force-fed to the proxy between calls
-/// belongs to no one and is neither spent nor refunded. Tokens transferred to it directly are not spent
-/// by anything.
+/// belongs to no one and is neither spent nor refunded. Tokens transferred to it directly belong to no
+/// one either; see {UniswapSwapProxy} KNOWN BEHAVIOURS for the one-sided fee token that can spend them.
 ///
 /// HOW A VAULT USES IT.
 /// - The vault's owners register its pools with `setPools` and set their price bands with
@@ -69,6 +69,9 @@ import {PoolAddress} from "./libraries/uniswapV3/PoolAddress.sol";
 ///   `value` on them only if the vault should pay native ETH.
 /// - This contract itself holds a dedicated role on each vault's modifier, for V4 liquidity only; see
 ///   {UniswapV4LiquidityProxy} for exactly what that role must allow.
+/// - Register only pools whose tokens run no outside code in their transfers: such a token could
+///   trade against the vault's other legs from inside its own `swap` call ({UniswapSwapProxy}, KNOWN
+///   BEHAVIOURS); every leg's bound still applies.
 /// - LP positions belong to the vault. V3: the recipient, always the vault, owns the position inside
 ///   the pool; `burn`/`collect` are made by the vault directly on the pool. V4: the vault itself is
 ///   the position's owner in the PoolManager, and exits through `modifyLiquidityV4`.

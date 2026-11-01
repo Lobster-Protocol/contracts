@@ -661,11 +661,19 @@ contract LobsterChainingTest is BatchSwapFixture {
         returns (bool)
     {
         for (uint256 i = 0; i < accesses.length; i++) {
-            if (accesses[i].accessor == from && accesses[i].account == to && bytes4(accesses[i].data) == selector) {
+            if (accesses[i].accessor == from && accesses[i].account == to && _sig(accesses[i].data) == selector) {
                 return true;
             }
         }
         return false;
+    }
+
+    /// @dev The first 4 bytes of `data` (zero when shorter), as `bytes4(data)` but without a cast
+    function _sig(bytes memory data) internal pure returns (bytes4 sig) {
+        if (data.length < 4) return sig;
+        assembly ("memory-safe") {
+            sig := and(mload(add(data, 0x20)), shl(224, 0xffffffff))
+        }
     }
 
     // ---------------------------------------------------------------------------

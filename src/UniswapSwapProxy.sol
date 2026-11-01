@@ -40,12 +40,18 @@ import {PoolAddress} from "./libraries/uniswapV3/PoolAddress.sol";
 /// - native ETH input is paid from the caller's msg.value only, and what is left of it is refunded;
 ///   ETH force-fed to the proxy between calls belongs to no one and is neither spent nor refunded (ETH
 ///   a selfdestruct run by the call itself pushes in mid-call is refunded with the change);
-/// - tokens sent to the proxy outside a call are never spent: a HELD leg spends exactly what the call
-///   parked;
+/// - tokens sent to the proxy outside a call belong to no one: a HELD leg spends what the call parked, as
+///   the pools report it, and nothing else;
 /// - a token that delivers less than a pool reports (fee-on-transfer, rounding) makes a hand-off through
-///   it revert rather than spend anything else;
-/// - in a call with a V4 leg, every leg runs inside the proxy's unlock, so a token whose own transfer
-///   opens a PoolManager unlock cannot be traded in such a call (only in a V3-only one).
+///   it revert rather than spend anything else, with one exception: a token that delivers less into the
+///   proxy than out of it (a fee on one direction only) can make a V3 to V3 hand-off draw the
+///   difference from tokens of its own sent to the proxy outside a call;
+/// - in a call with a V4 leg, every leg runs inside the proxy's unlock. A traded token whose transfers
+///   run outside code can therefore trade on the PoolManager for the rest of the call, paying only at
+///   its end, and so against the call's later legs: each leg's bound and band are what limit that, so
+///   register only tokens whose transfers run no outside code, and give every leg a real bound. For the
+///   same reason, a token whose own transfer opens a PoolManager unlock cannot be traded in such a call
+///   (only in a V3-only one).
 abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolRegistry, IUniswapV3SwapCallback {
     /// @dev keccak256("lobster.proxy.expectedPool") - 1
     uint256 private constant EXPECTED_POOL_SLOT = 0x81f6439a152a2e49b796da8b15878f81ed1ae1f01d0b6a0484a086a9ad2b2e80;

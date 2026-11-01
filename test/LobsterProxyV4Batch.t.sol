@@ -267,11 +267,19 @@ contract LobsterProxyV4BatchTest is BatchSwapFixture {
     {
         for (uint256 i = 0; i < accesses.length; i++) {
             VmSafe.AccountAccess memory a = accesses[i];
-            if (a.kind == VmSafe.AccountAccessKind.Call && a.account == callee && bytes4(a.data) == selector) {
+            if (a.kind == VmSafe.AccountAccessKind.Call && a.account == callee && _sig(a.data) == selector) {
                 return a.depth;
             }
         }
         revert("call not found");
+    }
+
+    /// @dev The first 4 bytes of `data` (zero when shorter), as `bytes4(data)` but without a cast
+    function _sig(bytes memory data) internal pure returns (bytes4 sig) {
+        if (data.length < 4) return sig;
+        assembly ("memory-safe") {
+            sig := and(mload(add(data, 0x20)), shl(224, 0xffffffff))
+        }
     }
 
     // ---------------------------------------------------------------------------

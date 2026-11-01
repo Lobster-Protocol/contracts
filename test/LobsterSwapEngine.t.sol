@@ -18,6 +18,7 @@ import {IProxyErrors} from "../src/interfaces/IProxyErrors.sol";
 
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
+import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
@@ -94,6 +95,130 @@ contract CallbackIntruder {
 
 interface IProxyErrorsCallback {
     function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external;
+}
+
+/// @notice Charges `feeBps` on transfers to `taxed` only: a token whose fee depends on the recipient
+/// (pools exempt, say), so it delivers less into the proxy than out of it
+contract InboundTaxedToken is MockERC20 {
+    address public taxed;
+    uint256 public feeBps;
+
+    constructor() MockERC20("Inbound taxed", "ITX", 18) {}
+
+    function setTax(address to, uint256 bps) external {
+        taxed = to;
+        feeBps = bps;
+    }
+
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        _move(msg.sender, to, amount);
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) public override returns (bool) {
+        uint256 allowed = allowance[from][msg.sender];
+        if (allowed != type(uint256).max) allowance[from][msg.sender] = allowed - amount;
+        _move(from, to, amount);
+        return true;
+    }
+
+    function _move(address from, address to, uint256 amount) private {
+        uint256 fee = to == taxed ? amount * feeBps / 10_000 : 0;
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount - fee;
+        totalSupply -= fee;
+        emit Transfer(from, to, amount - fee);
+    }
+}
+
+/// @notice A token whose transfers run outside code: each time it is moved it makes the next scheduled
+/// call, and bubbles its revert
+contract ScheduledHookToken is MockERC20 {
+    address[] internal callees;
+    bytes[] internal payloads;
+    uint256 public fired;
+
+    constructor() MockERC20("Hooked", "HKD", 18) {}
+
+    function schedule(address[] calldata newCallees, bytes[] calldata newPayloads) external {
+        delete callees;
+        delete payloads;
+        for (uint256 i = 0; i < newCallees.length; i++) {
+            callees.push(newCallees[i]);
+            payloads.push(newPayloads[i]);
+        }
+        fired = 0;
+    }
+
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        _fire();
+        return super.transfer(to, amount);
+    }
+
+    function transferFrom(address from, address to, uint256 amount) public override returns (bool) {
+        _fire();
+        return super.transferFrom(from, to, amount);
+    }
+
+    function _fire() private {
+        if (fired >= callees.length) return;
+        uint256 i = fired++;
+        (bool ok, bytes memory ret) = callees[i].call(payloads[i]);
+        if (!ok) {
+            assembly ("memory-safe") {
+                revert(add(ret, 0x20), mload(ret))
+            }
+        }
+    }
+}
+
+/// @notice Trades on a V4 pool while someone else holds the PoolManager unlocked, without paying: it
+/// front-runs with an unpaid swap, then, called again later in the same unlock, swaps back and takes
+/// the surplus, leaving none of its deltas open
+contract PoolManagerSandwicher {
+    IPoolManager internal immutable MANAGER;
+    PoolKey internal key;
+    address internal profitTo;
+    uint256 internal token1Paid;
+    uint256 internal token0Got;
+
+    constructor(IPoolManager manager) {
+        MANAGER = manager;
+    }
+
+    function setKey(PoolKey calldata newKey, address to) external {
+        key = newKey;
+        profitTo = to;
+    }
+
+    /// @dev token1 -> token0, the victim's direction, exact input `amount`
+    function frontRun(uint256 amount) external {
+        BalanceDelta delta = MANAGER.swap(
+            key,
+            IPoolManager.SwapParams({
+                zeroForOne: false,
+                amountSpecified: -SafeCast.toInt256(amount),
+                sqrtPriceLimitX96: TickMath.MAX_SQRT_RATIO - 1
+            }),
+            ""
+        );
+        token1Paid = SafeCast.toUint256(-int256(delta.amount1()));
+        token0Got = SafeCast.toUint256(int256(delta.amount0()));
+    }
+
+    /// @dev Sells the token0 back and takes the token1 surplus
+    function backRun() external {
+        BalanceDelta delta = MANAGER.swap(
+            key,
+            IPoolManager.SwapParams({
+                zeroForOne: true,
+                amountSpecified: -SafeCast.toInt256(token0Got),
+                sqrtPriceLimitX96: TickMath.MIN_SQRT_RATIO + 1
+            }),
+            ""
+        );
+        MANAGER.take(key.currency1, profitTo, SafeCast.toUint256(int256(delta.amount1())) - token1Paid);
+    }
 }
 
 /// @notice Adversarial suite for the mechanisms the swap-engine rewrite introduced: the one-unlock
@@ -313,7 +438,10 @@ contract LobsterSwapEngineTest is BatchSwapFixture {
     }
 
     function _selector(bytes memory ret) internal pure returns (bytes4 sel) {
-        if (ret.length >= 4) sel = bytes4(ret);
+        if (ret.length < 4) return sel;
+        assembly ("memory-safe") {
+            sel := and(mload(add(ret, 0x20)), shl(224, 0xffffffff))
+        }
     }
 
     /// @dev A V3 leg over an arbitrary pool (the fixture's `_v3In` hardwires FEE, which is fine here)
@@ -627,21 +755,25 @@ contract LobsterSwapEngineTest is BatchSwapFixture {
     function test_malformed_everyRuleReverts() public {
         // Rule: data is longer than the header (there is at least a token table and a leg)
         _assertMalformed(bytes(""), "empty data");
-        _assertMalformed(_header(uint32(block.timestamp), 0), "header only");
+        _assertMalformed(_header(SafeCast.toUint32(block.timestamp), 0), "header only");
 
         // Rule: the token table fits in the data
         _assertMalformed(
-            bytes.concat(_header(uint32(block.timestamp), 5), hex"00112233445566778899"), "token table does not fit"
+            bytes.concat(_header(SafeCast.toUint32(block.timestamp), 5), hex"00112233445566778899"),
+            "token table does not fit"
         );
 
         // Rule: there is at least one leg (data must extend past the token table)
         _assertMalformed(
-            bytes.concat(_header(uint32(block.timestamp), 2), bytes20(address(token0)), bytes20(address(token1))),
+            bytes.concat(
+                _header(SafeCast.toUint32(block.timestamp), 2), bytes20(address(token0)), bytes20(address(token1))
+            ),
             "no legs"
         );
 
-        bytes memory table =
-            bytes.concat(_header(uint32(block.timestamp), 2), bytes20(address(token0)), bytes20(address(token1)));
+        bytes memory table = bytes.concat(
+            _header(SafeCast.toUint32(block.timestamp), 2), bytes20(address(token0)), bytes20(address(token1))
+        );
 
         // Rule: no unknown flag bit is set (0x20 is outside SwapFlags.ALL)
         _assertMalformed(bytes.concat(table, _v3LegBytes(0x20, 0, 1, 1e18, 0)), "unknown flag bit");
@@ -670,7 +802,7 @@ contract LobsterSwapEngineTest is BatchSwapFixture {
 
         // Rule: a V3 leg names no native ETH (address(0))
         bytes memory ethTable =
-            bytes.concat(_header(uint32(block.timestamp), 2), bytes20(address(0)), bytes20(address(token1)));
+            bytes.concat(_header(SafeCast.toUint32(block.timestamp), 2), bytes20(address(0)), bytes20(address(token1)));
         _assertMalformed(bytes.concat(ethTable, _v3LegBytes(0, 0, 1, 1e18, 0)), "V3 leg on native ETH");
 
         // Rule: a PRICE_LIMIT, when flagged, is non-zero
@@ -693,7 +825,7 @@ contract LobsterSwapEngineTest is BatchSwapFixture {
         bytes memory data =
             SwapCalldata.encode(block.timestamp, _legs(_v3In(address(token0), address(token1), 1e18, 0)));
         uint256 index = bound(seed, 0, data.length - 1);
-        uint8 delta = uint8(1 + (seed >> 8) % 255);
+        uint8 delta = SafeCast.toUint8(1 + (seed >> 8) % 255);
         data[index] = bytes1(uint8(data[index]) ^ delta); // guaranteed to differ
 
         uint256 outsiderT0 = token0.balanceOf(outsider);
@@ -793,7 +925,7 @@ contract LobsterSwapEngineTest is BatchSwapFixture {
             uint128 amount;
             uint128 bound_;
             if (!held) {
-                amount = uint128(
+                amount = SafeCast.toUint128(
                     bound(uint256(keccak256(abi.encode(seed, i, "a"))), 1e6, exactOut ? uint256(1e18) : uint256(5e18))
                 );
                 bound_ = exactOut ? type(uint128).max : 0;
@@ -1727,5 +1859,142 @@ contract LobsterSwapEngineTest is BatchSwapFixture {
             assertEq(token0.balanceOf(address(v3Pool)), poolT0, "a refused callback paid the pool");
         }
         _assertProxyEmpty();
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // 11. Documented limits (KNOWN BEHAVIOURS in UniswapSwapProxy and SwapFlags), pinned: what the
+    //     engine does with duplicate table entries, a token taxed on its way into the proxy, and a
+    //     token whose transfers run outside code inside the call's PoolManager unlock.
+    // ---------------------------------------------------------------------------------------------
+
+    /// @dev A V3 HELD leg, raw (flags | in | out | fee | bound)
+    function _heldV3LegBytes(uint8 inIdx, uint8 outIdx) internal pure returns (bytes memory) {
+        return bytes.concat(bytes1(SwapFlags.HELD), bytes1(inIdx), bytes1(outIdx), bytes3(FEE), bytes16(0));
+    }
+
+    /// @notice KNOWN BEHAVIOUR (SwapFlags): parked amounts are kept per token-table index. With token1
+    /// listed twice, a HELD leg reading one index does not see what was parked under the other
+    /// (NothingHeld), and spending only one of the two leaves the other parked (FundsLeftInProxy);
+    /// each index spent by its own HELD leg runs. Every case that would not spend everything reverts.
+    function test_limit_duplicateTableEntries_areSeparateBalances() public {
+        bytes memory table = bytes.concat(
+            _header(SafeCast.toUint32(vm.getBlockTimestamp()), 3),
+            bytes20(address(token0)),
+            bytes20(address(token1)),
+            bytes20(address(token1))
+        );
+        bytes memory parkUnder1 = _v3LegBytes(SwapFlags.PARK, 0, 1, 1e18, 0);
+        bytes memory parkUnder2 = _v3LegBytes(SwapFlags.PARK, 0, 2, 1e18, 0);
+
+        (bool ok, bytes memory ret) = _trySwapRaw(user, bytes.concat(table, parkUnder1, _heldV3LegBytes(2, 0)));
+        assertFalse(ok, "a HELD leg spent what another index parked");
+        assertEq(_selector(ret), IProxyErrors.NothingHeld.selector, "not NothingHeld");
+
+        (ok, ret) = _trySwapRaw(user, bytes.concat(table, parkUnder1, parkUnder2, _heldV3LegBytes(1, 0)));
+        assertFalse(ok, "one HELD leg spent both indices");
+        assertEq(_selector(ret), IProxyErrors.FundsLeftInProxy.selector, "not FundsLeftInProxy");
+
+        uint256 t0 = token0.balanceOf(user);
+        (ok, ret) = _trySwapRaw(
+            user, bytes.concat(table, parkUnder1, parkUnder2, _heldV3LegBytes(1, 0), _heldV3LegBytes(2, 0))
+        );
+        assertTrue(ok, "spending each index from its own HELD leg reverted");
+        uint256[] memory amounts = abi.decode(ret, (uint256[]));
+        assertEq(token0.balanceOf(user), t0 - 2e18 + amounts[2] + amounts[3], "the user's token0 is off");
+        _assertProxyEmpty();
+    }
+
+    /// @notice KNOWN BEHAVIOUR (UniswapSwapProxy): a V3 output parked in the proxy is recorded as the
+    /// pool reports it. With a token that delivers less into the proxy than out of it (a fee on
+    /// transfers to the proxy only), the HELD leg pays the next pool the reported amount out of the
+    /// proxy's balance: with nothing else there the call reverts, and with tokens sent to the proxy
+    /// outside any call, which belong to no one, exactly the fee comes out of them.
+    function test_limit_inboundTaxedToken_handOffDrawsTheFeeFromStrays() public {
+        InboundTaxedToken tax = new InboundTaxedToken();
+        tax.mint(address(this), 100_000e18);
+        assertTrue(tax.approve(address(proxy), type(uint256).max));
+        IUniswapV3FactoryMinimal(v3Factory).createPool(address(tax), address(token1), FEE);
+        _v3PoolFor(address(tax), address(token1)).initialize(SQRT_PRICE_1_1);
+        _mintV3(address(tax), address(token1));
+        _allow(user, proxy.v3Key(address(_v3PoolFor(address(tax), address(token1)))), SWAP);
+        tax.setTax(address(proxy), 100); // 1%, on transfers into the proxy only
+
+        SwapCalldata.Leg memory buy = _v3In(address(token1), address(tax), 1e18, 0);
+        buy.park = true;
+        SwapCalldata.Leg memory sell = _v3In(address(tax), address(token1), 0, 0);
+        sell.held = true;
+
+        (bool ok, bytes memory ret) = _trySwap(user, _legs(buy, sell));
+        assertFalse(ok, "the hand-off paid out more than arrived");
+        assertEq(ret, abi.encodeWithSignature("Error(string)", "ST"), "reverted for the wrong reason");
+
+        tax.setTax(address(0), 0);
+        assertTrue(tax.transfer(address(proxy), 5e18)); // sent to the proxy outside any call
+        tax.setTax(address(proxy), 100);
+        (ok, ret) = _trySwap(user, _legs(buy, sell));
+        assertTrue(ok, "the hand-off reverted with strays to draw on");
+        uint256 fee = abi.decode(ret, (uint256[]))[0] / 100;
+        assertGt(fee, 0, "no fee charged: the test proves nothing");
+        assertEq(tax.balanceOf(address(proxy)), 5e18 - fee, "the strays did not cover exactly the fee");
+    }
+
+    /// @notice KNOWN BEHAVIOUR (UniswapSwapProxy): with a V4 leg, every leg runs inside the proxy's
+    /// unlock, so a traded token whose transfers run outside code can trade on the PoolManager for the
+    /// rest of the call without paying until later in it. Here its first transfer front-runs the vault's
+    /// V4 leg with an unpaid swap and its second closes the position at a profit: without a bound the
+    /// vault gets less. The vault's protection is the leg's bound: with it set to the unattacked output,
+    /// the same attack reverts the call (TooLittleReceived) and the attacker gets nothing.
+    function test_limit_hookTokenInsideTheUnlock_isStoppedByTheLegsBound() public {
+        ScheduledHookToken hooked = new ScheduledHookToken();
+        hooked.mint(address(this), 100_000e18);
+        assertTrue(hooked.approve(address(proxy), type(uint256).max));
+        IUniswapV3FactoryMinimal(v3Factory).createPool(address(hooked), address(token1), FEE);
+        _v3PoolFor(address(hooked), address(token1)).initialize(SQRT_PRICE_1_1);
+        _mintV3(address(hooked), address(token1));
+        hooked.mint(user, 100e18);
+        vm.prank(user);
+        assertTrue(hooked.approve(address(proxy), type(uint256).max));
+        _allow(user, proxy.v3Key(address(_v3PoolFor(address(hooked), address(token1)))), SWAP);
+
+        PoolManagerSandwicher sandwicher = new PoolManagerSandwicher(manager);
+        address profit = makeAddr("sandwich profit");
+        sandwicher.setKey(_v4CoreKey(address(token0), address(token1)), profit);
+        address[] memory callees = new address[](2);
+        callees[0] = address(sandwicher);
+        callees[1] = address(sandwicher);
+        bytes[] memory payloads = new bytes[](2);
+        payloads[0] = abi.encodeCall(PoolManagerSandwicher.frontRun, (100e18));
+        payloads[1] = abi.encodeCall(PoolManagerSandwicher.backRun, ());
+
+        // hooked -> token1 (the vault pays hooked: first hook), the victim V4 leg token1 -> token0, then
+        // token1 -> hooked (the pool delivers hooked: second hook)
+        SwapCalldata.Leg[] memory legs = _legs(
+            _v3In(address(hooked), address(token1), 1e18, 0),
+            _v4In(cleanKey, false, 100e18, 0),
+            _v3In(address(token1), address(hooked), 1e17, 0)
+        );
+
+        uint256 snap = vm.snapshotState();
+        (bool ok, bytes memory ret) = _trySwap(user, legs);
+        assertTrue(ok, "the unattacked call reverted");
+        uint256 unattacked = abi.decode(ret, (uint256[]))[1];
+        assertTrue(vm.revertToState(snap));
+
+        snap = vm.snapshotState();
+        hooked.schedule(callees, payloads);
+        (ok, ret) = _trySwap(user, legs);
+        assertTrue(ok, "the attacked call reverted");
+        assertEq(hooked.fired(), 2, "the hooks did not both fire");
+        assertLt(abi.decode(ret, (uint256[]))[1], unattacked, "the attack did not cost the vault anything");
+        assertGt(token1.balanceOf(profit), 0, "the attacker made no profit");
+        assertTrue(vm.revertToState(snap));
+
+        legs[1].bound = SafeCast.toUint128(unattacked);
+        hooked.schedule(callees, payloads);
+        (ok, ret) = _trySwap(user, legs);
+        assertFalse(ok, "the vault received less than its bound");
+        assertEq(_selector(ret), IProxyErrors.TooLittleReceived.selector, "reverted for the wrong reason");
+        assertEq(hooked.fired(), 0, "the attack's effects survived the revert");
+        assertEq(token1.balanceOf(profit), 0, "the attacker profited");
     }
 }
