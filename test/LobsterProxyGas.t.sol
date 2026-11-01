@@ -191,6 +191,26 @@ contract LobsterProxyGasTest is BatchSwapFixture {
         _measureBatch("batch_route_v3_v4_v4_v3", legs);
     }
 
+    /// @notice A split route: token0 -> token1 on both versions, the two outputs merged and spent by one
+    /// V4 leg, token1 -V4-> ETH
+    function test_gas_batch_split_v3_v4_then_v4() public {
+        Leg[] memory legs = new Leg[](3);
+        legs[0] = _in(E_V3_01, address(token0), 1e18, true);
+        legs[1] = _in(E_V4_01, address(token0), 1e18, true);
+        legs[2] = _held(E_V4_E1, address(token1), false);
+        _measureBatch("batch_split_v3_v4_then_v4", legs);
+    }
+
+    /// @notice A convergent route: token1 produced on V4 (from token0) and on V3 (from tokenC), the two
+    /// outputs merged and spent by one V3 leg, token1 -V3-> token0
+    function test_gas_batch_converge_v4_v3_then_v3() public {
+        Leg[] memory legs = new Leg[](3);
+        legs[0] = _in(E_V4_01, address(token0), 1e18, true);
+        legs[1] = _in(E_V3_1C, address(tokenC), 1e18, true);
+        legs[2] = _held(E_V3_01, address(token1), false);
+        _measureBatch("batch_converge_v4_v3_then_v3", legs);
+    }
+
     /// @notice Eight chained legs alternating versions, revisiting pools:
     /// token0 -V3-> token1 -V4-> ETH -V4-> tokenC -V3-> token1 -V4-> token0 -V3-> token1 -V4-> ETH -V4-> tokenC
     function test_gas_batch_route_8_legs() public {
