@@ -98,7 +98,12 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
     function swap(bytes calldata data) external payable nonReentrant returns (uint256[] memory amounts) {
         (Plan memory plan, bool anyV4) = _prepare(data);
         if (anyV4) {
-            amounts = abi.decode(POOL_MANAGER.unlock(_unlockPayload(data, plan)), (uint256[]));
+            // The callback returns the amounts as raw words ({_swapCallback}): reinterpret them in place
+            bytes memory words = POOL_MANAGER.unlock(_unlockPayload(data, plan));
+            assembly ("memory-safe") {
+                amounts := words
+                mstore(amounts, shr(5, mload(words)))
+            }
         } else {
             amounts = _execute(data, plan, false);
         }
@@ -119,7 +124,14 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
             calldatacopy(add(words, 0x20), add(payload.offset, 0x40), wordsSize)
         }
         Plan memory plan = Plan({legs: legs, usesLedger: usesLedger != 0, words: words});
-        return abi.encode(_execute(payload[64 + wordsSize:], plan, true));
+        uint256[] memory amounts = _execute(payload[64 + wordsSize:], plan, true);
+        // Raw words, the array without its length: {swap} reinterprets them in place
+        bytes memory raw;
+        assembly ("memory-safe") {
+            raw := amounts
+            mstore(raw, shl(5, mload(amounts)))
+        }
+        return raw;
     }
 
     /// @dev SWAP_TAG | legs | usesLedger | plan words | data
@@ -153,80 +165,103 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
         uint256 header = _wordAt(data, 0);
         _checkDeadline(header >> 224);
         uint256 tokenCount = (header >> 216) & 0xff;
-        uint256 pos = SwapFlags.HEADER_SIZE + 20 * tokenCount;
-        require(pos < length, MalformedSwap());
-
-        uint256 maxLegs = (length - pos) / SwapFlags.MIN_LEG_SIZE;
-        uint256[] memory words = new uint256[](2 * (maxLegs < 255 ? maxLegs : 255));
-        // Per token: the V3 legs that parked it since its last HELD leg, as a bit mask of leg indices
-        uint256[] memory parkedByV3 = new uint256[](tokenCount);
+        uint256 pos;
+        uint256[] memory words;
+        unchecked {
+            pos = SwapFlags.HEADER_SIZE + 20 * tokenCount;
+            require(pos < length, MalformedSwap());
+            uint256 maxLegs = (length - pos) / SwapFlags.MIN_LEG_SIZE;
+            words = new uint256[](2 * (maxLegs < 255 ? maxLegs : 255));
+        }
+        // Per token: the V3 legs that parked it since its last HELD leg, as a bit mask of leg indices.
+        // Allocated by the first leg that parks or spends parked funds.
+        uint256[] memory parkedByV3;
         uint256 legs = 0;
-        bool usesLedger = false;
         while (pos < length) {
             require(legs < 255, MalformedSwap());
-            uint256 word = _wordAt(data, pos);
+            uint256 word;
+            (word, pos) = _prepareLeg(data, pos, length, tokenCount, words, legs);
             uint256 flags = word >> 248;
-            require(
-                flags & ~uint256(SwapFlags.ALL) == 0
-                    && flags & (SwapFlags.HELD | SwapFlags.EXACT_OUT) != (SwapFlags.HELD | SwapFlags.EXACT_OUT),
-                MalformedSwap()
-            );
-            uint256 size = _legSize(flags);
-            require(pos + size <= length, MalformedSwap());
-            if (flags & SwapFlags.PRICE_LIMIT != 0) {
-                require(_wordAt(data, pos + size - 20) >> 96 != 0, MalformedSwap());
-            }
-
-            uint256 inIndex = (word >> 240) & 0xff;
-            uint256 outIndex = (word >> 232) & 0xff;
-            require(inIndex < tokenCount && outIndex < tokenCount, MalformedSwap());
-            address tokenIn = _tokenAt(data, inIndex);
-            address tokenOut = _tokenAt(data, outIndex);
-            require(tokenIn != tokenOut, MalformedSwap());
-            (address token0, address token1) = tokenIn < tokenOut ? (tokenIn, tokenOut) : (tokenOut, tokenIn);
-            uint24 fee;
-            int24 tickSpacing;
-            assembly ("memory-safe") {
-                fee := and(shr(208, word), 0xffffff)
-                tickSpacing := signextend(2, shr(184, word))
-            }
-
-            bytes32 key;
-            if (flags & SwapFlags.V4 != 0) {
-                anyV4 = true;
-                key = _v4PoolId(token0, token1, fee, tickSpacing);
-            } else {
-                require(token0 != address(0), MalformedSwap());
-                key = bytes32(uint256(uint160(_v3PoolAddress(token0, token1, fee))));
-            }
-            (int24 minTick, int24 maxTick) = _requireAllowed(msg.sender, key, PERMISSION_SWAP);
-            words[2 * legs] = uint256(key);
-            words[2 * legs + 1] = _bandWord(minTick, maxTick);
-
-            if (flags & SwapFlags.HELD != 0) {
-                usesLedger = true;
-                // This leg spends everything parked of tokenIn: the V3 legs that parked it pay the
-                // PoolManager directly if this leg is a V4 one
-                uint256 producers = parkedByV3[inIndex];
-                if (producers != 0 && flags & SwapFlags.V4 != 0) {
-                    for (uint256 j = 0; producers != 0; j++) {
-                        if (producers & 1 != 0) words[2 * j + 1] |= TO_MANAGER;
-                        producers >>= 1;
-                    }
+            if (flags & SwapFlags.V4 != 0) anyV4 = true;
+            if (flags & (SwapFlags.HELD | SwapFlags.PARK) != 0) {
+                if (parkedByV3.length == 0) parkedByV3 = new uint256[](tokenCount);
+                if (flags & SwapFlags.HELD != 0) {
+                    // This leg spends everything parked of tokenIn: the V3 legs that parked it pay the
+                    // PoolManager directly if this leg is a V4 one
+                    uint256 inIndex = (word >> 240) & 0xff;
+                    uint256 producers = parkedByV3[inIndex];
+                    if (producers != 0 && flags & SwapFlags.V4 != 0) _markToManager(words, producers);
+                    parkedByV3[inIndex] = 0;
                 }
-                parkedByV3[inIndex] = 0;
+                if (flags & (SwapFlags.PARK | SwapFlags.V4) == SwapFlags.PARK) {
+                    parkedByV3[(word >> 232) & 0xff] |= 1 << legs;
+                }
             }
-            if (flags & SwapFlags.PARK != 0) {
-                usesLedger = true;
-                if (flags & SwapFlags.V4 == 0) parkedByV3[outIndex] |= 1 << legs;
+            unchecked {
+                legs++;
             }
-            pos += size;
-            legs++;
         }
         assembly ("memory-safe") {
             mstore(words, mul(2, legs)) // the array was sized for the most legs `data` could hold
         }
-        plan = Plan({legs: legs, usesLedger: usesLedger, words: words});
+        plan = Plan({legs: legs, usesLedger: parkedByV3.length != 0, words: words});
+    }
+
+    /// @dev Validates the leg at `pos`, checks its pool in the caller's registry and writes its plan words.
+    /// Returns the leg's first word and the position of the next leg.
+    function _prepareLeg(
+        bytes calldata data,
+        uint256 pos,
+        uint256 length,
+        uint256 tokenCount,
+        uint256[] memory words,
+        uint256 legIndex
+    )
+        private
+        view
+        returns (uint256 word, uint256 next)
+    {
+        word = _wordAt(data, pos);
+        uint256 flags = word >> 248;
+        require(
+            flags & ~uint256(SwapFlags.ALL) == 0
+                && flags & (SwapFlags.HELD | SwapFlags.EXACT_OUT) != (SwapFlags.HELD | SwapFlags.EXACT_OUT),
+            MalformedSwap()
+        );
+        unchecked {
+            next = pos + _legSize(flags);
+            require(next <= length, MalformedSwap());
+            if (flags & SwapFlags.PRICE_LIMIT != 0) require(_wordAt(data, next - 20) >> 96 != 0, MalformedSwap());
+        }
+        uint256 inIndex = (word >> 240) & 0xff;
+        uint256 outIndex = (word >> 232) & 0xff;
+        require(inIndex < tokenCount && outIndex < tokenCount, MalformedSwap());
+        address tokenIn = _tokenAt(data, inIndex);
+        address tokenOut = _tokenAt(data, outIndex);
+        require(tokenIn != tokenOut, MalformedSwap());
+        (address token0, address token1) = tokenIn < tokenOut ? (tokenIn, tokenOut) : (tokenOut, tokenIn);
+
+        bytes32 key;
+        if (flags & SwapFlags.V4 != 0) {
+            key = _v4PoolId(token0, token1, word);
+        } else {
+            require(token0 != address(0), MalformedSwap());
+            key = bytes32(uint256(uint160(_v3PoolAddress(token0, token1, word))));
+        }
+        uint256 band = _requireAllowedWord(msg.sender, key, PERMISSION_SWAP);
+        assembly ("memory-safe") {
+            let at := add(add(words, 0x20), shl(6, legIndex))
+            mstore(at, key)
+            mstore(add(at, 0x20), band)
+        }
+    }
+
+    /// @dev Sets TO_MANAGER on the band word of every leg in `producers` (a bit mask of leg indices)
+    function _markToManager(uint256[] memory words, uint256 producers) private pure {
+        for (uint256 j = 0; producers != 0; j++) {
+            if (producers & 1 != 0) words[2 * j + 1] |= TO_MANAGER;
+            producers >>= 1;
+        }
     }
 
     function _legSize(uint256 flags) private pure returns (uint256 size) {
@@ -249,10 +284,12 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
         }
     }
 
-    /// @dev A plan word's band: minTick | maxTick << 24, each as 24 bits
-    function _bandWord(int24 minTick, int24 maxTick) private pure returns (uint256 band) {
+    /// @dev Leg `i`'s two plan words; `i` < `legs`, and the array holds 2 * `legs` words
+    function _planWords(uint256[] memory words, uint256 i) private pure returns (uint256 key, uint256 band) {
         assembly ("memory-safe") {
-            band := or(and(minTick, 0xffffff), shl(24, and(maxTick, 0xffffff)))
+            let at := add(add(words, 0x20), shl(6, i))
+            key := mload(at)
+            band := mload(add(at, 0x20))
         }
     }
 
@@ -282,11 +319,11 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
         uint256 pos = SwapFlags.HEADER_SIZE + 20 * tokenCount;
         for (uint256 i = 0; i < legs; i++) {
             pos = _parse(data, pos, ledger, leg);
-            uint256 band = plan.words[2 * i + 1];
+            (uint256 key, uint256 band) = _planWords(plan.words, i);
             if (leg.flags & SwapFlags.V4 != 0) {
-                amounts[i] = _v4Leg(leg, bytes32(plan.words[2 * i]), band, vault, ledger);
+                amounts[i] = _v4Leg(leg, bytes32(key), band, vault, ledger);
             } else {
-                amounts[i] = _v3Leg(leg, _asAddress(plan.words[2 * i]), band, vault, ledger, inUnlock);
+                amounts[i] = _v3Leg(leg, _asAddress(key), band, vault, ledger, inUnlock);
             }
         }
         if (plan.usesLedger) {
@@ -455,16 +492,16 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
     // V3
     // ---------------------------------------------------------------------------------------------
 
-    /// @dev CREATE2 address of the V3 pool of sorted tokens `token0` < `token1` and `fee`, as
-    /// {PoolAddress-computeAddress} derives it
-    function _v3PoolAddress(address token0, address token1, uint24 fee) private view returns (address pool) {
+    /// @dev CREATE2 address of the V3 pool of sorted tokens `token0` < `token1` and the fee of the leg
+    /// word `legWord`, as {PoolAddress-computeAddress} derives it
+    function _v3PoolAddress(address token0, address token1, uint256 legWord) private view returns (address pool) {
         address factory = UNI_V3_FACTORY;
         bytes32 initCodeHash = PoolAddress.POOL_INIT_CODE_HASH;
         assembly ("memory-safe") {
             let m := mload(0x40)
             mstore(m, token0)
             mstore(add(m, 0x20), token1)
-            mstore(add(m, 0x40), fee)
+            mstore(add(m, 0x40), and(shr(208, legWord), 0xffffff)) // fee
             let salt := keccak256(m, 0x60)
             mstore(m, or(shl(160, 0xff), factory))
             mstore(add(m, 0x20), salt)
@@ -597,23 +634,14 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
     // V4
     // ---------------------------------------------------------------------------------------------
 
-    /// @dev The PoolId of the hookless pool: `keccak256(abi.encode(poolKey))`
-    function _v4PoolId(
-        address currency0,
-        address currency1,
-        uint24 fee,
-        int24 tickSpacing
-    )
-        private
-        pure
-        returns (bytes32 id)
-    {
+    /// @dev The PoolId of the hookless pool of the leg word `legWord`: `keccak256(abi.encode(poolKey))`
+    function _v4PoolId(address currency0, address currency1, uint256 legWord) private pure returns (bytes32 id) {
         assembly ("memory-safe") {
             let m := mload(0x40)
             mstore(m, currency0)
             mstore(add(m, 0x20), currency1)
-            mstore(add(m, 0x40), fee)
-            mstore(add(m, 0x60), signextend(2, tickSpacing))
+            mstore(add(m, 0x40), and(shr(208, legWord), 0xffffff)) // fee
+            mstore(add(m, 0x60), signextend(2, shr(184, legWord))) // tickSpacing
             mstore(add(m, 0x80), 0)
             id := keccak256(m, 0xa0)
         }

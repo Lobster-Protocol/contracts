@@ -141,6 +141,30 @@ abstract contract PoolRegistry is Guards {
         return (entry.minTick, entry.maxTick);
     }
 
+    /// @dev {_requireAllowed}, returning the band as one word: minTick | maxTick << 24, each as 24 bits.
+    /// Reads the entry's slot directly: permissions in bits 0-7, minTick 8-31, maxTick 32-55 (the order
+    /// Solidity packs {Entry} in).
+    function _requireAllowedWord(address vault, bytes32 key, uint8 permission) internal view returns (uint256 band) {
+        uint256 entry;
+        assembly ("memory-safe") {
+            mstore(0, vault)
+            mstore(0x20, _entries.slot)
+            mstore(0x20, keccak256(0, 0x40))
+            mstore(0, key)
+            entry := sload(keccak256(0, 0x40))
+        }
+        require(entry & permission != 0, PoolNotAllowed());
+        int24 minTick;
+        int24 maxTick;
+        assembly ("memory-safe") {
+            minTick := signextend(2, shr(8, entry))
+            maxTick := signextend(2, shr(32, entry))
+            band := and(shr(8, entry), 0xffffffffffff)
+        }
+        // a set band always has minTick < maxTick, the default (0, 0) does not
+        require(minTick < maxTick, PriceBandNotSet());
+    }
+
     function _hasPermission(address vault, bytes32 key, uint8 permission) internal view returns (bool) {
         return _entries[vault][key].permissions & permission != 0;
     }
