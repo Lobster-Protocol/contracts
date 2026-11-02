@@ -986,7 +986,7 @@ contract UniV3LpVaultFeesTest is Test {
 
         // First update
         setup.vault.updateFees(1e18, 2e18);
-        vm.warp(block.timestamp + setup.vault.FEE_UPDATE_MIN_DELAY() + 1);
+        vm.warp(vm.getBlockTimestamp() + setup.vault.FEE_UPDATE_MIN_DELAY() + 1);
         setup.vault.enforceFeeUpdate();
 
         // Second update

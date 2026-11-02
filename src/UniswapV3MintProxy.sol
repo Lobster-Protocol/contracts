@@ -47,7 +47,7 @@ abstract contract UniswapV3MintProxy is UniswapV3ProxyBase, IUniswapV3MintCallba
         // compute the liquidity amount
         uint128 liquidity;
         {
-            (uint160 sqrtPriceX96,,,,,,) = pool.slot0();
+            (uint160 sqrtPriceX96,) = _slot0(address(pool));
             uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(params.tickLower);
             uint160 sqrtRatioBX96 = TickMath.getSqrtRatioAtTick(params.tickUpper);
 

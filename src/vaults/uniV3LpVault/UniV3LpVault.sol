@@ -11,6 +11,7 @@ import {TickMath} from "../../libraries/uniswapV3/TickMath.sol";
 import {FeeParams} from "../../libraries/uniswapV3/PositionValue.sol";
 import {PositionKey} from "../../libraries/uniswapV3/PositionKey.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {MintCallbackData} from "../../interfaces/uniswapV3/IUniswapV3MintCallback.sol";
 import {PoolAddress} from "../../libraries/uniswapV3/PoolAddress.sol";
 import {UniswapV3Calculator} from "../../utils/UniswapV3Calculator.sol";
@@ -594,7 +595,7 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
             Position memory position = positionsToProcess[i];
 
             uint128 liquidityToWithdraw =
-                uint128(uint256(position.liquidity).mulDiv(scaledPercentage, MAX_SCALED_PERCENTAGE));
+                SafeCast.toUint128(uint256(position.liquidity).mulDiv(scaledPercentage, MAX_SCALED_PERCENTAGE));
 
             (uint256 amount0Burnt, uint256 amount1Burnt) =
                 _burn(position.lowerTick, position.upperTick, liquidityToWithdraw);
@@ -1061,7 +1062,7 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
     function updateFees(uint80 newTvlFee, uint80 newPerformanceFee) external onlyFeeCollector returns (bool) {
         require(newTvlFee <= MAX_FEE && newPerformanceFee <= MAX_FEE, "Fees > max");
 
-        uint96 timestamp = uint96(block.timestamp) + FEE_UPDATE_MIN_DELAY;
+        uint96 timestamp = SafeCast.toUint96(block.timestamp) + FEE_UPDATE_MIN_DELAY;
 
         packedPendingFees = _packFeesWithTimestamp(newTvlFee, newPerformanceFee, timestamp);
 

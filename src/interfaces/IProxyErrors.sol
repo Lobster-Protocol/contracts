@@ -10,6 +10,8 @@ interface IProxyErrors {
     // --- Every entry point
     /// @notice `block.timestamp` is past the call's `deadline`
     error TransactionTooOld();
+    /// @notice A constructor argument is the zero address
+    error ZeroAddress();
     /// @notice An entry point was called while another one is running (OpenZeppelin's selector)
     error ReentrancyGuardReentrantCall();
     /// @notice `mint`'s recipient is not the caller
@@ -73,4 +75,6 @@ interface IProxyErrors {
     error NotEnoughEthSent();
     /// @notice A liquidity unlock that `modifyLiquidityV4` did not open
     error NoLiquidityOperation();
+    /// @notice The vault's Roles modifier reported a failed call without reverting
+    error RolesCallFailed();
 }

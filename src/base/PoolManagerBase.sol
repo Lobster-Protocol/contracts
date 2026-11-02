@@ -26,6 +26,7 @@ abstract contract PoolManagerBase is Guards, IUnlockCallback {
     IPoolManagerMinimal public immutable POOL_MANAGER;
 
     constructor(address _poolManager) {
+        require(_poolManager != address(0), ZeroAddress());
         POOL_MANAGER = IPoolManagerMinimal(_poolManager);
     }
 

@@ -183,7 +183,7 @@ abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, ICus
         int256[] memory amounts1 = new int256[](n);
         // Each operation touches two currencies
         address[] memory currencies = new address[](2 * n);
-        uint256 count;
+        uint256 count = 0;
 
         // 1. The vault modifies its own positions
         for (uint256 i = 0; i < n; i++) {
@@ -219,7 +219,7 @@ abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, ICus
         private
         returns (int256 amount0, int256 amount1)
     {
-        (, bytes memory returnData) = IRoles(rolesModifier)
+        (bool success, bytes memory returnData) = IRoles(rolesModifier)
             .execTransactionWithRoleReturnData(
                 address(POOL_MANAGER),
                 0,
@@ -240,6 +240,9 @@ abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, ICus
                 roleKey,
                 true
             );
+        // `shouldRevert` makes Roles revert on failure; a modifier that reports one without reverting is
+        // refused too
+        require(success, RolesCallFailed());
         (BalanceDelta callerDelta,) = abi.decode(returnData, (BalanceDelta, BalanceDelta));
         amount0 = callerDelta.amount0();
         amount1 = callerDelta.amount1();
@@ -257,7 +260,7 @@ abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, ICus
     )
         private
     {
-        IRoles(rolesModifier)
+        bool success = IRoles(rolesModifier)
             .execTransactionWithRole(
                 address(POOL_MANAGER),
                 0,
@@ -266,6 +269,7 @@ abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, ICus
                 roleKey,
                 true
             );
+        require(success, RolesCallFailed());
     }
 
     /// @dev Pays `owed` of `currency` to the PoolManager on the vault's behalf
@@ -274,11 +278,11 @@ abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, ICus
             require(owed <= value, NotEnoughEthSent());
             // Native settlement needs no synced currency; reset whatever may be there
             POOL_MANAGER.sync(Currency.wrap(address(0)));
-            POOL_MANAGER.settleFor{value: owed}(vault);
+            require(POOL_MANAGER.settleFor{value: owed}(vault) == owed, UnexpectedSettlement());
         } else {
             POOL_MANAGER.sync(Currency.wrap(currency));
             TransferHelper.safeTransferFrom(currency, vault, address(POOL_MANAGER), owed);
-            POOL_MANAGER.settleFor(vault);
+            require(POOL_MANAGER.settleFor(vault) == owed, UnexpectedSettlement());
         }
     }
 

@@ -12,7 +12,6 @@ import {UniswapV4LiquidityProxy} from "./UniswapV4LiquidityProxy.sol";
 import {UniswapV3ProxyBase} from "./base/UniswapV3ProxyBase.sol";
 import {PoolManagerBase} from "./base/PoolManagerBase.sol";
 import {MintParams} from "./interfaces/uniswapV3/IUniswapV3MintCallback.sol";
-import {IUniswapV3PoolMinimal} from "./interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {PoolAddress} from "./libraries/uniswapV3/PoolAddress.sol";
 
 /// @title Lobster proxy
@@ -99,7 +98,7 @@ contract LobsterProxy is UniswapV3MintProxy, UniswapSwapProxy, UniswapV4Liquidit
             UNI_V3_FACTORY, PoolAddress.PoolKey({token0: params.token0, token1: params.token1, fee: params.fee})
         );
         (int24 minTick, int24 maxTick) = _requireAllowed(msg.sender, v3Key(pool), PERMISSION_MINT);
-        (, int24 tick,,,,,) = IUniswapV3PoolMinimal(pool).slot0();
+        (, int24 tick) = _slot0(pool);
         _requireInBand(tick, minTick, maxTick);
         _checkDeadline(params.deadline);
         return _mint(params);
