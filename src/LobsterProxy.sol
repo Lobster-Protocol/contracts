@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0
 // Exact pin, deliberately: the tests and the deploy must build the same bytecode, and with
 // `via_ir = true` builds from different compilers are not interchangeable. 0.8.28, not 0.8.26: solc
-// 0.8.26 crashes on this contract ("Assembly exception for bytecode"), fixed in 0.8.28, which the vault
-// contracts use too. v4-core's PoolManager pins `=0.8.26`, so no file may import both it and this one;
+// 0.8.26 crashes on this contract ("Assembly exception for bytecode"), fixed in 0.8.28. v4-core's
+// PoolManager pins `=0.8.26`, so no file may import both it and this one;
 // the tests deploy the PoolManager from its own artifact instead (test/Mocks/uniswapV4/PoolManagerBuild.sol).
 pragma solidity =0.8.28;
 

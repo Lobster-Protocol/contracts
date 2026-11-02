@@ -3,7 +3,7 @@ pragma solidity >=0.8.4;
 
 /// @title Every custom error LobsterProxy and its mixins revert with
 /// @dev One place, so integrators decode a single error ABI. Inherited through {Deadline}, the root
-/// of every mixin. Libraries shared with the vault contracts (TransferHelper's `STF`/`ST`/`SA`/`STE`,
+/// of every mixin. The vendored Uniswap libraries (TransferHelper's `STF`/`ST`/`SA`/`STE`,
 /// TickMath's `T`/`R`) keep their short revert strings, the swap path's own token transfers revert with
 /// the same `STF`/`ST`, and Uniswap's own errors (V3 pools, the V4 PoolManager) surface unchanged.
 interface IProxyErrors {
