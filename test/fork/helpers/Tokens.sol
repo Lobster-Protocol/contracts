@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity =0.8.26;
+pragma solidity =0.8.28;
 
 /// @notice A minimal, well-behaved ERC20 for spinning up throwaway V3 pools on the fork.
 /// @dev Hand-rolled rather than reused from test/Mocks because those are pinned `^0.8.28` and this

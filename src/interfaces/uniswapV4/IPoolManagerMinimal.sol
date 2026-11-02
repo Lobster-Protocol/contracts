@@ -34,6 +34,16 @@ struct SwapParams {
     uint160 sqrtPriceLimitX96;
 }
 
+/// @notice Parameters for IPoolManager#modifyLiquidity (v4-core `IPoolManager.ModifyLiquidityParams`)
+struct ModifyLiquidityParams {
+    int24 tickLower;
+    int24 tickUpper;
+    /// @dev Positive adds liquidity, negative removes it, zero only collects fees
+    int256 liquidityDelta;
+    /// @dev Distinguishes positions of the same owner over the same range
+    bytes32 salt;
+}
+
 /// @title Minimal interface of the Uniswap V4 PoolManager singleton
 /// @dev Only the subset used by this repo. Mirrors Uniswap/v4-core `src/interfaces/IPoolManager.sol`.
 interface IPoolManagerMinimal {
@@ -62,6 +72,27 @@ interface IPoolManagerMinimal {
     /// @return paid The amount of currency settled
     function settle() external payable returns (uint256 paid);
 
+    /// @notice Like `settle`, but credits the payment to `recipient` instead of the caller
+    function settleFor(address recipient) external payable returns (uint256 paid);
+
     /// @notice Called to net out value owed to the caller, sending it to `to`
     function take(Currency currency, address to, uint256 amount) external;
+
+    /// @notice Adds or removes liquidity, or collects fees (zero delta). The position belongs to
+    /// msg.sender. Only callable while the manager is unlocked, by anyone.
+    /// @return callerDelta Principal plus fees, owed by (negative) or to (positive) msg.sender
+    /// @return feesAccrued The fees part of `callerDelta`
+    function modifyLiquidity(
+        PoolKey memory key,
+        ModifyLiquidityParams memory params,
+        bytes calldata hookData
+    )
+        external
+        returns (BalanceDelta callerDelta, BalanceDelta feesAccrued);
+
+    /// @notice Reads one transient storage slot of the manager, e.g. an account's currency delta
+    function exttload(bytes32 slot) external view returns (bytes32 value);
+
+    /// @notice Reads one storage slot of the manager, e.g. a pool's Slot0 (v4-core `StateLibrary`)
+    function extsload(bytes32 slot) external view returns (bytes32 value);
 }

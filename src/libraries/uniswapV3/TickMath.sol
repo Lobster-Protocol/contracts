@@ -2,6 +2,8 @@
 // pragma solidity >=0.5.0 <0.8.0;
 pragma solidity ^0.8.0;
 
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+
 /// @title Math library for computing sqrt prices from ticks and vice versa
 /// @notice Computes sqrt price for ticks of size 1.0001, i.e. sqrt(1.0001^tick) as fixed point Q64.96 numbers. Supports
 /// prices between 2**-128 and 2**128
@@ -24,7 +26,8 @@ library TickMath {
     function getSqrtRatioAtTick(int24 tick) internal pure returns (uint160 sqrtPriceX96) {
         // forge-lint: disable-next-line(unsafe-typecast)
         uint256 absTick = tick < 0 ? uint256(-int256(tick)) : uint256(int256(tick));
-        // forge-lint: disable-next-line(unsafe-typecast)
+        // An out-of-range tick reverts the call it belongs to
+        // forge-lint: disable-next-line(unsafe-typecast, require-revert-in-loop)
         require(absTick <= uint256(int256(MAX_TICK)), "T");
 
         uint256 ratio = absTick & 0x1 != 0 ? 0xfffcb933bd6fad37aa2d162d1a594001 : 0x100000000000000000000000000000000;
@@ -91,7 +94,7 @@ library TickMath {
         // this divides by 1<<32 rounding up to go from a Q128.128 to a Q128.96.
         // we then downcast because we know the result always fits within 160 bits due to our tick input constraint
         // we round up in the division so getTickAtSqrtRatio of the output price is always consistent
-        sqrtPriceX96 = uint160((ratio >> 32) + (ratio % (1 << 32) == 0 ? 0 : 1));
+        sqrtPriceX96 = SafeCast.toUint160((ratio >> 32) + (ratio % (1 << 32) == 0 ? 0 : 1));
     }
 
     /// @notice Calculates the greatest tick value such that getRatioAtTick(tick) <= ratio
@@ -239,8 +242,8 @@ library TickMath {
 
         int256 log_sqrt10001 = log_2 * 255738958999603826347141; // 128.128 number
 
-        int24 tickLow = int24((log_sqrt10001 - 3402992956809132418596140100660247210) >> 128);
-        int24 tickHi = int24((log_sqrt10001 + 291339464771989622907027621153398088495) >> 128);
+        int24 tickLow = SafeCast.toInt24((log_sqrt10001 - 3402992956809132418596140100660247210) >> 128);
+        int24 tickHi = SafeCast.toInt24((log_sqrt10001 + 291339464771989622907027621153398088495) >> 128);
 
         tick = tickLow == tickHi ? tickLow : getSqrtRatioAtTick(tickHi) <= sqrtPriceX96 ? tickHi : tickLow;
     }

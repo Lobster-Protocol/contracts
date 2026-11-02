@@ -80,6 +80,8 @@ contract UniV3LpVaultFactory is Ownable2Step {
      * @dev The vault address can be pre-computed using `computeVaultAddress` with the same parameters.
      *      Uses OpenZeppelin's cloneDeterministic which creates an EIP-1167 minimal proxy.
      *      Reverts if deployment fails or if a vault already exists at the computed address.
+     *      The address only depends on the salt, so the vault is registered and VaultDeployed is emitted before the
+     *      proxy is created and initialized (both are rolled back if either step reverts).
      *
      * @param salt Unique bytes32 salt for deterministic address generation (use different salts for different vaults)
      * @param initialOwner The address that will own the vault (has admin privileges and can deposit/withdraw)
@@ -108,8 +110,15 @@ contract UniV3LpVaultFactory is Ownable2Step {
         external
         returns (address vault)
     {
-        // Deploy minimal proxy using CREATE2
-        vault = IMPLEMENTATION.cloneDeterministic(salt);
+        // Register and announce the vault at its CREATE2 address before any contract creation or call
+        vault = _predictVaultAddress(salt);
+        isVault[vault] = true;
+
+        emit VaultDeployed(vault, pool, msg.sender, salt);
+
+        // Deploy minimal proxy using CREATE2, at the address predicted above
+        address deployed = IMPLEMENTATION.cloneDeterministic(salt);
+        assert(deployed == vault);
 
         // Initialize the proxy with the vault parameters
         UniV3LpVault(vault)
@@ -127,11 +136,6 @@ contract UniV3LpVaultFactory is Ownable2Step {
                 delta
             );
 
-        // Register the vault in the factory
-        isVault[vault] = true;
-
-        emit VaultDeployed(vault, pool, msg.sender, salt);
-
         return vault;
     }
 
@@ -146,7 +150,7 @@ contract UniV3LpVaultFactory is Ownable2Step {
      * @return predicted The deterministic address where the vault will be deployed with this salt
      */
     function computeVaultAddress(bytes32 salt) external view returns (address predicted) {
-        return IMPLEMENTATION.predictDeterministicAddress(salt, address(this));
+        return _predictVaultAddress(salt);
     }
 
     /**
@@ -169,10 +173,11 @@ contract UniV3LpVaultFactory is Ownable2Step {
         require(to != address(0), "Invalid recipient");
         require(amount <= address(this).balance, "Insufficient balance");
 
+        // Announced before the transfer, so logs emitted by the recipient cannot precede it
+        emit TokenWithdrawn(address(0), to, amount);
+
         (bool success,) = to.call{value: amount}("");
         require(success, "ETH transfer failed");
-
-        emit TokenWithdrawn(address(0), to, amount);
     }
 
     /**
@@ -186,9 +191,10 @@ contract UniV3LpVaultFactory is Ownable2Step {
         require(token != address(0), "Invalid token");
         require(to != address(0), "Invalid recipient");
 
-        IERC20(token).safeTransfer(to, amount);
-
+        // Announced before the transfer, like withdrawETH
         emit TokenWithdrawn(token, to, amount);
+
+        IERC20(token).safeTransfer(to, amount);
     }
 
     /**
@@ -209,6 +215,15 @@ contract UniV3LpVaultFactory is Ownable2Step {
         protocolFee = newProtocolFee;
 
         emit ProtocolFeeUpdated(oldFee, newProtocolFee);
+    }
+
+    /**
+     * @notice CREATE2 address of the vault proxy deployed with `salt` by this factory
+     * @param salt Deployment salt
+     * @return The address cloneDeterministic deploys to for this salt
+     */
+    function _predictVaultAddress(bytes32 salt) private view returns (address) {
+        return IMPLEMENTATION.predictDeterministicAddress(salt, address(this));
     }
 }
 

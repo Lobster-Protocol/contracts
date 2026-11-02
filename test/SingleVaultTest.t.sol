@@ -70,6 +70,12 @@ contract SingleVaultTest is Test {
         new SingleVault(address(0), allocator);
     }
 
+    /// @notice The initial allocator cannot be address(0): allocation is disabled with removeAllocator instead
+    function test_Constructor_RevertIf_ZeroAllocator() public {
+        vm.expectRevert(SingleVault.ZeroAddress.selector);
+        new SingleVault(owner, address(0));
+    }
+
     /*//////////////////////////////////////////////////////////////
                         EXECUTOR MANAGEMENT TESTS
     //////////////////////////////////////////////////////////////*/
@@ -92,6 +98,61 @@ contract SingleVaultTest is Test {
         vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", attacker));
         vm.prank(attacker);
         vault.setAllocator(newAllocator);
+    }
+
+    /// @notice setAllocator rejects address(0) and leaves the current allocator in place
+    function test_SetAllocator_RevertIf_ZeroAddress() public {
+        vm.expectRevert(SingleVault.ZeroAddress.selector);
+        vm.prank(owner);
+        vault.setAllocator(address(0));
+
+        assertEq(vault.allocator(), allocator);
+    }
+
+    /// @notice removeAllocator sets the allocator to address(0) and emits AllocatorUpdated(address(0))
+    function test_RemoveAllocator_ByOwner() public {
+        vm.expectEmit(true, true, true, true, address(vault));
+        emit AllocatorUpdated(address(0));
+
+        vm.prank(owner);
+        vault.removeAllocator();
+
+        assertEq(vault.allocator(), address(0));
+    }
+
+    /// @notice Without an allocator only the owner passes onlyOwnerOrAllocator, and setAllocator enables
+    ///         allocation again
+    function test_RemoveAllocator_DisablesAllocation() public {
+        TestVault testVault = new TestVault(owner, allocator);
+
+        vm.prank(owner);
+        testVault.removeAllocator();
+
+        vm.expectRevert(SingleVault.Unauthorized.selector);
+        vm.prank(allocator);
+        testVault.testOnlyOwnerOrAllocator();
+
+        vm.prank(owner);
+        testVault.testOnlyOwnerOrAllocator();
+
+        vm.prank(owner);
+        testVault.setAllocator(allocator);
+
+        vm.prank(allocator);
+        testVault.testOnlyOwnerOrAllocator();
+    }
+
+    /// @notice Only the owner can remove the allocator, not the allocator itself nor anyone else
+    function test_RemoveAllocator_RevertIf_Unauthorized() public {
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", attacker));
+        vm.prank(attacker);
+        vault.removeAllocator();
+
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", allocator));
+        vm.prank(allocator);
+        vault.removeAllocator();
+
+        assertEq(vault.allocator(), allocator);
     }
 
     /*//////////////////////////////////////////////////////////////
