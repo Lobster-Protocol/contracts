@@ -35,6 +35,7 @@ abstract contract PoolRegistry is Guards {
     uint8 public constant PERMISSION_MINT = 1;
     /// @notice Permission bit: the vault may swap on the pool, in either direction
     uint8 public constant PERMISSION_SWAP = 2;
+    uint8 private constant NO_PERMISSION = 0;
     uint8 private constant ALL_PERMISSIONS = PERMISSION_MINT | PERMISSION_SWAP;
 
     /// @dev Everything the registry holds for one (vault, key), in one storage slot
@@ -184,7 +185,7 @@ abstract contract PoolRegistry is Guards {
 
         Entry storage entry = _entries[vault][key];
         uint32 position = entry.position;
-        if (permissions == 0) {
+        if (permissions == NO_PERMISSION) {
             if (position != 0) {
                 // Swap-and-pop: move the last key into the removed one's slot
                 bytes32[] storage list = _keys[vault];
