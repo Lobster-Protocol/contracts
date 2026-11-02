@@ -138,6 +138,17 @@ abstract contract UniV3LpVaultVariables is SingleVault {
     /// @param performanceFee New active performance fee percentage
     event FeeUpdateEnforced(uint80 indexed tvlfee, uint80 indexed performanceFee);
 
+    /// @notice Emitted whenever the TVL fee accrual restarts: at initialization, when a TVL fee is collected, and when
+    ///         a fee collection finds nothing to collect
+    /// @param tvlFeeCollectedAt New value of tvlFeeCollectedAt (the current block timestamp)
+    event TvlFeeCollectedAtUpdated(uint256 tvlFeeCollectedAt);
+
+    /// @notice Emitted when the performance fee baseline is recorded (after a deposit, and after a withdrawal or fee
+    ///         collection that charged a performance fee)
+    /// @param lastVaultTvl0 New value of lastVaultTvl0: the vault TVL in token0, net of pending TVL fees
+    /// @param lastQuoteScaled New value of lastQuoteScaled: the token1/token0 TWAP quote used for that TVL
+    event VaultTvlRecorded(uint256 lastVaultTvl0, uint256 lastQuoteScaled);
+
     // ========== MODIFIERS ==========
 
     /**

@@ -1052,5 +1052,147 @@ contract UniV3LpVaultFeesTest is Test {
         setup.vault.enforceFeeUpdate();
     }
 
+    // ============ Events of the fee accounting ============
+
+    /// @notice A collection that charges a performance fee records the new baseline and emits it, last:
+    ///         VaultTvlRecorded carries the new lastVaultTvl0 and lastQuoteScaled
+    function test_PerfFees_Collection_EmitsVaultTvlRecorded() public {
+        helper.depositToVault(perfFeeSetup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
+        helper.createPositionAroundCurrentTick(
+            perfFeeSetup.vault,
+            perfFeeSetup.allocator,
+            TestConstants.TICK_RANGE_NARROW,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
+
+        // +50% performance
+        (uint256 tvl0, uint256 tvl1) = perfFeeSetup.vault.rawAssetsValue();
+        perfFeeSetup.token0.mint(address(perfFeeSetup.vault), tvl0 / 2);
+        perfFeeSetup.token1.mint(address(perfFeeSetup.vault), tvl1 / 2);
+        uint256 previousTvl0 = perfFeeSetup.vault.lastVaultTvl0();
+
+        vm.recordLogs();
+        vm.prank(perfFeeSetup.feeCollector);
+        perfFeeSetup.vault.collectPendingFees();
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        uint256 recorded =
+            _firstIndexOf(logs, address(perfFeeSetup.vault), UniV3LpVaultVariables.VaultTvlRecorded.selector);
+        assertLt(recorded, logs.length, "VaultTvlRecorded emitted");
+        assertEq(recorded, logs.length - 1, "VaultTvlRecorded is the last log");
+        (uint256 loggedTvl0, uint256 loggedQuote) = abi.decode(logs[recorded].data, (uint256, uint256));
+        assertEq(loggedTvl0, perfFeeSetup.vault.lastVaultTvl0(), "Logged lastVaultTvl0");
+        assertEq(loggedQuote, perfFeeSetup.vault.lastQuoteScaled(), "Logged lastQuoteScaled");
+        assertGt(loggedTvl0, previousTvl0, "Baseline moved up with the performance");
+        makeSureLastVaultTvl0Matches(perfFeeSetup);
+    }
+
+    /// @notice A collection that charges a TVL fee restarts the accrual first: TvlFeeCollectedAtUpdated is its first
+    ///         log, before the pool and token interactions; without a performance fee the baseline is left alone
+    function test_tvlFees_Collection_EmitsTvlFeeCollectedAtUpdatedFirst() public {
+        helper.depositToVault(tvlFeeSetup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
+        helper.createPositionAroundCurrentTick(
+            tvlFeeSetup.vault,
+            tvlFeeSetup.allocator,
+            TestConstants.TICK_RANGE_NARROW,
+            TestConstants.MEDIUM_AMOUNT,
+            TestConstants.MEDIUM_AMOUNT
+        );
+        helper.simulateTimePass(TestConstants.ONE_MONTH);
+        uint256 baseline = tvlFeeSetup.vault.lastVaultTvl0();
+
+        vm.recordLogs();
+        vm.prank(tvlFeeSetup.feeCollector);
+        tvlFeeSetup.vault.collectPendingFees();
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        assertEq(logs[0].emitter, address(tvlFeeSetup.vault), "First log from the vault");
+        assertEq(logs[0].topics[0], UniV3LpVaultVariables.TvlFeeCollectedAtUpdated.selector, "TvlFeeCollectedAtUpdated");
+        assertEq(abi.decode(logs[0].data, (uint256)), vm.getBlockTimestamp(), "Logged tvlFeeCollectedAt");
+        assertEq(tvlFeeSetup.vault.tvlFeeCollectedAt(), vm.getBlockTimestamp(), "tvlFeeCollectedAt");
+
+        uint256 collected =
+            _firstIndexOf(logs, address(tvlFeeSetup.vault), UniV3LpVaultVariables.TvlFeeCollected.selector);
+        assertLt(collected, logs.length, "TVL fee collected");
+        assertEq(
+            _firstIndexOf(logs, address(tvlFeeSetup.vault), UniV3LpVaultVariables.VaultTvlRecorded.selector),
+            logs.length,
+            "No baseline recorded"
+        );
+        assertEq(tvlFeeSetup.vault.lastVaultTvl0(), baseline, "Baseline unchanged");
+    }
+
+    /// @notice enforceFeeUpdate clears the pending update and emits FeeUpdateEnforced before collecting the pending
+    ///         fees: it is the first log, before TvlFeeCollected
+    function test_EnforceFeeUpdate_EmitsFeeUpdateEnforcedBeforeCollectingFees() public {
+        helper.depositToVault(tvlFeeSetup, TestConstants.LARGE_AMOUNT, TestConstants.LARGE_AMOUNT);
+
+        uint80 newTvlFee = 1e18;
+        uint80 newPerfFee = 2e18;
+        vm.prank(tvlFeeSetup.feeCollector);
+        tvlFeeSetup.vault.updateFees(newTvlFee, newPerfFee);
+        vm.warp(vm.getBlockTimestamp() + tvlFeeSetup.vault.FEE_UPDATE_MIN_DELAY() + 1);
+
+        vm.recordLogs();
+        vm.prank(tvlFeeSetup.feeCollector);
+        tvlFeeSetup.vault.enforceFeeUpdate();
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        assertEq(logs[0].emitter, address(tvlFeeSetup.vault), "First log from the vault");
+        assertEq(logs[0].topics[0], UniV3LpVaultVariables.FeeUpdateEnforced.selector, "First log is FeeUpdateEnforced");
+        assertEq(logs[0].topics[1], bytes32(uint256(newTvlFee)), "Logged TVL fee");
+        assertEq(logs[0].topics[2], bytes32(uint256(newPerfFee)), "Logged performance fee");
+        assertGt(
+            _firstIndexOf(logs, address(tvlFeeSetup.vault), UniV3LpVaultVariables.TvlFeeCollected.selector),
+            0,
+            "TVL fee collected after FeeUpdateEnforced"
+        );
+
+        (uint80 pendingTvl, uint80 pendingPerf, uint96 activatableAfter) = tvlFeeSetup.vault.pendingFeeUpdate();
+        assertEq(pendingTvl, 0, "Pending TVL fee cleared");
+        assertEq(pendingPerf, 0, "Pending performance fee cleared");
+        assertEq(activatableAfter, 0, "Pending timestamp cleared");
+        assertEq(tvlFeeSetup.vault.tvlFeeScaled(), newTvlFee, "New TVL fee active");
+        assertEq(tvlFeeSetup.vault.performanceFeeScaled(), newPerfFee, "New performance fee active");
+    }
+
+    /// @notice The fees pending when an update is enforced are collected at the previous rates
+    function test_EnforceFeeUpdate_CollectsPendingFeesAtPreviousRates() public {
+        uint256 deposit0 = TestConstants.LARGE_AMOUNT;
+        uint256 deposit1 = TestConstants.LARGE_AMOUNT;
+        helper.depositToVault(tvlFeeSetup, deposit0, deposit1);
+        uint256 accrualStart = tvlFeeSetup.vault.tvlFeeCollectedAt();
+
+        vm.prank(tvlFeeSetup.feeCollector);
+        tvlFeeSetup.vault.updateFees(1e18, 0);
+        vm.warp(vm.getBlockTimestamp() + tvlFeeSetup.vault.FEE_UPDATE_MIN_DELAY() + 1);
+
+        vm.prank(tvlFeeSetup.feeCollector);
+        tvlFeeSetup.vault.enforceFeeUpdate();
+
+        // Cash only, no protocol fee: the TVL fee is exactly the old rate over the elapsed time
+        uint256 feePercent = TestConstants.HIGH_TVL_FEE.mulDiv(vm.getBlockTimestamp() - accrualStart, 365 days);
+        assertEq(
+            tvlFeeSetup.token0.balanceOf(tvlFeeSetup.feeCollector),
+            deposit0.mulDiv(feePercent, MAX_SCALED_PERCENTAGE),
+            "token0 fee at the old rate"
+        );
+        assertEq(
+            tvlFeeSetup.token1.balanceOf(tvlFeeSetup.feeCollector),
+            deposit1.mulDiv(feePercent, MAX_SCALED_PERCENTAGE),
+            "token1 fee at the old rate"
+        );
+        assertEq(tvlFeeSetup.vault.tvlFeeScaled(), 1e18, "New TVL fee active afterwards");
+    }
+
+    /// @dev Index of the first log from `emitter` with `topic0`, or logs.length if there is none
+    function _firstIndexOf(Vm.Log[] memory logs, address emitter, bytes32 topic0) internal pure returns (uint256) {
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].emitter == emitter && logs[i].topics.length > 0 && logs[i].topics[0] == topic0) return i;
+        }
+        return logs.length;
+    }
+
     // todo: test protocol fees
 }

@@ -236,6 +236,135 @@ contract UniV3LpVaultFactoryTest is Test {
         assertTrue(vault != address(0));
         assertTrue(factory.isVault(vault));
     }
+
+    /*//////////////////////////////////////////////////////////////
+                    EVENTS BEFORE EXTERNAL INTERACTIONS
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice VaultDeployed is the first log of a deployment and names the predicted vault address: the vault's own
+    ///         initialization logs come after it
+    function test_DeployVault_EmitsVaultDeployedBeforeInitialization() public {
+        address predicted = factory.computeVaultAddress(salt);
+
+        vm.recordLogs();
+        address vault = factory.deployVault(
+            salt, owner, allocator, token0, token1, address(pool), feeCollector, tvlFee, performanceFee, DELTA5050
+        );
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        assertEq(vault, predicted, "Deployed at the predicted address");
+
+        assertGt(logs.length, 1, "Deployment and initialization logs");
+        assertEq(logs[0].emitter, address(factory), "First log from the factory");
+        assertEq(logs[0].topics[0], VaultDeployed.selector, "First log is VaultDeployed");
+        assertEq(logs[0].topics[1], bytes32(uint256(uint160(predicted))), "VaultDeployed vault");
+        assertEq(logs[0].topics[2], bytes32(uint256(uint160(address(pool)))), "VaultDeployed pool");
+        assertEq(logs[0].topics[3], bytes32(uint256(uint160(address(this)))), "VaultDeployed deployer");
+        assertEq(abi.decode(logs[0].data, (bytes32)), salt, "VaultDeployed salt");
+
+        bool vaultLogged;
+        for (uint256 i = 1; i < logs.length; i++) {
+            vaultLogged = vaultLogged || logs[i].emitter == vault;
+        }
+        assertTrue(vaultLogged, "Vault initialization logs follow VaultDeployed");
+    }
+
+    /// @notice The vault is registered before its initialization runs: a pool that reports its token0 only to
+    ///         registered vaults lets the deployment through
+    function test_DeployVault_RegistersVaultBeforeInitialization() public {
+        RegistrationProbePool probe = new RegistrationProbePool(factory, token0, token1);
+
+        address vault = factory.deployVault(
+            salt, owner, allocator, token0, token1, address(probe), feeCollector, tvlFee, performanceFee, DELTA5050
+        );
+
+        assertTrue(factory.isVault(vault), "Vault registered");
+        assertEq(address(UniV3LpVault(vault).POOL()), address(probe), "Vault initialized on the probe pool");
+    }
+
+    /// @notice withdrawETH emits TokenWithdrawn before sending the ETH: the recipient's logs come after it
+    function test_WithdrawETH_EmitsTokenWithdrawnBeforeTransfer() public {
+        LoggingReceiver receiver = new LoggingReceiver();
+        vm.deal(address(factory), 1 ether);
+
+        vm.recordLogs();
+        vm.prank(factory.owner());
+        factory.withdrawETH(address(receiver), 1 ether);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        assertEq(logs.length, 2, "TokenWithdrawn and the recipient's log");
+        assertEq(logs[0].emitter, address(factory), "First log from the factory");
+        assertEq(logs[0].topics[0], UniV3LpVaultFactory.TokenWithdrawn.selector, "First log is TokenWithdrawn");
+        assertEq(logs[0].topics[1], bytes32(0), "Native token");
+        assertEq(logs[0].topics[2], bytes32(uint256(uint160(address(receiver)))), "Recipient");
+        assertEq(abi.decode(logs[0].data, (uint256)), 1 ether, "Amount");
+        assertEq(logs[1].emitter, address(receiver), "Then the recipient's log");
+        assertEq(logs[1].topics[0], LoggingReceiver.Received.selector, "Recipient's Received log");
+
+        assertEq(address(receiver).balance, 1 ether, "ETH received");
+        assertEq(address(factory).balance, 0, "ETH left the factory");
+    }
+
+    /// @notice withdrawToken emits TokenWithdrawn before the token transfer: the token's Transfer log comes after it
+    function test_WithdrawToken_EmitsTokenWithdrawnBeforeTransfer() public {
+        address recipient = makeAddr("recipient");
+        MockERC20(token0).mint(address(factory), 5 ether);
+
+        vm.recordLogs();
+        vm.prank(factory.owner());
+        factory.withdrawToken(token0, recipient, 5 ether);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        assertEq(logs.length, 2, "TokenWithdrawn and the token's Transfer");
+        assertEq(logs[0].emitter, address(factory), "First log from the factory");
+        assertEq(logs[0].topics[0], UniV3LpVaultFactory.TokenWithdrawn.selector, "First log is TokenWithdrawn");
+        assertEq(logs[0].topics[1], bytes32(uint256(uint160(token0))), "Token");
+        assertEq(logs[0].topics[2], bytes32(uint256(uint160(recipient))), "Recipient");
+        assertEq(abi.decode(logs[0].data, (uint256)), 5 ether, "Amount");
+        assertEq(logs[1].emitter, token0, "Then the token's log");
+        assertEq(logs[1].topics[0], IERC20.Transfer.selector, "Token Transfer log");
+
+        assertEq(MockERC20(token0).balanceOf(recipient), 5 ether, "Tokens received");
+    }
+}
+
+/// @dev Minimal pool for UniV3LpVault.initialize that reports its token0 only to vaults the factory has registered,
+///      so initialize fails with "Token mismatch" if it runs before the registration
+contract RegistrationProbePool {
+    UniV3LpVaultFactory public immutable FACTORY;
+    address public immutable TOKEN0;
+    address public immutable TOKEN1;
+
+    constructor(UniV3LpVaultFactory factory_, address token0_, address token1_) {
+        FACTORY = factory_;
+        TOKEN0 = token0_;
+        TOKEN1 = token1_;
+    }
+
+    function token0() external view returns (address) {
+        return FACTORY.isVault(msg.sender) ? TOKEN0 : address(0);
+    }
+
+    function token1() external view returns (address) {
+        return TOKEN1;
+    }
+
+    function slot0() external pure returns (uint160, int24, uint16, uint16, uint16, uint8, bool) {
+        return (2 ** 96, 0, 0, 1, 1, 0, true);
+    }
+
+    function fee() external pure returns (uint24) {
+        return FEE;
+    }
+}
+
+/// @dev Accepts ETH and logs it, to order the recipient's logs against the factory's
+contract LoggingReceiver {
+    event Received(uint256 amount);
+
+    receive() external payable {
+        emit Received(msg.value);
+    }
 }
 
 // todo: test protocol fee

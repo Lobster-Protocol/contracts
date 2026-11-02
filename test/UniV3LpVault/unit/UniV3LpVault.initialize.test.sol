@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
 import {UniV3LpVault} from "../../../src/vaults/uniV3LpVault/UniV3LpVault.sol";
+import {UniV3LpVaultVariables} from "../../../src/vaults/uniV3LpVault/UniV3LpVaultVariables.sol";
 import {MAX_FEE_SCALED} from "../../../src/vaults/uniV3LpVault/constants.sol";
 import {SingleVault} from "../../../src/vaults/SingleVault.sol";
 import {TestHelper} from "../helpers/TestHelper.sol";
@@ -13,6 +14,7 @@ import {IUniswapV3FactoryMinimal} from "../../../src/interfaces/uniswapV3/IUnisw
 import {IUniswapV3PoolMinimal} from "../../../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {UniV3LpVaultFactory} from "../../../src/vaults/uniV3LpVault/UniV3LpVaultFactory.sol";
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 
 contract UniV3LpVaultInitializeTest is Test {
     TestHelper helper;
@@ -230,5 +232,73 @@ contract UniV3LpVaultInitializeTest is Test {
 
         vm.expectRevert(abi.encodePacked("Fees > max"));
         helper.deployVaultWithPool(0, MAX_FEE_SCALED + 1);
+    }
+
+    /// @notice The protocol address cannot be address(0), even when the protocol fee is zero
+    function test_initialize_ZeroProtocolAddress_Reverts() public {
+        TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(0, 0);
+        UniV3LpVault proxy = UniV3LpVault(Clones.clone(address(new UniV3LpVault())));
+
+        vm.expectRevert(SingleVault.ZeroAddress.selector);
+        _initializeWithProtocol(proxy, setup, address(0), 0);
+    }
+
+    /// @notice Initialization starts the TVL fee accrual and emits it in TvlFeeCollectedAtUpdated
+    function test_initialize_EmitsTvlFeeCollectedAtUpdated() public {
+        TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(0, 0);
+        UniV3LpVault proxy = UniV3LpVault(Clones.clone(address(new UniV3LpVault())));
+
+        vm.expectEmit(true, true, true, true, address(proxy));
+        emit UniV3LpVaultVariables.TvlFeeCollectedAtUpdated(vm.getBlockTimestamp());
+
+        _initializeWithProtocol(proxy, setup, makeAddr("protocol"), 0);
+
+        assertEq(proxy.tvlFeeCollectedAt(), vm.getBlockTimestamp(), "tvlFeeCollectedAt");
+    }
+
+    /// @notice A non-zero protocol fee without protocol address still reverts with "Invalid protocol fee", as before
+    ///         the zero-address check was added
+    function test_initialize_ProtocolFeeWithoutProtocolAddress_Reverts() public {
+        TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(0, 0);
+        UniV3LpVault proxy = UniV3LpVault(Clones.clone(address(new UniV3LpVault())));
+
+        vm.expectRevert("Invalid protocol fee");
+        _initializeWithProtocol(proxy, setup, address(0), 1e18);
+    }
+
+    /// @notice Any non-zero protocol address is accepted with a zero protocol fee, and stored
+    function test_initialize_ProtocolAddressWithZeroFee_Success() public {
+        TestHelper.VaultSetup memory setup = helper.deployVaultWithPool(0, 0);
+        UniV3LpVault proxy = UniV3LpVault(Clones.clone(address(new UniV3LpVault())));
+        address protocol = makeAddr("protocol");
+
+        _initializeWithProtocol(proxy, setup, protocol, 0);
+
+        assertEq(proxy.PROTOCOL_ADDR(), protocol, "Protocol address stored");
+        assertEq(proxy.PROTOCOL_FEE(), 0, "Protocol fee stored");
+    }
+
+    /// @dev Initializes `proxy` on the setup's pool and tokens with the given protocol address and fee
+    function _initializeWithProtocol(
+        UniV3LpVault proxy,
+        TestHelper.VaultSetup memory setup,
+        address protocolAddress,
+        uint256 protocolFee
+    )
+        private
+    {
+        proxy.initialize(
+            setup.owner,
+            setup.allocator,
+            address(setup.token0),
+            address(setup.token1),
+            address(setup.pool),
+            setup.feeCollector,
+            protocolAddress,
+            protocolFee,
+            0,
+            0,
+            TestConstants.DELTA5050
+        );
     }
 }

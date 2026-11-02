@@ -12,9 +12,11 @@ import {FeeParams} from "../../libraries/uniswapV3/PositionValue.sol";
 import {PositionKey} from "../../libraries/uniswapV3/PositionKey.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {Panic} from "@openzeppelin/contracts/utils/Panic.sol";
 import {MintCallbackData} from "../../interfaces/uniswapV3/IUniswapV3MintCallback.sol";
 import {PoolAddress} from "../../libraries/uniswapV3/PoolAddress.sol";
-import {UniswapV3Calculator} from "../../utils/UniswapV3Calculator.sol";
+import {UniswapV3Calculator, FeeGrowthGlobal} from "../../utils/UniswapV3Calculator.sol";
+import {IUniswapV3PoolTuples, PoolSlot0} from "../../interfaces/uniswapV3/IUniswapV3PoolTuples.sol";
 import {UniswapUtils} from "../../libraries/uniswapV3/UniswapUtils.sol";
 import {SCALING_FACTOR, TWAP_SECONDS_AGO, MAX_SCALED_PERCENTAGE, MIN_OBSERVATION_CARDINALITY} from "./constants.sol";
 import {WithdrawParams, MinimalMintParams, Position} from "./structs.sol";
@@ -52,7 +54,7 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
      * @param token0 Address of the first token (must be < token1 address)
      * @param token1 Address of the second token (must be > token0 address)
      * @param pool Address of the UniswapV3 pool
-     * @param protocolAddress used to collect the protocol fee (can be address(0) if protocolFee = 0)
+     * @param protocolAddress used to collect the protocol fee (must not be address(0), even if protocolFee = 0)
      * @param protocolFee represents a cut from the fees sent to the feeCollector (tvl & performance)
      * @param initialFeeCollector Address authorized to collect fees
      * @param initialtvlFee Initial annualized TVL management fee (scaled)
@@ -93,20 +95,21 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
         // Initialize pool and tokens
         POOL = IUniswapV3PoolMinimal(pool);
         require(POOL.token0() == token0 && POOL.token1() == token1, "Token mismatch");
-        (,,, uint16 observationCardinality,,,) = POOL.slot0();
-        require(MIN_OBSERVATION_CARDINALITY >= observationCardinality, "Not enough cardinality");
+        PoolSlot0 memory slot0 = IUniswapV3PoolTuples(pool).slot0();
+        require(MIN_OBSERVATION_CARDINALITY >= slot0.observationCardinality, "Not enough cardinality");
 
         TOKEN0 = IERC20(token0);
         TOKEN1 = IERC20(token1);
         POOL_FEE = POOL.fee();
 
         // Initialize fee parameters
+        require(protocolAddress != address(0), ZeroAddress());
         PROTOCOL_ADDR = protocolAddress;
         PROTOCOL_FEE = protocolFee;
         DELTA = delta;
         feeCollector = initialFeeCollector;
         tvlFeeScaled = initialtvlFee;
-        tvlFeeCollectedAt = block.timestamp;
+        _resetTvlFeeAccrual();
         performanceFeeScaled = initialPerformanceFee;
     }
 
@@ -114,12 +117,15 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
 
     /**
      * @notice Deposits tokens into the vault
-     * @dev Collects any pending fees before depositing and updates vault TVL
+     * @dev Collects any pending fees before depositing and updates vault TVL.
+     *      Deposit is emitted first, before the fee collection and the transfers.
      * @param assets0 Amount of token0 to deposit
      * @param assets1 Amount of token1 to deposit
      */
     function deposit(uint256 assets0, uint256 assets1) external onlyOwner {
         if (assets0 == 0 && assets1 == 0) revert ZeroValue();
+
+        emit Deposit(assets0, assets1);
 
         _collectFees();
 
@@ -131,10 +137,8 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
             SafeERC20.safeTransferFrom(TOKEN1, msg.sender, address(this), assets1);
         }
 
-        emit Deposit(assets0, assets1);
-
         // Always update vault tvl in token0
-        (lastVaultTvl0, lastQuoteScaled) = _getNewVaultTvl0();
+        _recordVaultTvl();
     }
 
     /**
@@ -272,9 +276,9 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
      * @return totalAssets1 Total token1 in LP positions (principal + uncollected fees)
      */
     function totalLpValue() external view returns (uint256 totalAssets0, uint256 totalAssets1) {
-        (uint160 sqrtPriceX96, int24 tickCurrent,,,,,) = POOL.slot0();
+        PoolSlot0 memory slot0 = IUniswapV3PoolTuples(address(POOL)).slot0();
 
-        return _totalLpValue(sqrtPriceX96, tickCurrent);
+        return _totalLpValue(slot0.sqrtPriceX96, slot0.tick);
     }
 
     /**
@@ -408,7 +412,7 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
         (uint256 performanceFeeToCollect, uint256 newTvlInToken0) = _pendingRelativePerformanceFeeAndNewTvl();
 
         if (tvlToCollect == 0 && performanceFeeToCollect == 0) {
-            tvlFeeCollectedAt = block.timestamp;
+            _resetTvlFeeAccrual();
             return;
         }
 
@@ -427,12 +431,14 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
      * @notice Internal function to execute withdrawals and fee collections
      * @dev Handles burning liquidity, collecting fees, and distributing tokens
      *      The function follows this sequence:
-     *      1. Collects all uncollected fees from positions
-     *      2. Calculates fee percentages (TVL + performance, capped at 100%)
-     *      3. Adjusts user percentage to account for fees
-     *      4. Burns liquidity proportionally from all positions
-     *      5. Distributes tokens to fee collector and user based on calculated percentages
-     *      6. Updates lastVaultTvl0 if performance fees were collected
+     *      1. Calculates fee percentages (TVL + performance, capped at 100%)
+     *      2. Adjusts user percentage to account for fees
+     *      3. Restarts the TVL fee accrual if a TVL fee is collected, and books the liquidity to burn from every
+     *         position in `positions`: both before any pool call
+     *      4. Collects all uncollected fees from positions
+     *      5. Burns the booked liquidity from all positions
+     *      6. Distributes tokens to fee collector and user based on calculated percentages
+     *      7. Updates lastVaultTvl0 if performance fees were collected
      * @param withdrawParams Struct containing all withdrawal parameters
      * @return amount0 Amount of token0 withdrawn for the user
      * @return amount1 Amount of token1 withdrawn for the user
@@ -440,19 +446,6 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
     function _withdraw(WithdrawParams memory withdrawParams) internal returns (uint256 amount0, uint256 amount1) {
         if (withdrawParams.userScaledPercent > MAX_SCALED_PERCENTAGE) {
             revert InvalidScalingFactor();
-        }
-
-        // Collect for all positions
-        uint256 posLen = positions.length;
-        for (uint256 i = 0; i < posLen; i++) {
-            Position storage position = positions[i];
-
-            _collect(
-                position.lowerTick,
-                position.upperTick,
-                type(uint128).max, // collect all amount0
-                type(uint128).max // collect all amount1
-            );
         }
 
         uint256 userScaledPercent = withdrawParams.userScaledPercent;
@@ -471,10 +464,29 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
 
         uint256 totalToWithdrawScaledPercent = userScaledPercent + tvlFeeScaledPercent + performanceFeeScaledPercent;
 
+        // The TVL fee is collected below: its accrual restarts now, before any pool or token interaction
+        if (tvlFeeScaledPercent > 0) {
+            _resetTvlFeeAccrual();
+        }
+
+        // Update `positions` before calling the pool: `toBurn` keeps the positions as they were, in the same order
+        Position[] memory toBurn = _bookWithdrawal(totalToWithdrawScaledPercent);
+
+        // Collect for all positions
+        uint256 posLen = toBurn.length;
+        for (uint256 i = 0; i < posLen; i++) {
+            _collect(
+                toBurn[i].lowerTick,
+                toBurn[i].upperTick,
+                type(uint128).max, // collect all amount0
+                type(uint128).max // collect all amount1
+            );
+        }
+
         uint256 initialToken0Balance = TOKEN0.balanceOf(address(this));
         uint256 initialToken1Balance = TOKEN1.balanceOf(address(this));
 
-        (uint256 withdrawn0, uint256 withdrawn1) = _withdrawFromPositions(totalToWithdrawScaledPercent);
+        (uint256 withdrawn0, uint256 withdrawn1) = _burnBooked(toBurn);
 
         // Extract the fees
         uint256 protocolFee0 = 0;
@@ -507,8 +519,6 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
             _safeTransferBoth(feeCollector, tvlFeeAssets0, tvlFeeAssets1);
 
             emit TvlFeeCollected(tvlFeeAssets0, tvlFeeAssets1, feeCollector);
-
-            tvlFeeCollectedAt = block.timestamp;
         }
         // Performance
         if (performanceFeeScaledPercent > 0) {
@@ -569,36 +579,50 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
 
         // If needed, update the lastVaultTvl0
         if (performanceFeeScaledPercent > 0) {
-            (lastVaultTvl0, lastQuoteScaled) = _getNewVaultTvl0();
+            _recordVaultTvl();
         }
 
         return (assets0ToWithdrawForUser, assets1ToWithdrawForUser);
     }
 
     /**
-     * @notice Burns liquidity from all positions proportionally
-     * @dev Creates a snapshot of positions array to safely iterate while modifying the actual positions
-     *      Burns the specified percentage from each position and accumulates withdrawn amounts
+     * @notice Books a proportional withdrawal from all positions in `positions`, before the pool is called
+     * @dev Creates a snapshot of the positions array, then applies to `positions`, position by position and in the
+     *      snapshot order, the update _burn applies for each burn (see _bookBurn). The burns themselves are left to
+     *      _burnBooked, so the bookkeeping is complete before any external call.
      * @param scaledPercentage Percentage of liquidity to burn from each position (scaled by SCALING_FACTOR)
-     * @return withdrawn0 Total token0 withdrawn from all positions
-     * @return withdrawn1 Total token1 withdrawn from all positions
+     * @return toBurn The positions as they were before the booking, each with the liquidity to burn from it
      */
-    function _withdrawFromPositions(uint256 scaledPercentage) private returns (uint256 withdrawn0, uint256 withdrawn1) {
+    function _bookWithdrawal(uint256 scaledPercentage) private returns (Position[] memory toBurn) {
         uint256 positionsCount = positions.length;
         // Create a copy of positions array to iterate safely
-        Position[] memory positionsToProcess = new Position[](positionsCount);
+        toBurn = new Position[](positionsCount);
         for (uint256 i = 0; i < positionsCount; i++) {
-            positionsToProcess[i] = positions[i];
+            Position memory position = positions[i];
+
+            position.liquidity =
+                SafeCast.toUint128(uint256(position.liquidity).mulDiv(scaledPercentage, MAX_SCALED_PERCENTAGE));
+
+            toBurn[i] = position;
         }
 
         for (uint256 i = 0; i < positionsCount; i++) {
-            Position memory position = positionsToProcess[i];
+            // Never more than the position holds, so there is no over-burn to report here
+            _bookBurn(toBurn[i].lowerTick, toBurn[i].upperTick, toBurn[i].liquidity);
+        }
+    }
 
-            uint128 liquidityToWithdraw =
-                SafeCast.toUint128(uint256(position.liquidity).mulDiv(scaledPercentage, MAX_SCALED_PERCENTAGE));
-
+    /**
+     * @notice Burns the liquidity booked by _bookWithdrawal from every position, in the same order
+     * @param toBurn The positions and the liquidity to burn from each of them
+     * @return withdrawn0 Total token0 withdrawn from all positions
+     * @return withdrawn1 Total token1 withdrawn from all positions
+     */
+    function _burnBooked(Position[] memory toBurn) private returns (uint256 withdrawn0, uint256 withdrawn1) {
+        uint256 positionsCount = toBurn.length;
+        for (uint256 i = 0; i < positionsCount; i++) {
             (uint256 amount0Burnt, uint256 amount1Burnt) =
-                _burn(position.lowerTick, position.upperTick, liquidityToWithdraw);
+                _burnAndCollect(toBurn[i].lowerTick, toBurn[i].upperTick, toBurn[i].liquidity);
 
             withdrawn0 += amount0Burnt;
             withdrawn1 += amount1Burnt;
@@ -625,12 +649,12 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
         // Compute the liquidity amount
         uint128 liquidity;
         {
-            (uint160 sqrtPriceX96,,,,,,) = POOL.slot0();
+            PoolSlot0 memory slot0 = IUniswapV3PoolTuples(address(POOL)).slot0();
             uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(params.tickLower);
             uint160 sqrtRatioBX96 = TickMath.getSqrtRatioAtTick(params.tickUpper);
 
             liquidity = LiquidityAmounts.getLiquidityForAmounts(
-                sqrtPriceX96, sqrtRatioAX96, sqrtRatioBX96, params.amount0Desired, params.amount1Desired
+                slot0.sqrtPriceX96, sqrtRatioAX96, sqrtRatioBX96, params.amount0Desired, params.amount1Desired
             );
         }
 
@@ -671,9 +695,12 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
      * @notice Internal function to burn liquidity from the pool
      * @dev Automatically collects tokens and updates position records
      *      The function:
-     *      1. Burns the specified liquidity amount from the pool
-     *      2. Automatically collects the resulting tokens (principal + fees)
-     *      3. Updates the positions array (removes if fully burned, decreases liquidity otherwise)
+     *      1. Updates the positions array (removes if fully burned, decreases liquidity otherwise), before any
+     *         pool call
+     *      2. Burns the specified liquidity amount from the pool
+     *      3. Automatically collects the resulting tokens (principal + fees)
+     *      Burning more than a recorded position holds reverts as before: with the pool's "LS", or, when the pool
+     *      accepts it (liquidity minted to this vault's position from outside), with an arithmetic underflow panic.
      * @param tickLower Lower tick boundary
      * @param tickUpper Upper tick boundary
      * @param amount Amount of liquidity to burn
@@ -688,18 +715,26 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
         internal
         returns (uint256 amount0, uint256 amount1)
     {
-        // Burn the liquidity
-        (amount0, amount1) = POOL.burn(tickLower, tickUpper, amount);
+        bool overBurn = _bookBurn(tickLower, tickUpper, amount);
 
-        // Automatically collect the tokens
-        POOL.collect(
-            address(this),
-            tickLower,
-            tickUpper,
-            type(uint128).max, // collect all amount0
-            type(uint128).max // collect all amount1
-        );
+        (amount0, amount1) = _burnAndCollect(tickLower, tickUpper, amount);
 
+        // The pool let the vault burn more than its record holds: reject it with the panic the checked
+        // `liquidity -= amount` of the record raised when it ran after the pool calls
+        if (overBurn) Panic.panic(Panic.UNDER_OVERFLOW);
+    }
+
+    /**
+     * @notice Records in `positions` a burn of `amount` liquidity from the position with this tick range
+     * @dev Removes the position if fully burned (swapping it with the last element), decreases its liquidity
+     *      otherwise. Leaves `positions` untouched if no position has this range, or if `amount` exceeds the
+     *      position's liquidity: the latter is then reported through `overBurn`.
+     * @param tickLower Lower tick boundary
+     * @param tickUpper Upper tick boundary
+     * @param amount Amount of liquidity burned
+     * @return overBurn True if the position exists and holds less than `amount`
+     */
+    function _bookBurn(int24 tickLower, int24 tickUpper, uint128 amount) private returns (bool overBurn) {
         Position memory refPosition = Position({upperTick: tickUpper, lowerTick: tickLower, liquidity: 0});
 
         // Properly remove from array by swapping with last element
@@ -711,13 +746,50 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
                     // Fully burned: swap with last element and pop
                     positions[i] = positions[posLen - 1];
                     positions.pop();
-                } else {
+                } else if (position.liquidity > amount) {
                     // Partially burned: decrease liquidity
-                    positions[i].liquidity -= amount;
+                    positions[i].liquidity = position.liquidity - amount;
+                } else {
+                    overBurn = true;
                 }
                 break;
             }
         }
+    }
+
+    /**
+     * @notice Burns liquidity from the pool and collects everything the position is owed (principal + fees)
+     * @dev Returns the principal released by the burn, capped by what the collect actually paid to the vault. A
+     *      Uniswap V3 pool always pays at least the principal it releases, so the cap only matters for a pool that
+     *      would not: the vault then never accounts for tokens it did not receive.
+     * @param tickLower Lower tick boundary
+     * @param tickUpper Upper tick boundary
+     * @param amount Amount of liquidity to burn
+     * @return amount0 Amount of token0 removed
+     * @return amount1 Amount of token1 removed
+     */
+    function _burnAndCollect(
+        int24 tickLower,
+        int24 tickUpper,
+        uint128 amount
+    )
+        private
+        returns (uint256 amount0, uint256 amount1)
+    {
+        // Burn the liquidity
+        (uint256 released0, uint256 released1) = POOL.burn(tickLower, tickUpper, amount);
+
+        // Automatically collect the tokens
+        (uint128 collected0, uint128 collected1) = POOL.collect(
+            address(this),
+            tickLower,
+            tickUpper,
+            type(uint128).max, // collect all amount0
+            type(uint128).max // collect all amount1
+        );
+
+        amount0 = Math.min(released0, collected0);
+        amount1 = Math.min(released1, collected1);
     }
 
     /**
@@ -860,9 +932,9 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
      * @return totalAssets1 Total token1 assets
      */
     function _rawAssetsValue() internal view returns (uint256 totalAssets0, uint256 totalAssets1) {
-        (uint160 sqrtPriceX96, int24 tickCurrent,,,,,) = POOL.slot0();
+        PoolSlot0 memory slot0 = IUniswapV3PoolTuples(address(POOL)).slot0();
 
-        (totalAssets0, totalAssets1) = _totalLpValue(sqrtPriceX96, tickCurrent);
+        (totalAssets0, totalAssets1) = _totalLpValue(slot0.sqrtPriceX96, slot0.tick);
 
         totalAssets0 += TOKEN0.balanceOf(address(this));
         totalAssets1 += TOKEN1.balanceOf(address(this));
@@ -917,6 +989,7 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
      * @notice Calculates detailed LP state for all positions
      * @dev Iterates through all positions and calculates principal and uncollected fees separately
      *      Uses Uniswap V3 position data and internal calculation functions
+     *      The pool's global fee growth is read once, before the loop, for all the positions in range
      * @param sqrtPriceX96 Current pool price in sqrt(token1/token0) * 2^96 format
      * @param currentTick Current pool tick
      * @return assets0 Token0 principal across all positions
@@ -933,6 +1006,12 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
         returns (uint256 assets0, uint256 assets1, uint256 uncollected0, uint256 uncollected1)
     {
         uint256 posLen = positions.length;
+        if (posLen == 0) return (0, 0, 0, 0);
+
+        FeeGrowthGlobal memory feeGrowthGlobal = FeeGrowthGlobal({
+            feeGrowthGlobal0X128: POOL.feeGrowthGlobal0X128(), feeGrowthGlobal1X128: POOL.feeGrowthGlobal1X128()
+        });
+
         for (uint256 i = 0; i < posLen;) {
             Position memory position = positions[i];
 
@@ -965,7 +1044,8 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
                     tokensOwed0: tokensOwed0,
                     tokensOwed1: tokensOwed1
                 }),
-                currentTick
+                currentTick,
+                feeGrowthGlobal
             );
 
             unchecked {
@@ -1074,7 +1154,8 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
     /**
      * @notice Enforces a pending fee update after timelock expires
      * @dev Collects all pending fees before applying new rates to ensure clean transition
-     *      Clears the pending fee update after enforcement
+     *      Clears the pending fee update and emits FeeUpdateEnforced first, before the fee collection's pool and
+     *      token interactions; the new rates are applied once the pending fees are collected at the old rates.
      * @return newTvlFee The newly activated TVL fee
      * @return newPerformanceFee The newly activated performance fee
      */
@@ -1087,14 +1168,36 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
 
         if (timestamp > block.timestamp) revert Unauthorized();
 
+        packedPendingFees = 0;
+
+        emit FeeUpdateEnforced(newTvlFee, newPerformanceFee);
+
         // Collect pending fees before changing rates
         _collectFees();
 
         tvlFeeScaled = newTvlFee;
         performanceFeeScaled = newPerformanceFee;
+    }
 
-        emit FeeUpdateEnforced(newTvlFee, newPerformanceFee);
+    /**
+     * @notice Restarts the TVL fee accrual at the current block
+     * @dev Every update of tvlFeeCollectedAt goes through here, so TvlFeeCollectedAtUpdated tracks all of them
+     */
+    function _resetTvlFeeAccrual() private {
+        tvlFeeCollectedAt = block.timestamp;
 
-        packedPendingFees = 0;
+        emit TvlFeeCollectedAtUpdated(block.timestamp);
+    }
+
+    /**
+     * @notice Records the vault TVL in token0 and the quote used for it: the baseline of the performance fee
+     * @dev Computed from the vault's current assets, so it runs after the transfers that change them
+     */
+    function _recordVaultTvl() private {
+        (uint256 newVaultTvl0, uint256 quoteScaled) = _getNewVaultTvl0();
+
+        (lastVaultTvl0, lastQuoteScaled) = (newVaultTvl0, quoteScaled);
+
+        emit VaultTvlRecorded(newVaultTvl0, quoteScaled);
     }
 }

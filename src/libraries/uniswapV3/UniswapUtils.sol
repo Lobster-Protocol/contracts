@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {IUniswapV3PoolMinimal} from "../../interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
 import {TickMath} from "./TickMath.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {LowLevelCall} from "@openzeppelin/contracts/utils/LowLevelCall.sol";
 
 struct Position {
     address token;
@@ -81,7 +82,7 @@ library UniswapUtils {
         secondsAgos[1] = 0; // now
 
         // Get cumulative ticks at both time points
-        (int56[] memory tickCumulatives,) = pool.observe(secondsAgos);
+        int56[] memory tickCumulatives = observeTickCumulatives(pool, secondsAgos);
 
         int56 tickCumulativesDelta = tickCumulatives[1] - tickCumulatives[0];
 
@@ -99,5 +100,32 @@ library UniswapUtils {
 
         // forge-lint: disable-next-line(unsafe-typecast)
         twPrice = getQuoteFromSqrtRatioX96(TickMath.getSqrtRatioAtTick(int24(averageTick)), baseAmount, inverse);
+    }
+
+    /**
+     * @notice Reads the tick cumulatives of `pool.observe(secondsAgos)`
+     * @dev Fails like the high-level call `pool.observe(secondsAgos)`: a revert of the pool (e.g. "OLD", for a
+     * target older than the oldest observation) is bubbled unchanged, return data too short to hold the offsets of
+     * the two arrays (no code at `pool`, say) reverts without data, and the tick cumulatives are checked by the ABI
+     * decoder. The seconds-per-liquidity cumulatives are not read, so an invalid encoding of that array alone, which
+     * a Uniswap V3 pool never returns, is not rejected.
+     * @param pool The Uniswap V3 pool
+     * @param secondsAgos How long before the current block timestamp each tick cumulative is taken
+     * @return tickCumulatives The cumulative tick value as of each of `secondsAgos`
+     */
+    function observeTickCumulatives(
+        IUniswapV3PoolMinimal pool,
+        uint32[] memory secondsAgos
+    )
+        internal
+        view
+        returns (int56[] memory tickCumulatives)
+    {
+        (bool success, bytes memory returnData) =
+            address(pool).staticcall(abi.encodeCall(IUniswapV3PoolMinimal.observe, (secondsAgos)));
+        if (!success) LowLevelCall.bubbleRevert(returnData);
+        // The decoder of the high-level call requires both array offsets before it reads either array
+        if (returnData.length < 64) revert();
+        tickCumulatives = abi.decode(returnData, (int56[]));
     }
 }
