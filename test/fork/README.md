@@ -8,7 +8,22 @@ the thing under test.
 The actors (`approver`, `outsider`, and the purpose-built ones in individual suites) are vaults in
 their own right: `ForkBase` registers the live pools each one trades on for itself, and each swap pays
 out to its own caller, as `LobsterProxy` requires. The registry is therefore never what stops a
-call here; its rules are covered by the offline suites.
+call here, except in the tests that are about it; its rules are covered by the offline suites.
+
+## The entry point under test
+
+Every swap goes through one entry point, `swap(bytes data)` (payable), whose `data` packs a deadline,
+a token table and one or more legs (`src/libraries/SwapFlags.sol`). A single swap is a one-leg call;
+the call returns one amount per leg (received for exact input, paid for exact output). A leg names its
+tokens and fee (plus tick spacing on V4) and nothing else:
+
+- **no recipient**: its output goes to the caller, or with `PARK` stays for a later `HELD` leg of the
+  same call, which spends exactly what was parked;
+- **no hooks**: a V4 leg always targets the hookless pool of its currencies, fee and tick spacing.
+
+A call with any V4 leg runs entirely inside one PoolManager unlock, V3 legs included; a V3-only call
+opens none. `ForkBase` builds legs against the live pools (`_v3In`, `_v3Out`, `_v4In`, `_v4Out`,
+`_parked`, `_held`) and encodes them with `test/helpers/SwapCalldata.sol`.
 
 Everything in `test/` outside this directory is mock-based and runs offline with plain `forge test`.
 
@@ -16,18 +31,20 @@ Everything in `test/` outside this directory is mock-based and runs offline with
 
 | Path | What it covers |
 | --- | --- |
-| `helpers/ForkBase.sol` | Shared fixture: per-chain addresses, actors, funding, unlimited approvals |
-| `helpers/Callers.sol` | Non-cooperative callers: direct-callback caller, re-entrant token |
+| `helpers/ForkBase.sol` | Shared fixture: per-chain addresses, actors, funding, unlimited approvals, leg builders |
+| `helpers/Callers.sol` | Non-cooperative callers: direct-callback caller, re-entrant token, settlement-thief token |
 | `helpers/Tokens.sol` | Throwaway ERC20s for building purpose-made pools (plain + fee-on-transfer) |
-| `security/Authorisation.t.sol` | Standing approvals are only spendable by the account that granted them |
-| `security/AmountCasts.t.sol` | Behaviour at the `uint256` -> `int256` conversion boundary |
-| `integration/HappyPath.t.sol` | V3 mint / exactInputSingle work as documented |
-| `integration/V4Swap.t.sol` | V4 swaps, native ETH handling, hook rejection, the refund sweep |
-| `integration/SwapSemantics.t.sol` | Edge behaviour: non-standard tokens (USDT, fee-on-transfer), mint slippage |
-| `integration/BatchSwap.t.sol` | `batchSwap`: V3 + V4 swaps in one transaction, and a chained route through native ETH; equivalence, atomicity, payer |
+| `security/Authorisation.t.sol` | Standing approvals are only spendable by the account that granted them: forged callbacks (even from the genuine pool, outside a call), payer and recipient are always the caller, re-entrant tokens, no plain ETH transfers |
+| `security/AmountCasts.t.sol` | The amount-encoding boundary: amounts are 16-byte (`uint128`) fields, so nothing can wrap; wider data is `MalformedSwap` |
+| `integration/HappyPath.t.sol` | V3 mint and a one-leg `swap` work as documented; deadline and price band |
+| `integration/V4Swap.t.sol` | V4 legs, native ETH (payable `swap`, paid from msg.value only, refunds of exactly the unspent msg.value; force-fed ETH is neither spent nor refunded), hooks that cannot be encoded, the unlock callback |
+| `integration/SwapSemantics.t.sol` | Edge behaviour: non-standard tokens (USDT, fee-on-transfer), mint slippage, exact-output fills |
+| `integration/BatchSwap.t.sol` | Multi-leg `swap`: V3 + V4 legs in one unlock, routes through every hand-off (PARK/HELD, native ETH in the middle); equivalence, atomicity, nothing runs unless every leg passes, native-input legs share one msg.value, payer |
 
 `security/Authorisation.t.sol` is the one to read first — it states the invariant the whole design
-rests on: `payer` is always `msg.sender`, at any call depth.
+rests on: `payer` is always the entry point's `msg.sender`, at any call depth (the pool callbacks read
+it from the proxy's reentrancy lock, never from calldata, and outside an entry point there is none, so
+even the genuine pool's callbacks revert).
 
 ## Running them
 

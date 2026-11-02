@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.27;
 
-import {UniswapV4SwapProxy} from "./UniswapV4SwapProxy.sol";
+import {PoolManagerBase} from "./base/PoolManagerBase.sol";
 import {PoolRegistry} from "./base/PoolRegistry.sol";
 import {
     IPoolManagerMinimal,
@@ -76,7 +76,7 @@ struct V4LiquidityOp {
 ///       approval above) and `settleFor`.
 ///
 /// Abstract on purpose: this is a mixin combined into {LobsterProxy}. Deploy that rather than this.
-abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, ICustomCondition {
+abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, ICustomCondition {
     using BalanceDeltaLibrary for BalanceDelta;
 
     /// @dev Transient context of the operation in progress: keccak256("lobster.V4LiquidityProxy.context")
@@ -124,7 +124,7 @@ abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, I
     /// unlock. Operations run in order and are settled together, so a rebalance (remove one range,
     /// add another) only moves the net amounts.
     /// @dev Payable for native-ETH pools: what the vault owes in ETH is paid from msg.value, and the
-    /// rest is refunded to the caller.
+    /// rest of msg.value is refunded to the caller.
     /// @return amounts0 Per operation, the vault's currency0 delta, fees included: negative = paid,
     /// positive = received
     /// @return amounts1 Same, for currency1
@@ -138,18 +138,22 @@ abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, I
         checkDeadline(deadline)
         returns (int256[] memory amounts0, int256[] memory amounts1)
     {
+        // What the proxy held before msg.value arrived: no operation may spend it
+        uint256 heldBefore = address(this).balance - msg.value;
         V4Roles memory roles = _v4Roles[msg.sender];
         require(roles.rolesModifier != address(0), V4RolesNotSet());
         _requireRolesOf(roles.rolesModifier, msg.sender);
 
         for (uint256 i = 0; i < ops.length; i++) {
+            // A call is all or nothing: one invalid operation refuses the whole batch
+            // forge-lint: disable-next-line(require-revert-in-loop)
             require(address(ops[i].key.hooks) == address(0), HooksNotSupported());
             if (ops[i].liquidityDelta > 0) {
                 bytes32 poolId = keccak256(abi.encode(ops[i].key));
-                require(_canAdd(msg.sender, poolId), PoolNotAllowed());
+                (int24 minTick, int24 maxTick) = _requireAllowed(msg.sender, poolId, PERMISSION_MINT);
                 // Checked once, up front: the unlock below only modifies liquidity, which never moves
                 // a pool's price, so the tick read here is the one every operation runs at
-                _requireInPriceBand(msg.sender, poolId, _currentTick(poolId));
+                _requireInBand(_currentTick(poolId), minTick, maxTick);
             }
         }
 
@@ -159,17 +163,17 @@ abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, I
 
         (amounts0, amounts1) = abi.decode(result, (int256[], int256[]));
 
-        // Unspent ETH is the caller's change: the PoolManager pays what the vault is owed to the
-        // vault directly, never to the proxy (see {UniswapV4SwapProxy-_refundExcessNative})
-        _refundExcessNative();
+        // Unspent msg.value is the caller's change: the PoolManager pays what the vault is owed to the
+        // vault directly, never to the proxy (see {PoolManagerBase-_refundExcessNative})
+        _refundExcessNative(heldBefore);
     }
 
     // ---------------------------------------------------------------------------------------------
     // The callback
     // ---------------------------------------------------------------------------------------------
 
-    /// @inheritdoc UniswapV4SwapProxy
-    /// @dev {UniswapV4SwapProxy-unlockCallback} has checked that the PoolManager is the caller and that
+    /// @inheritdoc PoolManagerBase
+    /// @dev {PoolManagerBase-unlockCallback} has checked that the PoolManager is the caller and that
     /// the data carries `LIQUIDITY_TAG`; `data` is what follows the tag.
     function _liquidityCallback(bytes calldata data) internal override returns (bytes memory) {
         (address vault, address rolesModifier, bytes32 roleKey, uint256 value) = _context();
@@ -181,7 +185,7 @@ abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, I
         int256[] memory amounts1 = new int256[](n);
         // Each operation touches two currencies
         address[] memory currencies = new address[](2 * n);
-        uint256 count;
+        uint256 count = 0;
 
         // 1. The vault modifies its own positions
         for (uint256 i = 0; i < n; i++) {
@@ -208,6 +212,10 @@ abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, I
         return abi.encode(amounts0, amounts1);
     }
 
+    // The unlock runs the vault's operations, then settles each currency, in loops: one call to the
+    // vault's own Roles modifier or to the PoolManager per operation or currency, and any failure
+    // reverts the whole rebalance, which is all or nothing.
+    // forge-lint: disable-start(require-revert-in-loop, calls-loop)
     /// @dev The vault calls `modifyLiquidity` through its Roles modifier; checks the op's limits
     function _modifyAsVault(
         address rolesModifier,
@@ -217,7 +225,7 @@ abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, I
         private
         returns (int256 amount0, int256 amount1)
     {
-        (, bytes memory returnData) = IRoles(rolesModifier)
+        (bool success, bytes memory returnData) = IRoles(rolesModifier)
             .execTransactionWithRoleReturnData(
                 address(POOL_MANAGER),
                 0,
@@ -238,6 +246,9 @@ abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, I
                 roleKey,
                 true
             );
+        // `shouldRevert` makes Roles revert on failure; a modifier that reports one without reverting is
+        // refused too
+        require(success, RolesCallFailed());
         (BalanceDelta callerDelta,) = abi.decode(returnData, (BalanceDelta, BalanceDelta));
         amount0 = callerDelta.amount0();
         amount1 = callerDelta.amount1();
@@ -255,7 +266,7 @@ abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, I
     )
         private
     {
-        IRoles(rolesModifier)
+        bool success = IRoles(rolesModifier)
             .execTransactionWithRole(
                 address(POOL_MANAGER),
                 0,
@@ -264,6 +275,7 @@ abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, I
                 roleKey,
                 true
             );
+        require(success, RolesCallFailed());
     }
 
     /// @dev Pays `owed` of `currency` to the PoolManager on the vault's behalf
@@ -272,11 +284,14 @@ abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, I
             require(owed <= value, NotEnoughEthSent());
             // Native settlement needs no synced currency; reset whatever may be there
             POOL_MANAGER.sync(Currency.wrap(address(0)));
-            POOL_MANAGER.settleFor{value: owed}(vault);
+            require(POOL_MANAGER.settleFor{value: owed}(vault) == owed, UnexpectedSettlement());
         } else {
             POOL_MANAGER.sync(Currency.wrap(currency));
+            // `vault` is the caller of modifyLiquidityV4 (the transient context it set): the
+            // operation is paid by the account that made the call, never by one named in calldata
+            // forge-lint: disable-next-line(arbitrary-send-erc20)
             TransferHelper.safeTransferFrom(currency, vault, address(POOL_MANAGER), owed);
-            POOL_MANAGER.settleFor(vault);
+            require(POOL_MANAGER.settleFor(vault) == owed, UnexpectedSettlement());
         }
     }
 
@@ -297,6 +312,8 @@ abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, I
         return int256(uint256(POOL_MANAGER.exttload(keccak256(abi.encode(vault, currency)))));
     }
 
+    // forge-lint: disable-end(require-revert-in-loop, calls-loop)
+
     function _addCurrency(address[] memory currencies, uint256 count, address currency) private pure returns (uint256) {
         for (uint256 i = 0; i < count; i++) {
             if (currencies[i] == currency) return count;
@@ -310,18 +327,6 @@ abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, I
             IRoles(rolesModifier).avatar() == vault && IRoles(rolesModifier).target() == vault,
             RolesModifierNotTheVaults()
         );
-    }
-
-    /// @dev The pool's current tick, read from its Slot0 in the PoolManager (v4-core `StateLibrary`:
-    /// `pools` is storage slot 6, the tick sits at bits 160-183 of Slot0)
-    function _currentTick(bytes32 poolId) internal view returns (int24) {
-        bytes32 slot0 = POOL_MANAGER.extsload(keccak256(abi.encodePacked(poolId, uint256(6))));
-        // forge-lint: disable-next-line(unsafe-typecast)
-        return int24(uint24(uint256(slot0) >> 160));
-    }
-
-    function _canAdd(address vault, bytes32 poolId) private view returns (bool) {
-        return _hasPermission(vault, poolId, PERMISSION_MINT);
     }
 
     function _setContext(address vault, address rolesModifier, bytes32 roleKey, uint256 value) private {
@@ -389,7 +394,7 @@ abstract contract UniswapV4LiquidityProxy is UniswapV4SwapProxy, PoolRegistry, I
             (bool ok, address vault) = _avatarOfCaller();
             if (!ok) return (false, "No avatar");
             // The PoolId: keccak256 of the five key words, validated above, hence canonical
-            if (!_canAdd(vault, keccak256(data[4:164]))) return (false, "Pool not allowed");
+            if (!_hasPermission(vault, keccak256(data[4:164]), PERMISSION_MINT)) return (false, "Pool not allowed");
         }
         return (true, bytes32(0));
     }

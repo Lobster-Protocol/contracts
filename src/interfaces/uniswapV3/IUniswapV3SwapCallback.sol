@@ -1,35 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 pragma solidity >=0.8.0;
 
-struct SwapCallbackData {
-    address tokenIn;
-    address tokenOut;
-    uint24 fee;
-    address payer;
-}
-
-struct ExactInputSingleParams {
-    address tokenIn;
-    address tokenOut;
-    uint24 fee;
-    address recipient;
-    uint256 deadline;
-    uint256 amountIn;
-    uint256 amountOutMinimum;
-    uint160 sqrtPriceLimitX96;
-}
-
-struct ExactOutputSingleParams {
-    address tokenIn;
-    address tokenOut;
-    uint24 fee;
-    address recipient;
-    uint256 deadline;
-    uint256 amountOut;
-    uint256 amountInMaximum;
-    uint160 sqrtPriceLimitX96;
-}
-
 /// @title Callback for IUniswapV3PoolActions#swap
 /// @notice Any contract that calls IUniswapV3PoolActions#swap must implement this interface
 interface IUniswapV3SwapCallback {

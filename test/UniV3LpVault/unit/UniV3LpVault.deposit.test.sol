@@ -13,6 +13,8 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {TestHelper} from "../helpers/TestHelper.sol";
 import {TestConstants} from "../helpers/Constants.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {UniswapUtils} from "../../../src/libraries/uniswapV3/UniswapUtils.sol";
 
 contract UniV3LpVaultDepositTest is Test {
@@ -244,5 +246,86 @@ contract UniV3LpVaultDepositTest is Test {
         assertEq(setup.token1.balanceOf(address(setup.vault)), maxAmount1);
         assertEq(setup.token0.balanceOf(setup.owner), 0);
         assertEq(setup.token1.balanceOf(setup.owner), 0);
+    }
+
+    /// @notice Deposit is the first log of a deposit: the token transfers it announces come after it
+    function test_deposit_EmitsDepositBeforeTransfers() public {
+        uint256 amount0 = TestConstants.MEDIUM_AMOUNT;
+        uint256 amount1 = TestConstants.LARGE_AMOUNT;
+
+        vm.recordLogs();
+        vm.prank(setup.owner);
+        setup.vault.deposit(amount0, amount1);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        assertEq(logs[0].emitter, address(setup.vault), "First log from the vault");
+        assertEq(logs[0].topics[0], UniV3LpVaultVariables.Deposit.selector, "First log is Deposit");
+        assertEq(logs[0].topics[1], bytes32(amount0), "Deposit assets0");
+        assertEq(logs[0].topics[2], bytes32(amount1), "Deposit assets1");
+
+        uint256 transfer0 = _firstIndexOf(logs, address(setup.token0), IERC20.Transfer.selector);
+        uint256 transfer1 = _firstIndexOf(logs, address(setup.token1), IERC20.Transfer.selector);
+        assertLt(transfer0, logs.length, "token0 transferred");
+        assertLt(transfer1, logs.length, "token1 transferred");
+        assertGt(transfer0, 0, "token0 transfer after Deposit");
+        assertGt(transfer1, 0, "token1 transfer after Deposit");
+    }
+
+    /// @notice When the deposit collects pending fees, Deposit still comes first, before the fee collection's logs
+    function test_deposit_WithFeesAccumulated_EmitsDepositBeforeFeeCollection() public {
+        TestHelper.VaultSetup memory feeSetup = helper.deployVaultWithPool(TestConstants.HIGH_TVL_FEE, 0);
+        helper.depositToVault(feeSetup, TestConstants.MEDIUM_AMOUNT, TestConstants.MEDIUM_AMOUNT);
+        helper.simulateTimePass(TestConstants.ONE_MONTH);
+
+        vm.recordLogs();
+        helper.depositToVault(feeSetup, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        assertEq(logs[0].emitter, address(feeSetup.vault), "First log from the vault");
+        assertEq(logs[0].topics[0], UniV3LpVaultVariables.Deposit.selector, "First log is Deposit");
+
+        uint256 feeLog = _firstIndexOf(logs, address(feeSetup.vault), UniV3LpVaultVariables.TvlFeeCollected.selector);
+        assertGt(feeLog, 0, "TVL fee collected after Deposit");
+        assertLt(feeLog, logs.length, "TVL fee collected");
+    }
+
+    /// @notice A deposit records the performance fee baseline and emits it: VaultTvlRecorded carries the new
+    ///         lastVaultTvl0 (token0 + token1 at the TWAP) and lastQuoteScaled
+    function test_deposit_EmitsVaultTvlRecorded() public {
+        uint256 amount0 = TestConstants.MEDIUM_AMOUNT;
+        uint256 amount1 = TestConstants.LARGE_AMOUNT;
+
+        uint256 quoteScaled =
+            UniswapUtils.getTwap(setup.pool, TWAP_SECONDS_AGO, SafeCast.toUint128(SCALING_FACTOR), true);
+        uint256 expectedTvl0 = amount0 + quoteScaled.mulDiv(amount1, SCALING_FACTOR);
+
+        vm.expectEmit(true, true, true, true, address(setup.vault));
+        emit UniV3LpVaultVariables.VaultTvlRecorded(expectedTvl0, quoteScaled);
+
+        vm.prank(setup.owner);
+        setup.vault.deposit(amount0, amount1);
+
+        assertEq(setup.vault.lastVaultTvl0(), expectedTvl0, "lastVaultTvl0");
+        assertEq(setup.vault.lastQuoteScaled(), quoteScaled, "lastQuoteScaled");
+    }
+
+    /// @notice A deposit with nothing to collect restarts the TVL fee accrual and emits TvlFeeCollectedAtUpdated
+    function test_deposit_NothingToCollect_EmitsTvlFeeCollectedAtUpdated() public {
+        helper.simulateTimePass(TestConstants.ONE_DAY);
+
+        vm.expectEmit(true, true, true, true, address(setup.vault));
+        emit UniV3LpVaultVariables.TvlFeeCollectedAtUpdated(vm.getBlockTimestamp());
+
+        helper.depositToVault(setup, TestConstants.SMALL_AMOUNT, TestConstants.SMALL_AMOUNT);
+
+        assertEq(setup.vault.tvlFeeCollectedAt(), vm.getBlockTimestamp(), "tvlFeeCollectedAt");
+    }
+
+    /// @dev Index of the first log from `emitter` with `topic0`, or logs.length if there is none
+    function _firstIndexOf(Vm.Log[] memory logs, address emitter, bytes32 topic0) internal pure returns (uint256) {
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].emitter == emitter && logs[i].topics.length > 0 && logs[i].topics[0] == topic0) return i;
+        }
+        return logs.length;
     }
 }

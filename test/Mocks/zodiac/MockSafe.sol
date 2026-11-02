@@ -8,16 +8,16 @@ import {Operation} from "../../../src/interfaces/zodiac/IRoles.sol";
 /// revert on a failed call, they return `success = false`. Owner-signed transactions are simulated in
 /// tests with `vm.prank(address(safe))`. Delegatecalls are not supported (never used here).
 contract MockSafe {
-    address private immutable _deployer;
+    address private immutable _DEPLOYER;
     mapping(address module => bool) public isModuleEnabled;
 
     constructor() {
-        _deployer = msg.sender;
+        _DEPLOYER = msg.sender;
     }
 
     /// @dev On a real Safe, an owner transaction calling itself; here, the deployer or the Safe
     function enableModule(address module) external {
-        require(msg.sender == _deployer || msg.sender == address(this), "GS031");
+        require(msg.sender == _DEPLOYER || msg.sender == address(this), "GS031");
         isModuleEnabled[module] = true;
     }
 

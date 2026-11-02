@@ -31,7 +31,7 @@ contract MockRoles {
         uint256 avatarParam;
     }
 
-    address private immutable _owner;
+    address private immutable _OWNER;
     address public avatar;
     address public target;
     mapping(address module => bool) public isModuleEnabled;
@@ -39,13 +39,13 @@ contract MockRoles {
     mapping(bytes32 roleKey => mapping(address to => mapping(bytes4 selector => Rule))) public rules;
 
     constructor(address _avatar, address _target) {
-        _owner = msg.sender;
+        _OWNER = msg.sender;
         avatar = _avatar;
         target = _target;
     }
 
     modifier onlyOwner() {
-        require(msg.sender == _owner, "MockRoles: not owner");
+        require(msg.sender == _OWNER, "MockRoles: not owner");
         _;
     }
 

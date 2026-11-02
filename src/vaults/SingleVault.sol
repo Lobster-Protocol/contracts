@@ -94,11 +94,13 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
      * @dev For implementation contracts, pass dummy addresses (e.g., address(0xdead))
      *      For proxy contracts, ownership will be set via _transferOwnership in the initialize function
      * @param initialOwner The address that will become the vault owner (dummy for implementation)
-     * @param initialAllocator The address that will become the initial allocator (dummy for implementation)
+     * @param initialAllocator The address that will become the initial allocator (dummy for implementation, must
+     *        not be address(0))
      */
     constructor(address initialOwner, address initialAllocator) Ownable(initialOwner) {
         // For implementation contracts, we use dummy addresses
         // For proxy contracts, real initialization happens in the initialize() function
+        require(initialAllocator != address(0), ZeroAddress());
         allocator = initialAllocator;
     }
 
@@ -110,12 +112,23 @@ contract SingleVault is Ownable2Step, ReentrancyGuard {
      * @notice Updates the allocator address
      * @dev Only callable by the owner; change takes effect immediately
      * @dev No timelock is enforced for allocator changes
-     * @dev Allocator can be set to address(0) -> disable position allocation
+     * @dev Reverts with ZeroAddress for address(0): use removeAllocator to disable position allocation
      * @param newAllocator Address of the new allocator
      */
     function setAllocator(address newAllocator) external onlyOwner {
+        require(newAllocator != address(0), ZeroAddress());
         allocator = newAllocator;
         emit AllocatorUpdated(newAllocator);
+    }
+
+    /**
+     * @notice Removes the allocator, which disables position allocation: only the owner can then run vault operations
+     * @dev Only callable by the owner; change takes effect immediately. Sets the allocator to address(0) and emits
+     *      AllocatorUpdated(address(0)). setAllocator restores an allocator.
+     */
+    function removeAllocator() external onlyOwner {
+        allocator = address(0);
+        emit AllocatorUpdated(address(0));
     }
 
     /*//////////////////////////////////////////////////////////////
