@@ -27,6 +27,8 @@ library PoolAddress {
     /// @param key The PoolKey
     /// @return pool The contract address of the V3 pool
     function computeAddress(address factory, PoolKey memory key) internal pure returns (address pool) {
+        // An unsorted key reverts the call it belongs to
+        // forge-lint: disable-next-line(require-revert-in-loop)
         require(key.token0 < key.token1);
         pool = address(
             uint160(

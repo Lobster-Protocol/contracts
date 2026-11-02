@@ -123,6 +123,9 @@ abstract contract PoolRegistry is Guards {
         return keccak256(abi.encode(key));
     }
 
+    // Checks that every swap leg, liquidity operation and setPools entry must pass: one failing item
+    // reverts the whole call, which is all or nothing
+    // forge-lint: disable-start(require-revert-in-loop)
     /// @dev Reverts unless `vault` registered `key` with `permission` and set a price band for it, and
     /// returns the band: one SLOAD
     function _requireAllowed(
@@ -199,4 +202,5 @@ abstract contract PoolRegistry is Guards {
         entry.permissions = permissions;
         emit PoolPermissionsSet(vault, key, permissions);
     }
+    // forge-lint: disable-end(require-revert-in-loop)
 }

@@ -174,6 +174,8 @@ abstract contract UniV3LpVaultVariables is SingleVault {
      * @param deadline Maximum timestamp for transaction
      */
     function _checkDeadline(uint256 deadline) internal view {
+        // Deadlines are wall-clock by design: a transaction mined after the caller's deadline is refused
+        // forge-lint: disable-next-line(block-timestamp)
         require(block.timestamp <= deadline, "Transaction too old");
     }
 

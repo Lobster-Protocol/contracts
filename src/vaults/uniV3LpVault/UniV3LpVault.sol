@@ -518,6 +518,9 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
 
             _safeTransferBoth(feeCollector, tvlFeeAssets0, tvlFeeAssets1);
 
+            // The amounts only exist once the vault's own pool has burned and collected, so the event follows
+            // those calls and the transfer it reports
+            // forge-lint: disable-next-line(reentrancy-events)
             emit TvlFeeCollected(tvlFeeAssets0, tvlFeeAssets1, feeCollector);
         }
         // Performance
@@ -546,6 +549,9 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
 
             _safeTransferBoth(feeCollector, perfFeeAssets0, perfFeeAssets1);
 
+            // The amounts only exist once the vault's own pool has burned and collected, so the event follows
+            // those calls and the transfer it reports
+            // forge-lint: disable-next-line(reentrancy-events)
             emit PerformanceFeeCollected(perfFeeAssets0, perfFeeAssets1, feeCollector);
         }
 
@@ -553,6 +559,9 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
         if (protocolFee0 > 0 || protocolFee1 > 0) {
             _safeTransferBoth(PROTOCOL_ADDR, protocolFee0, protocolFee1);
 
+            // The amounts only exist once the vault's own pool has burned and collected, so the event follows
+            // those calls and the transfer it reports
+            // forge-lint: disable-next-line(reentrancy-events)
             emit ProtocolFeeCollected(protocolFee0, protocolFee1, PROTOCOL_ADDR);
         }
 
@@ -574,6 +583,9 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
         _safeTransferBoth(withdrawParams.recipient, assets0ToWithdrawForUser, assets1ToWithdrawForUser);
 
         if (assets0ToWithdrawForUser > 0 || assets1ToWithdrawForUser > 0) {
+            // The amounts only exist once the vault's own pool has burned and collected, so the event follows
+            // those calls and the transfer it reports
+            // forge-lint: disable-next-line(reentrancy-events)
             emit Withdraw(assets0ToWithdrawForUser, assets1ToWithdrawForUser, withdrawParams.recipient);
         }
 
@@ -776,10 +788,15 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
         private
         returns (uint256 amount0, uint256 amount1)
     {
+        // _burnBooked runs this once per position, on the vault's own pool: the loop is bounded by the positions the
+        // owner or allocator opened. The performance fee baseline (lastVaultTvl0) is recorded after a withdrawal
+        // because it measures what the withdrawal left
         // Burn the liquidity
+        // forge-lint: disable-next-line(calls-loop, reentrancy-no-eth)
         (uint256 released0, uint256 released1) = POOL.burn(tickLower, tickUpper, amount);
 
         // Automatically collect the tokens
+        // forge-lint: disable-start(calls-loop, reentrancy-no-eth)
         (uint128 collected0, uint128 collected1) = POOL.collect(
             address(this),
             tickLower,
@@ -787,6 +804,7 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
             type(uint128).max, // collect all amount0
             type(uint128).max // collect all amount1
         );
+        // forge-lint: disable-end(calls-loop, reentrancy-no-eth)
 
         amount0 = Math.min(released0, collected0);
         amount1 = Math.min(released1, collected1);
@@ -811,6 +829,9 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
         internal
         returns (uint128 amount0, uint128 amount1)
     {
+        // _withdraw runs this once per position, on the vault's own pool and bounded by the positions it holds. The
+        // performance fee baseline (lastVaultTvl0) is recorded after a withdrawal because it measures what it left
+        // forge-lint: disable-next-line(calls-loop, reentrancy-no-eth)
         return POOL.collect(address(this), tickLower, tickUpper, amount0Requested, amount1Requested);
     }
 
@@ -1017,6 +1038,8 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
 
             bytes32 positionKey = PositionKey.compute(address(this), position.lowerTick, position.upperTick);
 
+            // One read of the vault's own pool per position it holds, bounded by `positions`
+            // forge-lint: disable-start(calls-loop)
             (
                 uint128 liquidity,
                 uint256 feeGrowthInside0LastX128,
@@ -1024,6 +1047,7 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
                 uint128 tokensOwed0,
                 uint128 tokensOwed1
             ) = POOL.positions(positionKey);
+            // forge-lint: disable-end(calls-loop)
 
             // Calculate principal amounts in position
             (uint256 positiontAssets0, uint256 positiontAssets1) =
@@ -1166,6 +1190,8 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
         uint96 timestamp;
         (newTvlFee, newPerformanceFee, timestamp) = _unpackFeesWithTimestamp(pendingFees);
 
+        // The timelock is wall-clock by design: FEE_UPDATE_MIN_DELAY is 14 days, far beyond any timestamp drift
+        // forge-lint: disable-next-line(block-timestamp)
         if (timestamp > block.timestamp) revert Unauthorized();
 
         packedPendingFees = 0;
@@ -1186,6 +1212,9 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
     function _resetTvlFeeAccrual() private {
         tvlFeeCollectedAt = block.timestamp;
 
+        // Only view calls can come before this; forge counts the inline assembly of Math.min and of the initializer
+        // modifier as external calls
+        // forge-lint: disable-next-line(reentrancy-events)
         emit TvlFeeCollectedAtUpdated(block.timestamp);
     }
 
@@ -1198,6 +1227,8 @@ contract UniV3LpVault is Initializable, UniV3LpVaultVariables, UniswapV3Calculat
 
         (lastVaultTvl0, lastQuoteScaled) = (newVaultTvl0, quoteScaled);
 
+        // The baseline is measured from the vault's assets after the transfers that change them, so it follows them
+        // forge-lint: disable-next-line(reentrancy-events)
         emit VaultTvlRecorded(newVaultTvl0, quoteScaled);
     }
 }

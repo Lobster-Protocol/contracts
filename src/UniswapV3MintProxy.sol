@@ -72,10 +72,13 @@ abstract contract UniswapV3MintProxy is UniswapV3ProxyBase, IUniswapV3MintCallba
         CallbackValidation.verifyCallback(UNI_V3_FACTORY, poolKey);
         address payer = _lockHolder();
 
+        // `payer` holds the reentrancy lock: it is the caller of mint, never an address from calldata
         if (amount0Owed > 0) {
+            // forge-lint: disable-next-line(arbitrary-send-erc20)
             TransferHelper.safeTransferFrom(poolKey.token0, payer, msg.sender, amount0Owed);
         }
         if (amount1Owed > 0) {
+            // forge-lint: disable-next-line(arbitrary-send-erc20)
             TransferHelper.safeTransferFrom(poolKey.token1, payer, msg.sender, amount1Owed);
         }
     }

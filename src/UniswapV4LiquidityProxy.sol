@@ -145,6 +145,8 @@ abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, ICus
         _requireRolesOf(roles.rolesModifier, msg.sender);
 
         for (uint256 i = 0; i < ops.length; i++) {
+            // A call is all or nothing: one invalid operation refuses the whole batch
+            // forge-lint: disable-next-line(require-revert-in-loop)
             require(address(ops[i].key.hooks) == address(0), HooksNotSupported());
             if (ops[i].liquidityDelta > 0) {
                 bytes32 poolId = keccak256(abi.encode(ops[i].key));
@@ -210,6 +212,10 @@ abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, ICus
         return abi.encode(amounts0, amounts1);
     }
 
+    // The unlock runs the vault's operations, then settles each currency, in loops: one call to the
+    // vault's own Roles modifier or to the PoolManager per operation or currency, and any failure
+    // reverts the whole rebalance, which is all or nothing.
+    // forge-lint: disable-start(require-revert-in-loop, calls-loop)
     /// @dev The vault calls `modifyLiquidity` through its Roles modifier; checks the op's limits
     function _modifyAsVault(
         address rolesModifier,
@@ -281,6 +287,9 @@ abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, ICus
             require(POOL_MANAGER.settleFor{value: owed}(vault) == owed, UnexpectedSettlement());
         } else {
             POOL_MANAGER.sync(Currency.wrap(currency));
+            // `vault` is the caller of modifyLiquidityV4 (the transient context it set): the
+            // operation is paid by the account that made the call, never by one named in calldata
+            // forge-lint: disable-next-line(arbitrary-send-erc20)
             TransferHelper.safeTransferFrom(currency, vault, address(POOL_MANAGER), owed);
             require(POOL_MANAGER.settleFor(vault) == owed, UnexpectedSettlement());
         }
@@ -302,6 +311,8 @@ abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, ICus
     function _deltaOf(address vault, address currency) private view returns (int256) {
         return int256(uint256(POOL_MANAGER.exttload(keccak256(abi.encode(vault, currency)))));
     }
+
+    // forge-lint: disable-end(require-revert-in-loop, calls-loop)
 
     function _addCurrency(address[] memory currencies, uint256 count, address currency) private pure returns (uint256) {
         for (uint256 i = 0; i < count; i++) {

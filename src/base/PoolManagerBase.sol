@@ -57,6 +57,8 @@ abstract contract PoolManagerBase is Guards, IUnlockCallback {
         }
     }
 
+    // A pool read that fails reverts the leg or operation it belongs to, and with it the whole call
+    // forge-lint: disable-start(require-revert-in-loop)
     /// @dev A pool's current tick: bits 160-183 of its Slot0 in the PoolManager
     function _tickAt(bytes32 stateSlot) internal view returns (int24 tick) {
         address manager = address(POOL_MANAGER);
@@ -71,6 +73,8 @@ abstract contract PoolManagerBase is Guards, IUnlockCallback {
             tick := signextend(2, shr(160, mload(0)))
         }
     }
+
+    // forge-lint: disable-end(require-revert-in-loop)
 
     function _currentTick(bytes32 poolId) internal view returns (int24) {
         return _tickAt(_poolStateSlot(poolId));

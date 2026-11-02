@@ -181,6 +181,10 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
     // Before anything runs
     // ---------------------------------------------------------------------------------------------
 
+    // Every leg of a swap call is checked as it runs, and a failing check (or a failing pool,
+    // PoolManager or token call) reverts the whole call: a call is all or nothing, and skipping a leg
+    // would skip its price band and slippage checks.
+    // forge-lint: disable-start(require-revert-in-loop)
     /// @dev Validates the whole call before anything runs: the deadline, the layout ({SwapFlags}), and
     /// for every leg that the caller registered its pool with `PERMISSION_SWAP` and set a band for it.
     /// Also decides where each parked V3 output goes: to the PoolManager when the first later leg that
@@ -848,4 +852,5 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
             }
         }
     }
+    // forge-lint: disable-end(require-revert-in-loop)
 }

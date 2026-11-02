@@ -147,6 +147,8 @@ contract UniswapV3Calculator {
         view
         returns (uint256 feeGrowthOutside0X128, uint256 feeGrowthOutside1X128)
     {
+        // Two reads per position of the vault (see UniV3LpVault._totalLpState), on its own pool
+        // forge-lint: disable-next-line(calls-loop)
         PoolTick memory info = IUniswapV3PoolTuples(address(pool)).ticks(tick);
         return (info.feeGrowthOutside0X128, info.feeGrowthOutside1X128);
     }
