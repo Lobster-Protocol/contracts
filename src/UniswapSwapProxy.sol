@@ -220,7 +220,7 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
                     parkedByV3[inIndex] = 0;
                 }
                 if (flags & (SwapFlags.PARK | SwapFlags.V4) == SwapFlags.PARK) {
-                    parkedByV3[(word >> 232) & 0xff] |= 1 << legs;
+                    parkedByV3[(word >> 232) & 0xff] |= uint256(1) << legs;
                 }
             }
             unchecked {

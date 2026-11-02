@@ -28,11 +28,19 @@ abstract contract Guards is Deadline {
     uint256 private constant LOCKED = 1 << 160;
 
     modifier nonReentrant() {
+        _nonReentrantBefore();
+        _;
+        _nonReentrantAfter();
+    }
+
+    function _nonReentrantBefore() private {
         TransientSlot.Uint256Slot lock = LOCK_SLOT.asUint256();
         require(lock.tload() == 0, ReentrancyGuardReentrantCall());
         lock.tstore(uint256(uint160(msg.sender)) | LOCKED);
-        _;
-        lock.tstore(0);
+    }
+
+    function _nonReentrantAfter() private {
+        LOCK_SLOT.asUint256().tstore(0);
     }
 
     /// @dev The account whose entry point is running; address(0) when none is

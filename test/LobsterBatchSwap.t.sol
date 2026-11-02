@@ -637,7 +637,7 @@ contract LobsterBatchSwapTest is BatchSwapFixture {
     /// hold, ETH included, leaves that stray balance untouched. The stray ETH is not refunded either:
     /// it stays in the proxy. Replaces `HELD_BALANCE`, which spent the whole stranded balance.
     function test_heldLegs_neverSpendStrayFunds() public {
-        token1.transfer(address(proxy), 7e18);
+        assertTrue(token1.transfer(address(proxy), 7e18));
         vm.deal(address(proxy), 5e18);
         uint256 ethBefore = user.balance;
 

@@ -7,11 +7,7 @@ import {SwapFlags} from "../src/libraries/SwapFlags.sol";
 import {MintParams, MintCallbackData} from "../src/interfaces/uniswapV3/IUniswapV3MintCallback.sol";
 import {IUniswapV3FactoryMinimal} from "../src/interfaces/uniswapV3/IUniswapV3FactoryMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../src/interfaces/uniswapV3/IUniswapV3PoolMinimal.sol";
-import {
-    PoolKey as ProxyPoolKey,
-    Currency as ProxyCurrency,
-    IPoolManagerMinimal
-} from "../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
+import {PoolKey as ProxyPoolKey, IPoolManagerMinimal} from "../src/interfaces/uniswapV4/IPoolManagerMinimal.sol";
 import {TickMath} from "../src/libraries/uniswapV3/TickMath.sol";
 import {PoolAddress} from "../src/libraries/uniswapV3/PoolAddress.sol";
 import {IProxyErrors} from "../src/interfaces/IProxyErrors.sol";
