@@ -63,7 +63,7 @@ interface IProxyErrors {
     error UnexpectedSettlement();
     /// @notice The call ended with parked funds not spent
     error FundsLeftInProxy();
-    /// @notice A HELD leg found nothing parked to spend
+    /// @notice A HELD leg found nothing parked to spend, or its SHARE of what is parked rounds to nothing
     error NothingHeld();
 
     // --- V4 liquidity
