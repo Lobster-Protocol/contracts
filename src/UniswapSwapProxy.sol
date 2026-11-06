@@ -11,8 +11,9 @@ import {PoolAddress} from "./libraries/uniswapV3/PoolAddress.sol";
 /// @title Uniswap V3 and V4 swaps, single or chained, in one packed call
 /// @notice `swap(data)` runs the legs encoded in `data` ({SwapFlags}) in order, on V3 pools and V4 pools
 /// alike, for the caller only. Every input is paid by the caller, except a HELD leg's, which spends what
-/// earlier legs of the same call parked. Every output goes to the caller, except a PARK leg's, which
-/// stays for a later leg. Each leg's pool must be registered for the caller with `PERMISSION_SWAP` and
+/// earlier legs of the same call parked: all of it, or with SHARE a share of it, so that one parked token
+/// can feed several pools. Every output goes to the caller, except a PARK leg's, which stays for a later
+/// leg. Each leg's pool must be registered for the caller with `PERMISSION_SWAP` and
 /// a price band set ({PoolRegistry}), checked for every leg before anything runs; and the pool's tick
 /// must be inside that band both before and after the leg runs. A swap moves the price one way only,
 /// so a price inside the band at both ends means the whole leg executed inside it.
@@ -23,7 +24,10 @@ import {PoolAddress} from "./libraries/uniswapV3/PoolAddress.sol";
 ///   (sync, then settled in the pool's callback before anything else runs, and required to match what
 ///   the pool reports);
 /// - a V3 leg spending credit is paid by the PoolManager straight to the V3 pool (`take`).
-/// Only a V3 output that a V3 leg will spend sits in the proxy itself, where a hand-off costs less.
+/// Only a V3 output that no V4 leg is meant to spend sits in the proxy itself, where a hand-off costs less.
+/// A V3 leg that stops early may leave some of it for a later V4 leg, which then pays the PoolManager from
+/// the proxy (`sync`, `transfer`, `settle`). A token can therefore be parked in both places at once, and
+/// every HELD leg, SHARE or not, spends the PoolManager credit first, then what is in the proxy.
 /// Every amount parked is tracked exactly, per token, in a ledger that lives in memory for the duration
 /// of the call and must be back to zero at its end (`FundsLeftInProxy`); the PoolManager independently
 /// requires every one of the proxy's deltas to be zero (`CurrencyNotSettled`).
@@ -44,8 +48,13 @@ import {PoolAddress} from "./libraries/uniswapV3/PoolAddress.sol";
 ///   the pools report it, and nothing else;
 /// - a token that delivers less than a pool reports (fee-on-transfer, rounding) makes a hand-off through
 ///   it revert rather than spend anything else, with one exception: a token that delivers less into the
-///   proxy than out of it (a fee on one direction only) can make a V3 to V3 hand-off draw the
-///   difference from tokens of its own sent to the proxy outside a call;
+///   proxy than out of it (a fee on one direction only) can make a hand-off out of the proxy, to a V3
+///   pool or to the PoolManager, draw the difference from tokens of its own sent to the proxy outside a
+///   call;
+/// - a HELD leg's input follows what is parked, but its bound is an absolute amount: if an earlier
+///   consumer of a token stops at its price limit, a later one spends more against the same minimum, and
+///   then only its band limits the price. So an earlier consumer with a price limit needs a real bound,
+///   or every later consumer of that token needs a price limit too;
 /// - in a call with a V4 leg, every leg runs inside the proxy's unlock. A traded token whose transfers
 ///   run outside code can therefore trade on the PoolManager for the rest of the call, paying only at
 ///   its end, and so against the call's later legs: each leg's bound and band are what limit that, so
@@ -86,7 +95,7 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
         address tokenOut;
         uint24 fee;
         int24 tickSpacing;
-        /// @dev amountIn, resolved for HELD; amountOut with EXACT_OUT
+        /// @dev amountIn, resolved for HELD (with SHARE, from the share); amountOut with EXACT_OUT
         uint256 amount;
         /// @dev amountOutMinimum; amountInMaximum with EXACT_OUT
         uint256 bound;
@@ -187,8 +196,11 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
     // forge-lint: disable-start(require-revert-in-loop)
     /// @dev Validates the whole call before anything runs: the deadline, the layout ({SwapFlags}), and
     /// for every leg that the caller registered its pool with `PERMISSION_SWAP` and set a band for it.
-    /// Also decides where each parked V3 output goes: to the PoolManager when the first later leg that
-    /// spends it is a V4 leg, to the proxy otherwise. Runs in the caller's frame: msg.sender is the vault.
+    /// Also decides where each parked V3 output goes: to the PoolManager when a V4 leg comes after it and
+    /// before any plain HELD V3 leg of that token (V3 shares in between do not count), to the proxy
+    /// otherwise. That choice only sets where the output waits and so what its hand-offs cost: the ledger
+    /// records the place, and any later HELD leg, on either version, can pay from either place. Runs in
+    /// the caller's frame: msg.sender is the vault.
     function _prepare(bytes calldata data) private view returns (Plan memory plan, bool anyV4) {
         uint256 length = data.length;
         require(length > SwapFlags.HEADER_SIZE, MalformedSwap());
@@ -203,25 +215,38 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
             uint256 maxLegs = (length - pos) / SwapFlags.MIN_LEG_SIZE;
             words = new uint256[](2 * (maxLegs < 255 ? maxLegs : 255));
         }
-        // Per token: the V3 legs that parked it since its last HELD leg, as a bit mask of leg indices.
-        // Allocated by the first leg that parks or spends parked funds.
+        // Per token: the V3 legs that parked it and whose place is not decided yet, as a bit mask of leg
+        // indices. Allocated by the first leg that parks or spends parked funds.
         uint256[] memory parkedByV3;
         uint256 legs = 0;
         while (pos < length) {
             require(legs < 255, MalformedSwap());
             uint256 word;
+            uint256 start = pos;
             (word, pos) = _prepareLeg(data, pos, length, tokenCount, words, legs);
             uint256 flags = word >> 248;
             if (flags & SwapFlags.V4 != 0) anyV4 = true;
             if (flags & (SwapFlags.HELD | SwapFlags.PARK) != 0) {
                 if (parkedByV3.length == 0) parkedByV3 = new uint256[](tokenCount);
                 if (flags & SwapFlags.HELD != 0) {
-                    // This leg spends everything parked of tokenIn: the V3 legs that parked it pay the
-                    // PoolManager directly if this leg is a V4 one
+                    // A share of 0 is refused here, not when the leg runs. It sits in the amount field, after
+                    // the 6-byte head and, on V4, the tick spacing, and {_prepareLeg} checked that it fits.
+                    if (flags & SwapFlags.SHARE != 0) {
+                        require(_wordAt(data, start + (flags & SwapFlags.V4 != 0 ? 9 : 6)) >> 128 != 0, MalformedSwap());
+                    }
                     uint256 inIndex = (word >> 240) & 0xff;
-                    uint256 producers = parkedByV3[inIndex];
-                    if (producers != 0 && flags & SwapFlags.V4 != 0) _markToManager(words, producers);
-                    parkedByV3[inIndex] = 0;
+                    if (flags & SwapFlags.V4 != 0) {
+                        // A V4 leg spends what these V3 legs parked of tokenIn: they pay the PoolManager
+                        uint256 producers = parkedByV3[inIndex];
+                        if (producers != 0) {
+                            _markToManager(words, producers);
+                            parkedByV3[inIndex] = 0;
+                        }
+                    } else if (flags & SwapFlags.SHARE == 0) {
+                        // A V3 leg meant to spend all of it, so no V4 leg is meant to get any. A V3 share
+                        // says nothing yet: the leg that gets the rest may be a V4 one.
+                        parkedByV3[inIndex] = 0;
+                    }
                 }
                 if (flags & (SwapFlags.PARK | SwapFlags.V4) == SwapFlags.PARK) {
                     parkedByV3[(word >> 232) & 0xff] |= uint256(1) << legs;
@@ -253,11 +278,7 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
     {
         word = _wordAt(data, pos);
         uint256 flags = word >> 248;
-        require(
-            flags & ~uint256(SwapFlags.ALL) == 0
-                && flags & (SwapFlags.HELD | SwapFlags.EXACT_OUT) != (SwapFlags.HELD | SwapFlags.EXACT_OUT),
-            MalformedSwap()
-        );
+        require((SwapFlags.VALID >> flags) & 1 != 0, MalformedSwap());
         unchecked {
             next = pos + _legSize(flags);
             require(next <= length, MalformedSwap());
@@ -297,7 +318,7 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
     function _legSize(uint256 flags) private pure returns (uint256 size) {
         size = 22; // flags, tokenIn, tokenOut, fee, bound
         if (flags & SwapFlags.V4 != 0) size += 3;
-        if (flags & SwapFlags.HELD == 0) size += 16;
+        if (flags & (SwapFlags.HELD | SwapFlags.SHARE) != SwapFlags.HELD) size += 16; // amount, or share
         if (flags & SwapFlags.PRICE_LIMIT != 0) size += 20;
     }
 
@@ -373,7 +394,8 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
     }
 
     /// @dev Parses the leg at `pos` into `leg` and returns the position of the next one. A HELD leg's
-    /// amount is resolved here, from the ledger: everything the call parked of its input.
+    /// amount is resolved here, from the ledger: everything the call has parked of its input and not yet
+    /// spent, or with SHARE that times the leg's Q128 share, rounded down.
     function _parse(
         bytes calldata data,
         uint256 pos,
@@ -407,8 +429,16 @@ abstract contract UniswapSwapProxy is UniswapV3ProxyBase, PoolManagerBase, PoolR
         }
         if (flags & SwapFlags.HELD != 0) {
             uint256 amountIn = ledger.credit[inIndex] + ledger.held[inIndex];
-            require(amountIn != 0, NothingHeld());
             require(amountIn <= type(uint128).max, MalformedSwap());
+            if (flags & SwapFlags.SHARE != 0) {
+                // Both factors fit in uint128, so the product cannot overflow. {_prepare} refused a share
+                // of 0. A share is below 1, so this always leaves at least 1 unit for a later leg.
+                unchecked {
+                    amountIn = (amountIn * (_wordAt(data, pos) >> 128)) >> 128;
+                    pos += 16;
+                }
+            }
+            require(amountIn != 0, NothingHeld());
             leg.amount = amountIn;
         } else {
             leg.amount = _wordAt(data, pos) >> 128;

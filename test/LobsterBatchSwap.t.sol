@@ -300,15 +300,15 @@ contract LobsterBatchSwapTest is BatchSwapFixture {
     // Malformed calls (SwapFlags layout rules), refused before anything runs
     // ---------------------------------------------------------------------------
 
-    /// @notice A leg whose flags byte has a bit outside V4 | EXACT_OUT | PARK | HELD | PRICE_LIMIT, or
-    /// HELD with EXACT_OUT, is refused, and refusing it means the valid leg placed before it never
+    /// @notice A leg whose flags byte has a bit outside {SwapFlags-ALL}, or HELD with EXACT_OUT, or SHARE
+    /// without HELD, is refused, and refusing it means the valid leg placed before it never
     /// runs: no pool swap, no unlock, no balance or price change. Replaces the unknown swap types
     /// (0x00, 0x05, 0xff and the empty item; 0x00 is a valid V3 exact-input leg now).
     function test_unknownFlags_areRejectedBeforeAnythingRuns() public {
         bytes memory validLeg = SwapCalldata.encodeLeg(_v3In(address(token0), address(token1), 1e18, 0), 0, 1);
         bytes memory fields = _slice(validLeg, 1, validLeg.length); // the leg after its flags byte
         uint8[6] memory invalid = [
-            uint8(0x20),
+            SwapFlags.SHARE,
             0x40,
             0x80,
             0xff,
@@ -334,12 +334,13 @@ contract LobsterBatchSwapTest is BatchSwapFixture {
         assertEq(_v3Price(), priceBefore, "a rejected call moved the pool");
     }
 
-    /// @notice Every flags byte with an unknown bit, or with HELD and EXACT_OUT together, is refused,
-    /// whatever follows it.
+    /// @notice Every flags byte with an unknown bit, with HELD and EXACT_OUT together, or with SHARE without
+    /// HELD, is refused, whatever follows it.
     function testFuzz_anyUnknownFlagIsRejected(uint8 flags, bytes calldata fields) public {
         vm.assume(
             flags & ~SwapFlags.ALL != 0
                 || flags & (SwapFlags.HELD | SwapFlags.EXACT_OUT) == (SwapFlags.HELD | SwapFlags.EXACT_OUT)
+                || (flags & SwapFlags.SHARE != 0 && flags & SwapFlags.HELD == 0)
         );
         bytes memory validLeg = SwapCalldata.encodeLeg(_v3In(address(token0), address(token1), 1e18, 0), 0, 1);
         uint256[6] memory before = _holdings();

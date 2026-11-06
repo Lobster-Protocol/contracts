@@ -15,12 +15,16 @@ library SwapCalldata {
         bool park;
         /// @dev Exact input only: spends everything earlier legs parked of `tokenIn`
         bool held;
+        /// @dev With `held`: spends only the Q128 share in `amount` of what is parked. Encoded as given, so
+        /// a test can also build the invalid SHARE without HELD.
+        bool share;
         address tokenIn;
         address tokenOut;
         uint24 fee;
         /// @dev V4 only
         int24 tickSpacing;
-        /// @dev amountIn, or amountOut with `exactOut`; not encoded with `held`
+        /// @dev amountIn, or amountOut with `exactOut`, or the share with `share`; not encoded with `held`
+        /// alone
         uint128 amount;
         /// @dev amountOutMinimum, or amountInMaximum with `exactOut`
         uint128 bound;
@@ -56,12 +60,12 @@ library SwapCalldata {
     function encodeLeg(Leg memory leg, uint256 inIndex, uint256 outIndex) internal pure returns (bytes memory) {
         uint8 flags = (leg.v4 ? SwapFlags.V4 : 0) | (leg.exactOut ? SwapFlags.EXACT_OUT : 0)
             | (leg.park ? SwapFlags.PARK : 0) | (leg.held ? SwapFlags.HELD : 0)
-            | (leg.sqrtPriceLimitX96 != 0 ? SwapFlags.PRICE_LIMIT : 0);
+            | (leg.sqrtPriceLimitX96 != 0 ? SwapFlags.PRICE_LIMIT : 0) | (leg.share ? SwapFlags.SHARE : 0);
         bytes memory out = bytes.concat(
             bytes1(flags), bytes1(SafeCast.toUint8(inIndex)), bytes1(SafeCast.toUint8(outIndex)), bytes3(leg.fee)
         );
         if (leg.v4) out = bytes.concat(out, _int24(leg.tickSpacing));
-        if (!leg.held) out = bytes.concat(out, bytes16(leg.amount));
+        if (!leg.held || leg.share) out = bytes.concat(out, bytes16(leg.amount));
         out = bytes.concat(out, bytes16(leg.bound));
         if (leg.sqrtPriceLimitX96 != 0) out = bytes.concat(out, bytes20(leg.sqrtPriceLimitX96));
         return out;
