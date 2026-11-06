@@ -459,14 +459,29 @@ contract LobsterShareTest is BatchSwapFixture {
     }
 
     /// @notice The conversion ../aggregator-test uses (a Q192 share rounded up to Q128) makes a consumer
-    /// spend exactly the planned amount when the chain delivers exactly the plan, and the next one the rest
-    function testFuzz_q192ShareRoundedUp_spendsThePlannedAmount(uint96 planned, uint96 rest) public pure {
+    /// spend the planned amount when the chain delivers exactly the plan, or one unit less when the floored
+    /// Q192 share has lost the bits that rounding needs, as its `chained_legs` documents. Never more, and
+    /// the next consumer spends the rest either way.
+    function testFuzz_q192ShareRoundedUp_spendsThePlanWithinOneUnit(uint96 planned, uint96 rest) public pure {
         vm.assume(planned != 0 && rest != 0);
         uint256 total = uint256(planned) + rest;
-        uint256 q192 = Math.mulDiv(planned, uint256(1) << 192, total);
-        uint256 q128 = (q192 + type(uint64).max) >> 64;
+        uint256 q128 = _q192RoundedUpToQ128(planned, total);
         assertLe(q128, type(uint128).max, "does not fit the share field");
-        assertEq((total * q128) >> 128, planned, "spent other than the plan");
+        uint256 spent = (total * q128) >> 128;
+        assertLe(spent, planned, "spent more than the plan");
+        assertGe(spent + 1, planned, "spent more than one unit below the plan");
+    }
+
+    /// @notice A case found by fuzzing where that conversion spends one unit less: the fractional bits of
+    /// the Q192 share that rounding would need are below Q192, so they are already gone
+    function test_q192ShareRoundedUp_canSpendOneUnitLess() public pure {
+        uint256 planned = 2 ** 96 - 3;
+        uint256 total = planned + 2 ** 96 - 4;
+        assertEq((total * _q192RoundedUpToQ128(planned, total)) >> 128, planned - 1);
+    }
+
+    function _q192RoundedUpToQ128(uint256 planned, uint256 total) internal pure returns (uint256) {
+        return (Math.mulDiv(planned, uint256(1) << 192, total) + type(uint64).max) >> 64;
     }
 
     // ---------------------------------------------------------------------------
@@ -855,8 +870,8 @@ contract LobsterShareTest is BatchSwapFixture {
         vm.prank(user);
         (bool ok, bytes memory ret) = address(proxy).call(abi.encodeCall(proxy.swap, (_packed(legs))));
         assertFalse(ok, "the proxy holds nothing to pay this with");
-        assertTrue(bytes4(ret) != IProxyErrors.MalformedSwap.selector, "an amount that fits was refused");
-        assertTrue(bytes4(ret) != IProxyErrors.NothingHeld.selector, "the product wrapped");
+        assertNotEq(ret, abi.encodeWithSelector(IProxyErrors.MalformedSwap.selector), "an amount that fits was refused");
+        assertNotEq(ret, abi.encodeWithSelector(IProxyErrors.NothingHeld.selector), "the product wrapped");
     }
 
     /// @notice The bitmap the proxy checks flags against says exactly what the written rules say, for every
