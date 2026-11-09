@@ -407,6 +407,14 @@ abstract contract ForkBase is Test {
         return leg;
     }
 
+    /// @dev `leg`, spending the Q128 `share` of what is parked of its input when it runs (HELD | SHARE)
+    function _shareOf(SwapCalldata.Leg memory leg, uint128 share) internal pure returns (SwapCalldata.Leg memory) {
+        leg.held = true;
+        leg.share = true;
+        leg.amount = share;
+        return leg;
+    }
+
     function _one(SwapCalldata.Leg memory leg) internal pure returns (SwapCalldata.Leg[] memory legs) {
         legs = new SwapCalldata.Leg[](1);
         legs[0] = leg;

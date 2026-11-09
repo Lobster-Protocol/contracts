@@ -18,12 +18,12 @@ the call returns one amount per leg (received for exact input, paid for exact ou
 tokens and fee (plus tick spacing on V4) and nothing else:
 
 - **no recipient**: its output goes to the caller, or with `PARK` stays for a later `HELD` leg of the
-  same call, which spends exactly what was parked;
+  same call, which spends exactly what was parked, or with `SHARE` a share of it;
 - **no hooks**: a V4 leg always targets the hookless pool of its currencies, fee and tick spacing.
 
 A call with any V4 leg runs entirely inside one PoolManager unlock, V3 legs included; a V3-only call
 opens none. `ForkBase` builds legs against the live pools (`_v3In`, `_v3Out`, `_v4In`, `_v4Out`,
-`_parked`, `_held`) and encodes them with `test/helpers/SwapCalldata.sol`.
+`_parked`, `_held`, `_shareOf`) and encodes them with `test/helpers/SwapCalldata.sol`.
 
 Everything in `test/` outside this directory is mock-based and runs offline with plain `forge test`.
 
@@ -40,6 +40,7 @@ Everything in `test/` outside this directory is mock-based and runs offline with
 | `integration/V4Swap.t.sol` | V4 legs, native ETH (payable `swap`, paid from msg.value only, refunds of exactly the unspent msg.value; force-fed ETH is neither spent nor refunded), hooks that cannot be encoded, the unlock callback |
 | `integration/SwapSemantics.t.sol` | Edge behaviour: non-standard tokens (USDT, fee-on-transfer), mint slippage, exact-output fills |
 | `integration/BatchSwap.t.sol` | Multi-leg `swap`: V3 + V4 legs in one unlock, routes through every hand-off (PARK/HELD, native ETH in the middle); equivalence, atomicity, nothing runs unless every leg passes, native-input legs share one msg.value, payer |
+| `integration/ShareSplit.t.sol` | Splitting a parked token (`HELD \| SHARE`) across live pools: every order of versions, USDT, native ETH, partial fills, random shares; each compared with the same swaps made one by one |
 
 `security/Authorisation.t.sol` is the one to read first — it states the invariant the whole design
 rests on: `payer` is always the entry point's `msg.sender`, at any call depth (the pool callbacks read

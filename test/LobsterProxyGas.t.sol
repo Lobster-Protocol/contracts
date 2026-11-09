@@ -15,9 +15,11 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 /// `vm.snapshotGasLastCall` into `snapshots/LobsterProxyGas.json`, so the effect of a change shows up
 /// as a diff of that file.
 /// @dev Each scenario is the first and only proxy call of its test, so accounts and storage start
-/// cold, as in a real transaction. Recorded numbers are what a receipt would show: they include the
-/// 21000 base cost and calldata, and are net of gas refunds. The refund itself is recorded as
-/// `<name>_refund`, so the gross cost (what `--gas-report` and traces show) is the sum of the two.
+/// cold, as in a real transaction. The committed file comes from a plain `forge test`: each number is the
+/// gas of the call itself, as traces show it, without the 21000 base cost and calldata, and before gas
+/// refunds. The refund is recorded as `<name>_refund`, so when comparing routes compare the number minus
+/// its refund. With `--isolate` the numbers are what a receipt would show: base cost and calldata
+/// included, refunds taken off.
 ///
 /// Scenarios are written against a version-neutral {Leg} description; only the `_encode*` helpers
 /// know the proxy's calldata format, so the same swaps can be measured across interface changes
@@ -50,6 +52,8 @@ contract LobsterProxyGasTest is BatchSwapFixture {
         bool park;
         /// @dev Exact input only: spends what earlier legs parked
         bool held;
+        /// @dev With `held`: the Q128 share of what is parked it spends; 0 means all of it
+        uint128 share;
     }
 
     MockERC20 tokenC;
@@ -224,6 +228,48 @@ contract LobsterProxyGasTest is BatchSwapFixture {
         _measureBatch("batch_route_8_legs", legs);
     }
 
+    /// @notice token0 -V3-> token1, split half on V3 to tokenC and the rest on V3 back to token0: the output
+    /// waits in the proxy, which pays both pools. To compare with {test_gas_batch_chain_v3_v3}.
+    function test_gas_batch_share_v3_then_v3() public {
+        Leg[] memory legs = new Leg[](3);
+        legs[0] = _in(E_V3_01, address(token0), 1e18, true);
+        legs[1] = _half(E_V3_1C, address(token1), false);
+        legs[2] = _held(E_V3_01, address(token1), false);
+        _measureBatch("batch_share_v3_then_v3", legs);
+    }
+
+    /// @notice token0 -V3-> token1, split half on V4 to ETH and the rest on V3 to tokenC: the output goes to
+    /// the PoolManager, which pays the V3 pool
+    function test_gas_batch_share_v4_then_v3() public {
+        Leg[] memory legs = new Leg[](3);
+        legs[0] = _in(E_V3_01, address(token0), 1e18, true);
+        legs[1] = _half(E_V4_E1, address(token1), false);
+        legs[2] = _held(E_V3_1C, address(token1), false);
+        _measureBatch("batch_share_v4_then_v3", legs);
+    }
+
+    /// @notice token0 -V3-> token1, split half on V3 to tokenC and the rest on V4 to ETH: the output waits in
+    /// the proxy, which pays the V3 pool, then the PoolManager. The same route as
+    /// {test_gas_batch_share_v4_then_v3} with its consumers swapped, and the costlier order.
+    function test_gas_batch_share_v3_then_v4() public {
+        Leg[] memory legs = new Leg[](3);
+        legs[0] = _in(E_V3_01, address(token0), 1e18, true);
+        legs[1] = _half(E_V3_1C, address(token1), false);
+        legs[2] = _held(E_V4_E1, address(token1), false);
+        _measureBatch("batch_share_v3_then_v4", legs);
+    }
+
+    /// @notice token0 -V4-> token1, split on V4 to ETH, V3 to tokenC, then V4 back to token0: all credit,
+    /// and the PoolManager pays the V3 pool
+    function test_gas_batch_share_3_consumers_mixed() public {
+        Leg[] memory legs = new Leg[](4);
+        legs[0] = _in(E_V4_01, address(token0), 1e18, true);
+        legs[1] = _half(E_V4_E1, address(token1), false);
+        legs[2] = _half(E_V3_1C, address(token1), false);
+        legs[3] = _held(E_V4_01, address(token1), false);
+        _measureBatch("batch_share_3_consumers_mixed", legs);
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Measuring
     // ---------------------------------------------------------------------------------------------
@@ -260,18 +306,33 @@ contract LobsterProxyGasTest is BatchSwapFixture {
     // ---------------------------------------------------------------------------------------------
 
     function _in(uint8 edge, address tokenIn, uint256 amountIn, bool park) internal pure returns (Leg memory) {
-        return Leg({edge: edge, tokenIn: tokenIn, exactOut: false, amount: amountIn, bound: 0, park: park, held: false});
+        return Leg({
+            edge: edge, tokenIn: tokenIn, exactOut: false, amount: amountIn, bound: 0, park: park, held: false, share: 0
+        });
     }
 
     function _held(uint8 edge, address tokenIn, bool park) internal pure returns (Leg memory) {
-        return Leg({edge: edge, tokenIn: tokenIn, exactOut: false, amount: 0, bound: 0, park: park, held: true});
+        return
+            Leg({edge: edge, tokenIn: tokenIn, exactOut: false, amount: 0, bound: 0, park: park, held: true, share: 0});
+    }
+
+    /// @dev A held leg spending half of what is parked when it runs
+    function _half(uint8 edge, address tokenIn, bool park) internal pure returns (Leg memory leg) {
+        leg = _held(edge, tokenIn, park);
+        leg.share = uint128(1) << 127;
     }
 
     function _out(uint8 edge, address tokenIn, uint256 amountOut, uint256 maxIn) internal pure returns (Leg memory) {
-        return
-            Leg({
-                edge: edge, tokenIn: tokenIn, exactOut: true, amount: amountOut, bound: maxIn, park: false, held: false
-            });
+        return Leg({
+            edge: edge,
+            tokenIn: tokenIn,
+            exactOut: true,
+            amount: amountOut,
+            bound: maxIn,
+            park: false,
+            held: false,
+            share: 0
+        });
     }
 
     function _edgeTokens(uint8 edge) internal view returns (address, address) {
@@ -324,7 +385,8 @@ contract LobsterProxyGasTest is BatchSwapFixture {
         p.exactOut = leg.exactOut;
         p.park = leg.park;
         p.held = leg.held;
-        p.amount = SafeCast.toUint128(leg.amount);
+        p.share = leg.share != 0;
+        p.amount = leg.share != 0 ? leg.share : SafeCast.toUint128(leg.amount);
         p.bound = SafeCast.toUint128(leg.bound);
         p.fee = FEE;
         if (!_isV3(leg.edge)) {

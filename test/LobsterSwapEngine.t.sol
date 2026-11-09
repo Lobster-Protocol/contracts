@@ -771,8 +771,12 @@ contract LobsterSwapEngineTest is BatchSwapFixture {
             _header(SafeCast.toUint32(block.timestamp), 2), bytes20(address(token0)), bytes20(address(token1))
         );
 
-        // Rule: no unknown flag bit is set (0x20 is outside SwapFlags.ALL)
-        _assertMalformed(bytes.concat(table, _v3LegBytes(0x20, 0, 1, 1e18, 0)), "unknown flag bit");
+        // Rule: no unknown flag bit is set (0x40 and 0x80 are outside SwapFlags.ALL)
+        _assertMalformed(bytes.concat(table, _v3LegBytes(0x40, 0, 1, 1e18, 0)), "unknown flag bit 0x40");
+        _assertMalformed(bytes.concat(table, _v3LegBytes(0x80, 0, 1, 1e18, 0)), "unknown flag bit 0x80");
+
+        // Rule: SHARE is only valid with HELD (test/LobsterShare.t.sol covers the other SHARE rules)
+        _assertMalformed(bytes.concat(table, _v3LegBytes(SwapFlags.SHARE, 0, 1, 1e18, 0)), "SHARE without HELD");
 
         // Rule: HELD is only valid with exact input (HELD | EXACT_OUT is rejected)
         _assertMalformed(
