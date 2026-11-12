@@ -5,6 +5,7 @@ import {BatchSwapFixture} from "./helpers/BatchSwapFixture.sol";
 import {SwapCalldata} from "./helpers/SwapCalldata.sol";
 import {LobsterProxy} from "../src/LobsterProxy.sol";
 import {UniswapV4LiquidityProxy, V4LiquidityOp} from "../src/UniswapV4LiquidityProxy.sol";
+import {PositionRecorder, Range} from "../src/base/PositionRecorder.sol";
 import {Operation} from "../src/interfaces/zodiac/IRoles.sol";
 import {
     PoolKey as ProxyPoolKey,
@@ -115,6 +116,10 @@ contract LobsterV4LiquidityTest is BatchSwapFixture {
         v.roles.enableModule(v.executor);
         v.roles.assignRole(v.executor, ROLE_EXEC, true);
         v.roles.allowFunction(ROLE_EXEC, address(liq), UniswapV4LiquidityProxy.modifyLiquidityV4.selector, true);
+        v.roles
+            .allowFunction(
+                ROLE_EXEC, address(liq), UniswapV4LiquidityProxy.modifyLiquidityV4WithRecording.selector, true
+            );
 
         // Funds, approval, registry and trampoline config: the owners' setup batch
         address safe = address(v.safe);
@@ -1196,5 +1201,242 @@ contract LobsterV4LiquidityTest is BatchSwapFixture {
         _setBand(a, cleanKey, moved - 100, moved + 100);
         _asVault(a, _ops(_op(cleanKey, 10e18)));
         assertEq(_liquidity(address(a.safe), cleanKey), 10e18, "add after moving the band failed");
+    }
+
+    // ---------------------------------------------------------------------------
+    // Recording
+    // ---------------------------------------------------------------------------
+
+    /// @dev The production path, through the recording entry point
+    function _viaExecutorRecording(
+        Vault memory v,
+        V4LiquidityOp[] memory ops,
+        uint256 value
+    )
+        internal
+        returns (int256[] memory amounts0, int256[] memory amounts1)
+    {
+        bytes memory data =
+            abi.encodeCall(UniswapV4LiquidityProxy.modifyLiquidityV4WithRecording, (ops, vm.getBlockTimestamp()));
+        vm.prank(v.executor);
+        (, bytes memory ret) =
+            v.roles.execTransactionWithRoleReturnData(address(liq), value, data, Operation.Call, ROLE_EXEC, true);
+        (amounts0, amounts1) = abi.decode(ret, (int256[], int256[]));
+    }
+
+    /// @dev The vault calling the recording entry point directly, so revert reasons surface unmasked
+    function _asVaultRecording(Vault memory v, V4LiquidityOp[] memory ops) internal {
+        vm.prank(address(v.safe));
+        liq.modifyLiquidityV4WithRecording(ops, vm.getBlockTimestamp());
+    }
+
+    function _saltedLiquidity(
+        address owner,
+        ProxyPoolKey memory key,
+        int24 lower,
+        int24 upper,
+        bytes32 salt
+    )
+        internal
+        view
+        returns (uint128 liquidity)
+    {
+        (liquidity,,) = StateLibrary.getPositionInfo(
+            IPoolManager(address(manager)), PoolId.wrap(keccak256(abi.encode(key))), owner, lower, upper, salt
+        );
+    }
+
+    function _rangesOf(Vault memory v, ProxyPoolKey memory key) internal view returns (Range[] memory) {
+        return liq.rangesOf(address(v.safe), keccak256(abi.encode(key)));
+    }
+
+    function _salted(V4LiquidityOp memory op, uint256 salt) internal pure returns (V4LiquidityOp memory) {
+        op.salt = bytes32(salt);
+        return op;
+    }
+
+    /// @dev `ranges` holds exactly the ranges of `expected` (lower, upper, salt), in any order
+    function _assertRanges(Range[] memory ranges, V4LiquidityOp[] memory expected, string memory what) internal pure {
+        assertEq(ranges.length, expected.length, string.concat(what, ": number of ranges"));
+        for (uint256 i = 0; i < expected.length; i++) {
+            uint256 found = 0;
+            for (uint256 j = 0; j < ranges.length; j++) {
+                if (
+                    ranges[j].tickLower == expected[i].tickLower && ranges[j].tickUpper == expected[i].tickUpper
+                        && ranges[j].salt == expected[i].salt
+                ) found++;
+            }
+            assertEq(found, 1, string.concat(what, ": range ", vm.toString(i), " not listed exactly once"));
+        }
+    }
+
+    function _ops3(
+        V4LiquidityOp memory x,
+        V4LiquidityOp memory y,
+        V4LiquidityOp memory z
+    )
+        internal
+        pure
+        returns (V4LiquidityOp[] memory ops)
+    {
+        ops = new V4LiquidityOp[](3);
+        (ops[0], ops[1], ops[2]) = (x, y, z);
+    }
+
+    /// @notice Through the executor and Roles, as in production: the recording entry point does exactly
+    /// what modifyLiquidityV4 does, ERC20 and native ETH, change refunded, and lists each add's range
+    /// under the vault and the pool's PoolId, with its salt, emitting RangeRecorded
+    function test_addWithRecording_actsLikeModifyLiquidityV4_andRecordsEachAdd() public {
+        V4LiquidityOp memory salted = _salted(_op(nativeKey, -1200, 1200, 10e18), 7);
+        V4LiquidityOp[] memory ops = _ops(_op(cleanKey, 10e18), salted);
+        address safe = address(a.safe);
+
+        uint256 snap = vm.snapshotState();
+        (int256[] memory plain0, int256[] memory plain1) = _viaExecutor(a, ops, 50 ether);
+        uint256[3] memory plainAfter = _bal(safe);
+        vm.revertToStateAndDelete(snap);
+
+        vm.expectEmit(true, true, false, true, address(liq));
+        emit PositionRecorder.RangeRecorded(safe, keccak256(abi.encode(cleanKey)), LOWER, UPPER, bytes32(0));
+        vm.expectEmit(true, true, false, true, address(liq));
+        emit PositionRecorder.RangeRecorded(safe, keccak256(abi.encode(nativeKey)), -1200, 1200, salted.salt);
+        (int256[] memory amounts0, int256[] memory amounts1) = _viaExecutorRecording(a, ops, 50 ether);
+
+        for (uint256 i = 0; i < 2; i++) {
+            assertEq(amounts0[i], plain0[i], "currency0 differs from modifyLiquidityV4");
+            assertEq(amounts1[i], plain1[i], "currency1 differs from modifyLiquidityV4");
+        }
+        uint256[3] memory nowHeld = _bal(safe);
+        for (uint256 i = 0; i < 3; i++) {
+            assertEq(nowHeld[i], plainAfter[i], "the vault's balances differ from modifyLiquidityV4");
+        }
+        assertEq(_liquidity(safe, cleanKey), 10e18, "the vault does not own the position");
+        assertEq(_saltedLiquidity(safe, nativeKey, -1200, 1200, salted.salt), 10e18, "salted position");
+
+        _assertRanges(_rangesOf(a, cleanKey), _ops(ops[0]), "clean pool");
+        _assertRanges(_rangesOf(a, nativeKey), _ops(salted), "native pool");
+        _assertClean(a);
+    }
+
+    /// @notice Only adds are recorded, each range once (twice in one call, or in a later call), and a
+    /// different salt is a different position
+    function test_addWithRecording_recordsOnlyAdds_eachRangeOnce() public {
+        V4LiquidityOp memory otherSalt = _salted(_op(cleanKey, 5e18), 1);
+        address safe = address(a.safe);
+
+        _viaExecutorRecording(a, _ops(_op(cleanKey, 10e18), _op(cleanKey, 10e18)), 0);
+        _viaExecutorRecording(a, _ops(_op(cleanKey, -4e18), _op(cleanKey, 0)), 0); // remove, collect
+        _viaExecutorRecording(a, _ops(_op(cleanKey, 1e18)), 0);
+        _viaExecutorRecording(a, _ops(otherSalt), 0);
+
+        assertEq(_liquidity(safe, cleanKey), 17e18, "liquidity of the unsalted position");
+        assertEq(_saltedLiquidity(safe, cleanKey, LOWER, UPPER, otherSalt.salt), 5e18, "salted position");
+        _assertRanges(_rangesOf(a, cleanKey), _ops(_op(cleanKey, 1), otherSalt), "clean pool");
+        assertEq(_rangesOf(a, nativeKey).length, 0, "another pool's list was written");
+        _assertClean(a);
+    }
+
+    /// @notice Removing and collecting through the recording entry point record nothing, even of a range
+    /// never recorded, and delete nothing, even a range they empty; plain modifyLiquidityV4 records nothing
+    function test_recording_removeCollectAndPlainCallsRecordNothing() public {
+        _viaExecutor(a, _ops(_op(cleanKey, 10e18)), 0);
+        _viaExecutorRecording(a, _ops(_op(cleanKey, 0), _op(cleanKey, -10e18)), 0);
+        assertEq(_rangesOf(a, cleanKey).length, 0, "something was recorded");
+
+        _viaExecutorRecording(a, _ops(_op(cleanKey, 10e18)), 0);
+        _viaExecutorRecording(a, _ops(_op(cleanKey, -10e18)), 0);
+        _assertRanges(_rangesOf(a, cleanKey), _ops(_op(cleanKey, 1)), "a remove deleted a range");
+
+        // Collecting from a range that still holds liquidity does not list it, and cleans up nothing
+        _viaExecutor(a, _ops(_op(cleanKey, -1200, 1200, 10e18)), 0);
+        _viaExecutorRecording(a, _ops(_op(cleanKey, -1200, 1200, 0)), 0);
+        _assertRanges(_rangesOf(a, cleanKey), _ops(_op(cleanKey, 1)), "a collect was recorded, or cleaned up");
+        _assertClean(a);
+    }
+
+    /// @notice A recording add deletes the ranges of that pool's list that hold no liquidity, whatever
+    /// emptied them, and lists a deleted range again when it is added to again. Another pool's list is
+    /// left alone.
+    function test_addWithRecording_deletesEmptyRangesOfThePool() public {
+        V4LiquidityOp memory wide = _op(cleanKey, -1200, 1200, 10e18);
+        V4LiquidityOp memory salted = _salted(_op(cleanKey, 10e18), 1);
+        V4LiquidityOp memory narrow = _op(cleanKey, -60, 60, 10e18);
+        V4LiquidityOp memory native = _op(nativeKey, 10e18);
+        _viaExecutorRecording(a, _ops3(_op(cleanKey, 10e18), wide, salted), 0);
+        _viaExecutorRecording(a, _ops(native), 50 ether);
+
+        // Emptied with plain modifyLiquidityV4: the list does not see it until the next recording add
+        _viaExecutor(a, _ops(_op(cleanKey, -1200, 1200, -10e18), _op(nativeKey, -10e18)), 0);
+        _assertRanges(_rangesOf(a, cleanKey), _ops3(_op(cleanKey, 1), wide, salted), "before");
+
+        vm.expectEmit(true, true, false, true, address(liq));
+        emit PositionRecorder.RangeDeleted(address(a.safe), keccak256(abi.encode(cleanKey)), -1200, 1200, bytes32(0));
+        vm.expectEmit(true, true, false, true, address(liq));
+        emit PositionRecorder.RangeRecorded(address(a.safe), keccak256(abi.encode(cleanKey)), -60, 60, bytes32(0));
+        _viaExecutorRecording(a, _ops(narrow), 0);
+        _assertRanges(_rangesOf(a, cleanKey), _ops3(_op(cleanKey, 1), salted, narrow), "the empty one deleted");
+        _assertRanges(_rangesOf(a, nativeKey), _ops(native), "the other pool's list was cleaned");
+
+        // Same salt-less range, other salt: only the emptied one goes. Then the deleted range again.
+        _viaExecutor(a, _ops(_salted(_op(cleanKey, -10e18), 1)), 0);
+        _viaExecutorRecording(a, _ops(_op(cleanKey, 1e18)), 0);
+        _assertRanges(_rangesOf(a, cleanKey), _ops(_op(cleanKey, 1), narrow), "the salted one deleted");
+        _viaExecutorRecording(a, _ops(wide), 0);
+        _assertRanges(_rangesOf(a, cleanKey), _ops3(_op(cleanKey, 1), narrow, wide), "listed again");
+        _assertClean(a);
+    }
+
+    /// @notice One batch: the cleanup sees the positions as the whole batch left them. A range emptied
+    /// earlier in the batch is deleted; a range added to and then emptied in the same batch is not listed.
+    function test_addWithRecording_cleanupSeesTheWholeBatch() public {
+        V4LiquidityOp memory wide = _op(cleanKey, -1200, 1200, 10e18);
+        _viaExecutorRecording(a, _ops(_op(cleanKey, 10e18)), 0);
+
+        // A rebalance: exit one range, enter another
+        _viaExecutorRecording(a, _ops(_op(cleanKey, -10e18), wide), 0);
+        _assertRanges(_rangesOf(a, cleanKey), _ops(wide), "after the rebalance");
+
+        // In and out of a range within one call
+        _viaExecutorRecording(a, _ops(_op(cleanKey, 10e18), _op(cleanKey, -10e18)), 0);
+        _assertRanges(_rangesOf(a, cleanKey), _ops(wide), "an emptied range was listed");
+
+        // ... including one already listed
+        _viaExecutorRecording(a, _ops(_op(cleanKey, -1200, 1200, 1e18), _op(cleanKey, -1200, 1200, -11e18)), 0);
+        assertEq(_rangesOf(a, cleanKey).length, 0, "an emptied range stayed listed");
+        _assertClean(a);
+    }
+
+    /// @notice A call that fails records nothing: an add over its limit, an add on a pool the vault
+    /// deregistered (alongside a valid add), an expired deadline
+    function test_addWithRecording_failedCallRecordsNothing() public {
+        V4LiquidityOp memory tooDear = _op(cleanKey, 10e18);
+        tooDear.amount0Limit = 1e17;
+        vm.expectRevert(IProxyErrors.TooMuchRequested.selector);
+        _asVaultRecording(a, _ops(tooDear));
+
+        _deregister(a, nativeKey);
+        vm.expectRevert(IProxyErrors.PoolNotAllowed.selector);
+        _asVaultRecording(a, _ops(_op(cleanKey, 10e18), _op(nativeKey, 10e18)));
+
+        vm.warp(1000);
+        vm.prank(address(a.safe));
+        vm.expectRevert(IProxyErrors.TransactionTooOld.selector);
+        liq.modifyLiquidityV4WithRecording(_ops(_op(cleanKey, 10e18)), 999);
+
+        assertEq(_rangesOf(a, cleanKey).length, 0, "a failed call was recorded");
+        assertEq(_rangesOf(a, nativeKey).length, 0, "a failed call was recorded");
+    }
+
+    /// @notice Lists belong to the vault that added the liquidity, and another vault's cleanup leaves
+    /// them alone
+    function test_addWithRecording_recordsForTheCallingVaultOnly() public {
+        Vault memory b = _newVault("B");
+        _viaExecutorRecording(a, _ops(_op(cleanKey, 10e18)), 0);
+        _viaExecutorRecording(a, _ops(_op(cleanKey, -10e18)), 0); // vault A's range is now empty
+
+        _viaExecutorRecording(b, _ops(_op(cleanKey, 10e18)), 0);
+        _assertRanges(_rangesOf(a, cleanKey), _ops(_op(cleanKey, 1)), "vault A's list");
+        _assertRanges(_rangesOf(b, cleanKey), _ops(_op(cleanKey, 1)), "vault B's list");
+        assertEq(liq.rangesOf(b.executor, keccak256(abi.encode(cleanKey))).length, 0, "the executor got a record");
     }
 }

@@ -40,6 +40,7 @@ Everything in `test/` outside this directory is mock-based and runs offline with
 | `integration/V4Swap.t.sol` | V4 legs, native ETH (payable `swap`, paid from msg.value only, refunds of exactly the unspent msg.value; force-fed ETH is neither spent nor refunded), hooks that cannot be encoded, the unlock callback |
 | `integration/SwapSemantics.t.sol` | Edge behaviour: non-standard tokens (USDT, fee-on-transfer), mint slippage, exact-output fills |
 | `integration/BatchSwap.t.sol` | Multi-leg `swap`: V3 + V4 legs in one unlock, routes through every hand-off (PARK/HELD, native ETH in the middle); equivalence, atomicity, nothing runs unless every leg passes, native-input legs share one msg.value, payer |
+| `integration/Recording.t.sol` | `mintWithRecording` and `modifyLiquidityV4WithRecording` on the live USDC/WETH 0.05% V3 pool and the ETH/USDC V4 pool: ranges listed per vault and pool, empty ones deleted by the next recording add (a burnt V3 range still owing tokens is kept). Checks the proxy's reads of `positions()` and of the deployed PoolManager's storage |
 | `integration/ShareSplit.t.sol` | Splitting a parked token (`HELD \| SHARE`) across live pools: every order of versions, USDT, native ETH, partial fills, random shares; each compared with the same swaps made one by one |
 
 `security/Authorisation.t.sol` is the one to read first — it states the invariant the whole design

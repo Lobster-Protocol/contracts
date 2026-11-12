@@ -5,6 +5,7 @@ import "forge-std/Test.sol";
 
 import {LobsterProxy} from "../src/LobsterProxy.sol";
 import {PoolRegistry} from "../src/base/PoolRegistry.sol";
+import {PositionRecorder, Range} from "../src/base/PositionRecorder.sol";
 import {UniswapSwapProxy} from "../src/UniswapSwapProxy.sol";
 import {UniswapV3MintProxy} from "../src/UniswapV3MintProxy.sol";
 import {UniswapV4LiquidityProxy, V4LiquidityOp} from "../src/UniswapV4LiquidityProxy.sol";
@@ -352,17 +353,19 @@ contract LobsterProxyTest is Test {
         lobster.swap(data);
     }
 
-    /// @dev Calldata for each of the three checked V3 entry points: mint, and one-leg swaps, exact
-    /// input and exact output. Only mint has a recipient (`to`); a swap leg cannot name one.
-    function _calls(uint24 fee, address to) internal view returns (bytes[3] memory c) {
-        c[0] = abi.encodeCall(LobsterProxy.mint, (_mintParams(fee, to)));
+    /// @dev Calldata for each of the four checked V3 entry points: mint, one-leg swaps, exact input and
+    /// exact output, and mintWithRecording. Only the mints have a recipient (`to`); a swap leg cannot name
+    /// one.
+    function _calls(uint24 fee, address to) internal view returns (bytes[4] memory c) {
+        c[0] = abi.encodeCall(UniswapV3MintProxy.mint, (_mintParams(fee, to)));
         c[1] = _swapCall(_legs(_exactIn(true, fee)));
         c[2] = _swapCall(_legs(_exactOut(true, fee, 1e18)));
+        c[3] = abi.encodeCall(UniswapV3MintProxy.mintWithRecording, (_mintParams(fee, to)));
     }
 
     /// @dev Expects every checked entry point, called by `caller`, to revert with `reason`
     function _expectAllRevert(address caller, uint24 fee, address to, bytes4 reason) internal {
-        bytes[3] memory c = _calls(fee, to);
+        bytes[4] memory c = _calls(fee, to);
         for (uint256 i = 0; i < c.length; i++) {
             vm.prank(caller);
             (bool ok, bytes memory ret) = address(lobster).call(c[i]);
@@ -436,13 +439,15 @@ contract LobsterProxyTest is Test {
     }
 
     /// @dev LobsterProxy's whole external ABI, as `forge inspect LobsterProxy methodIdentifiers` lists
-    /// it: 20 functions, and no receive or fallback
-    function _abi() internal pure returns (bytes4[20] memory) {
+    /// it: 23 functions, and no receive or fallback
+    function _abi() internal pure returns (bytes4[23] memory) {
         return [
             // fund-moving entry points (test_noUncheckedEntryPoints)
             UniswapSwapProxy.swap.selector,
-            LobsterProxy.mint.selector,
+            UniswapV3MintProxy.mint.selector,
             UniswapV4LiquidityProxy.modifyLiquidityV4.selector,
+            UniswapV3MintProxy.mintWithRecording.selector,
+            UniswapV4LiquidityProxy.modifyLiquidityV4WithRecording.selector,
             // admin: the caller's own entries (test_noUncheckedEntryPoints_adminFunctionsOnlyWriteTheCaller)
             PoolRegistry.setPools.selector,
             PoolRegistry.setPriceBand.selector,
@@ -462,7 +467,8 @@ contract LobsterProxyTest is Test {
             PoolRegistry.priceBandOf.selector,
             PoolRegistry.v3Key.selector,
             PoolRegistry.v4Key.selector,
-            UniswapV4LiquidityProxy.v4RolesOf.selector
+            UniswapV4LiquidityProxy.v4RolesOf.selector,
+            PositionRecorder.rangesOf.selector
         ];
     }
 
@@ -1014,7 +1020,8 @@ contract LobsterProxyTest is Test {
     /// @notice Every fund-moving entry point of the new ABI (see `_abi`) is a checked one: a caller
     /// that registered nothing (vault B) is refused by `swap` for every kind of leg (V3 and V4, exact
     /// input and output, with a price limit, native ETH in and out with ETH attached, and PARK/HELD
-    /// chains V3->V3, V4->V4 and V3->V4), by `mint`, and by `modifyLiquidityV4` (Roles not configured;
+    /// chains V3->V3, V4->V4 and V3->V4), by `mint` and `mintWithRecording`, and by `modifyLiquidityV4`
+    /// and `modifyLiquidityV4WithRecording` (Roles not configured;
     /// then, once configured, an add on a pool it has no PERMISSION_MINT for), before anything runs:
     /// no pool or PoolManager is called and no token moves, not even inside the reverted calls. The
     /// rest of the ABI: the other test_noUncheckedEntryPoints_* tests and test_callbacksCannotBeForged.
@@ -1076,6 +1083,9 @@ contract LobsterProxyTest is Test {
         vm.prank(vaultB);
         vm.expectRevert(IProxyErrors.PoolNotAllowed.selector);
         lobster.mint(_mintParams(FEE, vaultB));
+        vm.prank(vaultB);
+        vm.expectRevert(IProxyErrors.PoolNotAllowed.selector);
+        lobster.mintWithRecording(_mintParams(FEE, vaultB));
 
         // V4 liquidity: refused before anything runs for a vault that has not configured its Roles
         // modifier, and then, configured, for an add on a pool it has no PERMISSION_MINT for (exits
@@ -1084,10 +1094,20 @@ contract LobsterProxyTest is Test {
         vm.expectRevert(IProxyErrors.V4RolesNotSet.selector);
         lobster.modifyLiquidityV4{value: 1e18}(add, block.timestamp);
         vm.prank(vaultB);
+        vm.expectRevert(IProxyErrors.V4RolesNotSet.selector);
+        lobster.modifyLiquidityV4WithRecording{value: 1e18}(add, block.timestamp);
+        vm.prank(vaultB);
         lobster.setV4Roles(address(rolesB), keccak256("vault B role"));
         vm.prank(vaultB);
         vm.expectRevert(IProxyErrors.PoolNotAllowed.selector);
         lobster.modifyLiquidityV4{value: 1e18}(add, block.timestamp);
+        vm.prank(vaultB);
+        vm.expectRevert(IProxyErrors.PoolNotAllowed.selector);
+        lobster.modifyLiquidityV4WithRecording{value: 1e18}(add, block.timestamp);
+        assertEq(lobster.rangesOf(vaultB, _key(FEE)).length, 0, "a refused mint recorded a range");
+        assertEq(
+            lobster.rangesOf(vaultB, keccak256(abi.encode(add[0].key))).length, 0, "a refused add recorded a range"
+        );
 
         _assertUnchanged(beforeA, _balances(vaultA), "vault A");
         _assertUnchanged(beforeB, _balances(vaultB), "vault B");
@@ -1149,7 +1169,7 @@ contract LobsterProxyTest is Test {
     /// @notice Everything else in the ABI is read-only: each view answers a static call from anyone,
     /// so none of them can write state or move funds
     function test_noUncheckedEntryPoints_viewsAreReadOnly() public {
-        bytes[10] memory views = [
+        bytes[11] memory views = [
             abi.encodeCall(IProxyGetters.PERMISSION_MINT, ()),
             abi.encodeCall(IProxyGetters.PERMISSION_SWAP, ()),
             abi.encodeCall(IProxyGetters.POOL_MANAGER, ()),
@@ -1159,7 +1179,8 @@ contract LobsterProxyTest is Test {
             abi.encodeCall(PoolRegistry.priceBandOf, (vaultA, _key(FEE))),
             abi.encodeCall(PoolRegistry.v3Key, (_pool(FEE))),
             abi.encodeCall(PoolRegistry.v4Key, (_v4PoolKey(address(token0), address(token1)))),
-            abi.encodeCall(UniswapV4LiquidityProxy.v4RolesOf, (vaultA))
+            abi.encodeCall(UniswapV4LiquidityProxy.v4RolesOf, (vaultA)),
+            abi.encodeCall(PositionRecorder.rangesOf, (vaultA, _key(FEE)))
         ];
         vm.startPrank(makeAddr("attacker"));
         for (uint256 i = 0; i < views.length; i++) {
@@ -1270,7 +1291,7 @@ contract LobsterProxyTest is Test {
     )
         public
     {
-        bytes4[20] memory known = _abi();
+        bytes4[23] memory known = _abi();
         for (uint256 i = 0; i < known.length; i++) {
             vm.assume(selector != known[i]);
         }
@@ -1524,23 +1545,27 @@ contract LobsterProxyTest is Test {
         SwapCalldata.Leg memory spendParked = _held(_v3(evil, address(token0), FEE, false, 0, 0));
         bytes memory locked = abi.encodeWithSelector(IProxyErrors.ReentrancyGuardReentrantCall.selector);
 
-        calls = new bytes[](9);
-        reverts = new bytes[](9);
+        calls = new bytes[](11);
+        reverts = new bytes[](11);
         calls[0] = abi.encodeCall(PoolRegistry.setPools, (keys, perms));
         calls[1] = abi.encodeCall(PoolRegistry.setPriceBand, (keys[0], TickMath.MIN_TICK, TickMath.MAX_TICK));
         calls[2] = abi.encodeCall(UniswapV4LiquidityProxy.setV4Roles, (address(0), bytes32(0)));
         calls[3] = _swapCall(_legs(spendParked));
-        calls[4] = abi.encodeCall(LobsterProxy.mint, (_mintParams(FEE, evil)));
+        calls[4] = abi.encodeCall(UniswapV3MintProxy.mint, (_mintParams(FEE, evil)));
         calls[5] = abi.encodeCall(UniswapV4LiquidityProxy.modifyLiquidityV4, (new V4LiquidityOp[](0), block.timestamp));
-        for (uint256 i = 0; i < 6; i++) {
+        calls[6] = abi.encodeCall(UniswapV3MintProxy.mintWithRecording, (_mintParams(FEE, evil)));
+        calls[7] = abi.encodeCall(
+            UniswapV4LiquidityProxy.modifyLiquidityV4WithRecording, (new V4LiquidityOp[](0), block.timestamp)
+        );
+        for (uint256 i = 0; i < 8; i++) {
             reverts[i] = locked;
         }
-        calls[6] = abi.encodeCall(
+        calls[8] = abi.encodeCall(
             UniswapSwapProxy.uniswapV3SwapCallback,
             (1e18, -1e18, abi.encodePacked(address(token0), uint8(0), uint256(0)))
         );
-        reverts[6] = abi.encodeWithSelector(IProxyErrors.UnexpectedCallback.selector);
-        calls[7] = abi.encodeCall(
+        reverts[8] = abi.encodeWithSelector(IProxyErrors.UnexpectedCallback.selector);
+        calls[9] = abi.encodeCall(
             UniswapV3MintProxy.uniswapV3MintCallback,
             (
                 1e18,
@@ -1550,9 +1575,9 @@ contract LobsterProxyTest is Test {
                 )
             )
         );
-        reverts[7] = ""; // CallbackValidation's bare require: not the pool
-        calls[8] = abi.encodeCall(PoolManagerBase.unlockCallback, (bytes.concat(bytes1(0x01), new bytes(64))));
-        reverts[8] = abi.encodeWithSelector(IProxyErrors.NotPoolManager.selector);
+        reverts[9] = ""; // CallbackValidation's bare require: not the pool
+        calls[10] = abi.encodeCall(PoolManagerBase.unlockCallback, (bytes.concat(bytes1(0x01), new bytes(64))));
+        reverts[10] = abi.encodeWithSelector(IProxyErrors.NotPoolManager.selector);
     }
 
     function _assertEveryAttemptFailed(ReenterOnTransfer evil, bytes[] memory reverts) internal view {
@@ -1590,8 +1615,8 @@ contract LobsterProxyTest is Test {
     }
 
     /// @notice No entry point is reachable mid-swap: a token delivered to the vault in the middle of a
-    /// swap calls every function that moves funds or writes state (swap, mint, modifyLiquidityV4,
-    /// setPools, setPriceBand, setV4Roles) and each hits the lock; the three callbacks refuse it. The
+    /// swap calls every function that moves funds or writes state (swap, mint, modifyLiquidityV4, their
+    /// recording variants, setPools, setPriceBand, setV4Roles) and each hits the lock; the three callbacks refuse it. The
     /// swap itself completes.
     function test_reentrancy_noEntryPointIsReachableMidSwap() public {
         ReenterOnTransfer evil = _evilPool();
@@ -1763,6 +1788,273 @@ contract LobsterProxyTest is Test {
         lobster.mint(_mintParams(FEE, vaultA));
     }
 
+    // --- recording mints -------------------------------------------------------
+
+    /// @dev The liquidity `owner` holds in the FEE pool over the range, as the pool itself reports it
+    function _v3Liquidity(address owner, int24 lower, int24 upper) internal view returns (uint128 liquidity) {
+        (liquidity,,,,) = IUniswapV3PoolMinimal(_pool(FEE)).positions(keccak256(abi.encodePacked(owner, lower, upper)));
+    }
+
+    function _mintWide(address vault, int24 lower, int24 upper) internal {
+        MintParams memory p = _mintParams(FEE, vault);
+        (p.tickLower, p.tickUpper) = (lower, upper);
+        vm.prank(vault);
+        lobster.mintWithRecording(p);
+    }
+
+    /// @dev The vault burns all its liquidity over the range on the FEE pool, directly, as it exits a V3
+    /// position: the liquidity is gone, the tokens stay owed to it until it collects
+    function _burnAll(address vault, int24 lower, int24 upper) internal {
+        uint128 liquidity = _v3Liquidity(vault, lower, upper);
+        vm.prank(vault);
+        IUniswapV3PoolMinimal(_pool(FEE)).burn(lower, upper, liquidity);
+    }
+
+    function _collectAll(address vault, int24 lower, int24 upper) internal {
+        vm.prank(vault);
+        IUniswapV3PoolMinimal(_pool(FEE)).collect(vault, lower, upper, type(uint128).max, type(uint128).max);
+    }
+
+    /// @dev Exactly `expected` (lower, upper pairs), in any order, salt 0
+    function _assertRanges(address vault, bytes32 key, int24[2][] memory expected, string memory what) internal view {
+        Range[] memory ranges = lobster.rangesOf(vault, key);
+        assertEq(ranges.length, expected.length, string.concat(what, ": number of ranges"));
+        for (uint256 i = 0; i < expected.length; i++) {
+            uint256 found = 0;
+            for (uint256 j = 0; j < ranges.length; j++) {
+                if (ranges[j].tickLower == expected[i][0] && ranges[j].tickUpper == expected[i][1]) found++;
+            }
+            assertEq(found, 1, string.concat(what, ": range ", vm.toString(i), " not listed exactly once"));
+        }
+        for (uint256 j = 0; j < ranges.length; j++) {
+            assertEq(ranges[j].salt, bytes32(0), string.concat(what, ": a V3 range has no salt"));
+        }
+    }
+
+    function _r(int24 lower, int24 upper) internal pure returns (int24[2][] memory r) {
+        r = new int24[2][](1);
+        r[0] = [lower, upper];
+    }
+
+    function _r(int24 l0, int24 u0, int24 l1, int24 u1) internal pure returns (int24[2][] memory r) {
+        r = new int24[2][](2);
+        (r[0], r[1]) = ([l0, u0], [l1, u1]);
+    }
+
+    function _r(int24 l0, int24 u0, int24 l1, int24 u1, int24 l2, int24 u2)
+        internal
+        pure
+        returns (int24[2][] memory r)
+    {
+        r = new int24[2][](3);
+        (r[0], r[1], r[2]) = ([l0, u0], [l1, u1], [l2, u2]);
+    }
+
+    function _noRecordingLogs(Vm.Log[] memory logs, string memory what) internal pure {
+        for (uint256 i = 0; i < logs.length; i++) {
+            assertTrue(logs[i].topics[0] != PositionRecorder.RangeRecorded.selector, string.concat(what, ": recorded"));
+            assertTrue(logs[i].topics[0] != PositionRecorder.RangeDeleted.selector, string.concat(what, ": deleted"));
+        }
+    }
+
+    /// @notice mintWithRecording mints exactly what mint mints, to the caller, and lists the range under
+    /// the caller and the pool's registry key, emitting RangeRecorded
+    function test_mintWithRecording_mintsLikeMintAndRecordsTheRange() public {
+        _set(vaultA, _key(FEE), MINT);
+        uint256 snap = vm.snapshotState();
+        vm.prank(vaultA);
+        (uint256 plain0, uint256 plain1) = lobster.mint(_mintParams(FEE, vaultA));
+        uint128 plainLiquidity = _v3Liquidity(vaultA, -600, 600);
+        vm.revertToStateAndDelete(snap);
+
+        vm.expectEmit(true, true, false, true, address(lobster));
+        emit PositionRecorder.RangeRecorded(vaultA, _key(FEE), -600, 600, bytes32(0));
+        vm.prank(vaultA);
+        (uint256 amount0, uint256 amount1) = lobster.mintWithRecording(_mintParams(FEE, vaultA));
+
+        assertEq(amount0, plain0, "amount0 differs from mint");
+        assertEq(amount1, plain1, "amount1 differs from mint");
+        assertGt(plainLiquidity, 0, "test bug: nothing minted");
+        assertEq(_v3Liquidity(vaultA, -600, 600), plainLiquidity, "the vault does not own the same position");
+        _assertRanges(vaultA, _key(FEE), _r(-600, 600), "the range");
+        _assertProxyHoldsNothing();
+    }
+
+    /// @notice A range is listed once, however often liquidity is added to it; another range on the same
+    /// pool joins that pool's list, a range on another pool goes into that pool's list
+    function test_mintWithRecording_eachRangeOnce_perPool() public {
+        _set(vaultA, _key(FEE), MINT);
+        _set(vaultA, _key(OTHER_FEE), MINT);
+
+        vm.prank(vaultA);
+        lobster.mintWithRecording(_mintParams(FEE, vaultA));
+        uint128 once = _v3Liquidity(vaultA, -600, 600);
+        vm.recordLogs();
+        vm.prank(vaultA);
+        lobster.mintWithRecording(_mintParams(FEE, vaultA)); // the same range again
+        _noRecordingLogs(vm.getRecordedLogs(), "the same range again");
+        _mintWide(vaultA, -1200, 1200);
+        vm.prank(vaultA);
+        lobster.mintWithRecording(_mintParams(OTHER_FEE, vaultA));
+
+        assertEq(_v3Liquidity(vaultA, -600, 600), 2 * once, "the second mint did not add to the position");
+        _assertRanges(vaultA, _key(FEE), _r(-600, 600, -1200, 1200), "FEE pool");
+        _assertRanges(vaultA, _key(OTHER_FEE), _r(-600, 600), "OTHER_FEE pool");
+    }
+
+    /// @notice A recording mint deletes the ranges of that pool's list that are empty: no liquidity and
+    /// nothing left to collect. A burnt range whose tokens are still owed stays; it goes once collected.
+    /// A deleted range minted again is listed again.
+    function test_mintWithRecording_deletesEmptyRangesOfThePool() public {
+        _set(vaultA, _key(FEE), MINT);
+        _mintWide(vaultA, -600, 600);
+        _mintWide(vaultA, -1200, 1200);
+        _mintWide(vaultA, -1800, 1800);
+
+        _burnAll(vaultA, -600, 600); // burnt, not collected: tokens still owed
+        _burnAll(vaultA, -1200, 1200);
+        _collectAll(vaultA, -1200, 1200); // empty
+
+        // Nothing is deleted until the next recording mint on the pool
+        _assertRanges(vaultA, _key(FEE), _r(-600, 600, -1200, 1200, -1800, 1800), "before");
+
+        vm.expectEmit(true, true, false, true, address(lobster));
+        emit PositionRecorder.RangeDeleted(vaultA, _key(FEE), -1200, 1200, bytes32(0));
+        vm.expectEmit(true, true, false, true, address(lobster));
+        emit PositionRecorder.RangeRecorded(vaultA, _key(FEE), -2400, 2400, bytes32(0));
+        _mintWide(vaultA, -2400, 2400);
+        _assertRanges(vaultA, _key(FEE), _r(-600, 600, -1800, 1800, -2400, 2400), "the empty one deleted");
+
+        // Collected: now empty, deleted by a mint to a range already listed, which is not listed twice
+        _collectAll(vaultA, -600, 600);
+        vm.recordLogs();
+        _mintWide(vaultA, -1800, 1800);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        uint256 deleted = 0;
+        for (uint256 i = 0; i < logs.length; i++) {
+            assertTrue(logs[i].topics[0] != PositionRecorder.RangeRecorded.selector, "a listed range recorded again");
+            if (logs[i].topics[0] == PositionRecorder.RangeDeleted.selector) deleted++;
+        }
+        assertEq(deleted, 1, "one RangeDeleted");
+        _assertRanges(vaultA, _key(FEE), _r(-1800, 1800, -2400, 2400), "the collected one deleted");
+
+        // Every listed range emptied: the next mint leaves only its own
+        _burnAll(vaultA, -1800, 1800);
+        _collectAll(vaultA, -1800, 1800);
+        _burnAll(vaultA, -2400, 2400);
+        _collectAll(vaultA, -2400, 2400);
+        _mintWide(vaultA, -1200, 1200);
+        _assertRanges(vaultA, _key(FEE), _r(-1200, 1200), "minted again after its deletion");
+    }
+
+    /// @notice A burnt range with only one token left to collect is not empty: either token keeps it.
+    /// A range below the price holds only token1, one above it only token0.
+    function test_mintWithRecording_keepsARangeOwingEitherToken() public {
+        _set(vaultA, _key(FEE), MINT);
+        int24 tick = _tick(FEE);
+        int24 below = ((tick - 6000) / 60) * 60;
+        int24 above = ((tick + 6000) / 60) * 60;
+        _mintWide(vaultA, below - 600, below); // token1 only
+        _mintWide(vaultA, above, above + 600); // token0 only
+        _burnAll(vaultA, below - 600, below);
+        _burnAll(vaultA, above, above + 600);
+
+        (,,, uint128 owed0, uint128 owed1) =
+            IUniswapV3PoolMinimal(_pool(FEE)).positions(keccak256(abi.encodePacked(vaultA, below - 600, below)));
+        assertTrue(owed0 == 0 && owed1 > 0, "test bug: the range below owes more than token1");
+        (,,, owed0, owed1) =
+            IUniswapV3PoolMinimal(_pool(FEE)).positions(keccak256(abi.encodePacked(vaultA, above, above + 600)));
+        assertTrue(owed0 > 0 && owed1 == 0, "test bug: the range above owes more than token0");
+
+        _mintWide(vaultA, -600, 600);
+        _assertRanges(vaultA, _key(FEE), _r(below - 600, below, above, above + 600, -600, 600), "still owed");
+
+        _collectAll(vaultA, below - 600, below);
+        _collectAll(vaultA, above, above + 600);
+        _mintWide(vaultA, -600, 600);
+        _assertRanges(vaultA, _key(FEE), _r(-600, 600), "collected");
+    }
+
+    /// @notice The cleanup only looks at the list it writes to: the caller's, on the pool minted on. Plain
+    /// mint cleans up nothing.
+    function test_mintWithRecording_cleansOnlyTheCallersListForThePool() public {
+        _set(vaultA, _key(FEE), MINT);
+        _set(vaultB, _key(FEE), MINT);
+        _set(vaultA, _key(OTHER_FEE), MINT);
+        _mintWide(vaultA, -600, 600);
+        vm.prank(vaultA);
+        lobster.mintWithRecording(_mintParams(OTHER_FEE, vaultA));
+        _burnAll(vaultA, -600, 600);
+        _collectAll(vaultA, -600, 600);
+
+        vm.recordLogs();
+        vm.prank(vaultA);
+        lobster.mint(_mintParams(FEE, vaultA));
+        _noRecordingLogs(vm.getRecordedLogs(), "plain mint");
+        _mintWide(vaultB, -1200, 1200);
+        vm.prank(vaultA);
+        lobster.mintWithRecording(_mintParams(OTHER_FEE, vaultA));
+
+        // vault A's empty range is still there: no recording mint of vault A on that pool since
+        _assertRanges(vaultA, _key(FEE), _r(-600, 600), "vault A, FEE pool");
+        _assertRanges(vaultB, _key(FEE), _r(-1200, 1200), "vault B, FEE pool");
+        _assertRanges(vaultA, _key(OTHER_FEE), _r(-600, 600), "vault A, OTHER_FEE pool");
+    }
+
+    /// @notice A mint that fails records nothing, whatever the reason: no permission, no band, out of the
+    /// band, a recipient other than the caller, slippage, an expired deadline
+    function test_mintWithRecording_failedMintRecordsNothing() public {
+        MintParams memory other = _mintParams(FEE, vaultB);
+        MintParams memory slippage = _mintParams(FEE, vaultA);
+        slippage.amount0Min = type(uint128).max;
+        MintParams memory expired = _mintParams(FEE, vaultA);
+        expired.deadline = block.timestamp - 1;
+
+        vm.startPrank(vaultA);
+        vm.expectRevert(IProxyErrors.PoolNotAllowed.selector);
+        lobster.mintWithRecording(_mintParams(FEE, vaultA));
+        vm.stopPrank();
+
+        _set(vaultA, _key(FEE), MINT);
+        int24 tick = _tick(FEE);
+        _band(vaultA, tick + 1, tick + 100);
+        vm.prank(vaultA);
+        vm.expectRevert(IProxyErrors.PriceOutOfBand.selector);
+        lobster.mintWithRecording(_mintParams(FEE, vaultA));
+        _band(vaultA, 0, 0);
+        vm.prank(vaultA);
+        vm.expectRevert(IProxyErrors.PriceBandNotSet.selector);
+        lobster.mintWithRecording(_mintParams(FEE, vaultA));
+
+        _anyPrice(vaultA, _key(FEE));
+        vm.startPrank(vaultA);
+        vm.expectRevert(IProxyErrors.RecipientMustBeCaller.selector);
+        lobster.mintWithRecording(other);
+        vm.expectRevert(IProxyErrors.PriceSlippageCheck.selector);
+        lobster.mintWithRecording(slippage);
+        vm.expectRevert(IProxyErrors.TransactionTooOld.selector);
+        lobster.mintWithRecording(expired);
+        vm.stopPrank();
+
+        assertEq(lobster.rangesOf(vaultA, _key(FEE)).length, 0, "a failed mint was recorded");
+        assertEq(lobster.rangesOf(vaultB, _key(FEE)).length, 0, "the named recipient got a record");
+    }
+
+    /// @notice Plain mint records nothing; records belong to the vault that minted
+    function test_mintWithRecording_onlyRecordsForTheCaller() public {
+        _set(vaultA, _key(FEE), MINT);
+        _set(vaultB, _key(FEE), MINT);
+
+        vm.prank(vaultA);
+        lobster.mint(_mintParams(FEE, vaultA));
+        assertEq(lobster.rangesOf(vaultA, _key(FEE)).length, 0, "plain mint recorded");
+
+        vm.prank(vaultB);
+        lobster.mintWithRecording(_mintParams(FEE, vaultB));
+        assertEq(lobster.rangesOf(vaultA, _key(FEE)).length, 0, "vault B's mint was recorded for vault A");
+        assertEq(lobster.rangesOf(vaultB, _key(FEE)).length, 1, "vault B's record");
+    }
+
     // --- swaps -----------------------------------------------------------------
 
     /// @notice A registered pool without a band cannot be swapped on, exact input or output: refused
@@ -1770,7 +2062,7 @@ contract LobsterProxyTest is Test {
     function test_swap_withoutPriceBand_reverts() public {
         _set(vaultA, _key(FEE), SWAP);
         _band(vaultA, 0, 0);
-        bytes[3] memory c = _calls(FEE, vaultA);
+        bytes[4] memory c = _calls(FEE, vaultA);
         vm.expectCall(_pool(FEE), "", 0);
         // c[1] = exact input, c[2] = exact output
         for (uint256 i = 1; i < 3; i++) {
@@ -1797,7 +2089,7 @@ contract LobsterProxyTest is Test {
         _set(vaultA, _key(FEE), SWAP);
         int24 tick = _tick(FEE);
         _band(vaultA, tick + 1, tick + 1000);
-        bytes[3] memory c = _calls(FEE, vaultA);
+        bytes[4] memory c = _calls(FEE, vaultA);
         vm.expectCall(_pool(FEE), abi.encodeWithSelector(IUniswapV3PoolMinimal.swap.selector), 0);
         for (uint256 i = 1; i < 3; i++) {
             vm.prank(vaultA);
