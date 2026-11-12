@@ -3,6 +3,7 @@ pragma solidity >=0.8.27;
 
 import {PoolManagerBase} from "./base/PoolManagerBase.sol";
 import {PoolRegistry} from "./base/PoolRegistry.sol";
+import {PositionRecorder, Range} from "./base/PositionRecorder.sol";
 import {
     IPoolManagerMinimal,
     Currency,
@@ -66,8 +67,9 @@ struct V4LiquidityOp {
 /// - the vault approves this contract for the ERC20s it will provide as liquidity;
 /// - the vault's owners call `setV4Roles(modifier, roleKey)` from the Safe;
 /// - on the vault's Roles modifier (configured by the backend):
-///   - the executor's role: `allowFunction(this, modifyLiquidityV4)`, with Send allowed if the vault
-///     should pay native ETH. NEVER `setV4Roles`;
+///   - the executor's role: `allowFunction(this, modifyLiquidityV4)`, and the same for
+///     `modifyLiquidityV4WithRecording` if it is used, with Send allowed if the vault should pay
+///     native ETH. NEVER `setV4Roles`;
 ///   - this contract: enabled as a module (`enableModule`), and the only member of a dedicated role
 ///     (`assignRoles(this, [roleKey], [true])`) that allows exactly:
 ///     - `PoolManager.modifyLiquidity`, with a Custom condition pointing at this contract's {check};
@@ -76,7 +78,7 @@ struct V4LiquidityOp {
 ///       approval above) and `settleFor`.
 ///
 /// Abstract on purpose: this is a mixin combined into {LobsterProxy}. Deploy that rather than this.
-abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, ICustomCondition {
+abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, PositionRecorder, ICustomCondition {
     using BalanceDeltaLibrary for BalanceDelta;
 
     /// @dev Transient context of the operation in progress: keccak256("lobster.V4LiquidityProxy.context")
@@ -138,6 +140,35 @@ abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, ICus
         checkDeadline(deadline)
         returns (int256[] memory amounts0, int256[] memory amounts1)
     {
+        return _modifyLiquidityV4(ops, false);
+    }
+
+    /// @notice {modifyLiquidityV4}, which also records the range of every operation that adds
+    /// liquidity in the caller's list for that pool, and deletes the ranges of that list that are now
+    /// empty ({PositionRecorder}). Operations that remove or collect touch no list.
+    function modifyLiquidityV4WithRecording(
+        V4LiquidityOp[] calldata ops,
+        uint256 deadline
+    )
+        external
+        payable
+        nonReentrant
+        checkDeadline(deadline)
+        returns (int256[] memory amounts0, int256[] memory amounts1)
+    {
+        return _modifyLiquidityV4(ops, true);
+    }
+
+    /// @dev The body of both entry points. With `record`, records each add's range once every operation
+    /// has run and been settled, so the cleanup sees the positions as the batch left them, and before
+    /// the caller's change is refunded.
+    function _modifyLiquidityV4(
+        V4LiquidityOp[] calldata ops,
+        bool record
+    )
+        private
+        returns (int256[] memory amounts0, int256[] memory amounts1)
+    {
         // What the proxy held before msg.value arrived: no operation may spend it
         uint256 heldBefore = address(this).balance - msg.value;
         V4Roles memory roles = _v4Roles[msg.sender];
@@ -162,6 +193,20 @@ abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, ICus
         _setContext(address(0), address(0), bytes32(0), 0);
 
         (amounts0, amounts1) = abi.decode(result, (int256[], int256[]));
+
+        if (record) {
+            for (uint256 i = 0; i < ops.length; i++) {
+                V4LiquidityOp calldata op = ops[i];
+                if (op.liquidityDelta > 0) {
+                    _recordRange(
+                        msg.sender,
+                        keccak256(abi.encode(op.key)),
+                        Range({tickLower: op.tickLower, tickUpper: op.tickUpper, salt: op.salt}),
+                        _isEmptyV4
+                    );
+                }
+            }
+        }
 
         // Unspent msg.value is the caller's change: the PoolManager pays what the vault is owed to the
         // vault directly, never to the proxy (see {PoolManagerBase-_refundExcessNative})
@@ -313,6 +358,17 @@ abstract contract UniswapV4LiquidityProxy is PoolManagerBase, PoolRegistry, ICus
     }
 
     // forge-lint: disable-end(require-revert-in-loop, calls-loop)
+
+    /// @dev Whether the vault's position over `range` in the pool `poolId` holds no liquidity. A V4
+    /// position is paid all its fees whenever its liquidity changes, so one with none has nothing left
+    /// to collect either. Reads `pools[poolId].positions[positionKey].liquidity` (v4-core
+    /// `StateLibrary.getPositionLiquidity`: `positions` is at offset 6 of a pool's state, the position
+    /// key is `Position.calculatePositionKey`).
+    function _isEmptyV4(address vault, bytes32 poolId, Range memory range) private view returns (bool) {
+        bytes32 positionKey = keccak256(abi.encodePacked(vault, range.tickLower, range.tickUpper, range.salt));
+        bytes32 slot = keccak256(abi.encode(positionKey, uint256(_poolStateSlot(poolId)) + 6));
+        return uint128(uint256(POOL_MANAGER.extsload(slot))) == 0;
+    }
 
     function _addCurrency(address[] memory currencies, uint256 count, address currency) private pure returns (uint256) {
         for (uint256 i = 0; i < count; i++) {
