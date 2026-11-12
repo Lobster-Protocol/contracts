@@ -63,8 +63,10 @@ abstract contract UniswapV3MintProxy is UniswapV3ProxyBase, PoolRegistry, Positi
     function _isEmptyV3(address vault, bytes32 key, Range memory range) private view returns (bool) {
         // forge-lint: disable-next-line(unsafe-typecast)
         IUniswapV3PoolMinimal pool = IUniswapV3PoolMinimal(address(uint160(uint256(key))));
-        (uint128 liquidity,,, uint128 owed0, uint128 owed1) =
-            pool.positions(keccak256(abi.encodePacked(vault, range.tickLower, range.tickUpper)));
+        bytes32 positionKey = keccak256(abi.encodePacked(vault, range.tickLower, range.tickUpper));
+        // The two fee growth fields are not needed: fees are already in tokensOwed (see above)
+        // forge-lint: disable-next-line(unused-return)
+        (uint128 liquidity,,, uint128 owed0, uint128 owed1) = pool.positions(positionKey);
         return liquidity == 0 && owed0 == 0 && owed1 == 0;
     }
 

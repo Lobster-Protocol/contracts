@@ -35,8 +35,11 @@ abstract contract PositionRecorder {
         return _ranges[vault][key];
     }
 
-    // One read of the pool or the PoolManager per range in the list; any failure reverts the whole call
-    // forge-lint: disable-start(calls-loop)
+    // One read of the pool or the PoolManager per range in the list; any failure reverts the whole call.
+    // The events follow those reads, but `isEmpty` is `view`: compiled to STATICCALL, the callee can
+    // neither change state nor reenter, so nothing can reorder or fabricate these logs (and every entry
+    // point recording ranges is `nonReentrant`).
+    // forge-lint: disable-start(calls-loop, reentrancy-events)
     /// @dev Called once liquidity was added to `added`, on the pool `key`, for `vault`. Deletes every
     /// empty range of the list, then adds `added` unless it is already there or is empty itself (a V4
     /// batch can empty a range it added to). `isEmpty` tells whether a vault's range on a pool is empty.
@@ -70,7 +73,7 @@ abstract contract PositionRecorder {
         }
     }
 
-    // forge-lint: disable-end(calls-loop)
+    // forge-lint: disable-end(calls-loop, reentrancy-events)
 
     function _isSame(Range memory a, Range memory b) private pure returns (bool) {
         return a.tickLower == b.tickLower && a.tickUpper == b.tickUpper && a.salt == b.salt;

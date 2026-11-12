@@ -227,7 +227,7 @@ contract LobsterProxyTest is Test {
             amount0Min: 0,
             amount1Min: 0,
             recipient: to,
-            deadline: block.timestamp
+            deadline: vm.getBlockTimestamp()
         });
     }
 
