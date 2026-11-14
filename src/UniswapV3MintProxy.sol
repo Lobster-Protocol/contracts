@@ -38,7 +38,7 @@ abstract contract UniswapV3MintProxy is UniswapV3ProxyBase, PoolRegistry, Positi
         _recordRange(
             msg.sender,
             v3Key(pool),
-            Range({tickLower: params.tickLower, tickUpper: params.tickUpper, salt: bytes32(0)}),
+            Range({tickLower: params.tickLower, tickUpper: params.tickUpper, salt: V3_SALT}),
             _isEmptyV3
         );
     }
@@ -59,7 +59,7 @@ abstract contract UniswapV3MintProxy is UniswapV3ProxyBase, PoolRegistry, Positi
     /// @dev Whether the vault's position over `range` in the V3 pool `key` holds no liquidity and has
     /// nothing left to collect. Fees are moved into `tokensOwed` whenever the liquidity changes, and a
     /// position with no liquidity earns none, so these three say it all. `key` is a registry key the
-    /// vault minted on, so the pool is a genuine one; `range.salt` is always 0 for V3.
+    /// vault minted on, so the pool is a genuine one; `range.salt` is always {V3_SALT}.
     function _isEmptyV3(address vault, bytes32 key, Range memory range) private view returns (bool) {
         // forge-lint: disable-next-line(unsafe-typecast)
         IUniswapV3PoolMinimal pool = IUniswapV3PoolMinimal(address(uint160(uint256(key))));

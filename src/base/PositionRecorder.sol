@@ -5,7 +5,7 @@ pragma solidity >=0.8.27;
 struct Range {
     int24 tickLower;
     int24 tickUpper;
-    /// @dev The V4 position's salt. Always 0 for V3, whose positions have none.
+    /// @dev The V4 position's salt. Always {V3_SALT} for V3, whose positions have none.
     bytes32 salt;
 }
 
@@ -22,6 +22,10 @@ struct Range {
 /// until the next recording add on that pool. Lists are only ever written for the vault making the
 /// call.
 abstract contract PositionRecorder {
+    /// @dev The salt of every V3 range. Salts are a V4 concept (several positions of one owner over
+    /// the same range); a V3 position has none, so its range carries this placeholder.
+    bytes32 internal constant V3_SALT = bytes32(0);
+
     /// @dev Per vault, per registry key ({PoolRegistry}: a V3 pool's address left-padded with zeros, or
     /// a V4 PoolId), the ranges. Order is not meaningful and changes when one is deleted.
     mapping(address vault => mapping(bytes32 key => Range[])) private _ranges;
