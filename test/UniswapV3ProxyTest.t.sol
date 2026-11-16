@@ -216,7 +216,7 @@ contract UniswapV3ProxyTest is Test {
         });
 
         vm.prank(user);
-        (amount0, amount1) = proxy.mint(params);
+        (amount0, amount1) = proxy.mintUnchecked(params);
     }
 
     /// @dev Registers the V3 pool at `v3Pool` (deployed or not) for `who`'s swaps, with a price band
@@ -448,7 +448,7 @@ contract UniswapV3ProxyTest is Test {
         });
 
         vm.prank(user);
-        (uint256 amount0, uint256 amount1) = proxy.mint(params);
+        (uint256 amount0, uint256 amount1) = proxy.mintUnchecked(params);
 
         // Amounts match the precomputed expectation (rounding tolerance of 1 wei)
         assertApproxEqAbs(amount0, expectedAmt0, 1, "amount0 should match expected");
@@ -494,7 +494,7 @@ contract UniswapV3ProxyTest is Test {
         });
 
         vm.prank(user);
-        (uint256 amount0, uint256 amount1) = proxy.mint(params);
+        (uint256 amount0, uint256 amount1) = proxy.mintUnchecked(params);
 
         assertApproxEqAbs(amount0, expectedAmt0, 1);
         assertApproxEqAbs(amount1, expectedAmt1, 1);
@@ -526,7 +526,7 @@ contract UniswapV3ProxyTest is Test {
         });
 
         vm.prank(user);
-        (uint256 amount0, uint256 amount1) = proxy.mint(params);
+        (uint256 amount0, uint256 amount1) = proxy.mintUnchecked(params);
 
         assertApproxEqAbs(amount0, expectedAmt0, 1);
         assertApproxEqAbs(amount1, expectedAmt1, 1);
@@ -556,7 +556,7 @@ contract UniswapV3ProxyTest is Test {
         });
 
         vm.prank(user);
-        proxy.mint(params1);
+        proxy.mintUnchecked(params1);
 
         uint256 poolBal0After1 = token0.balanceOf(address(pool));
         uint256 poolBal1After1 = token1.balanceOf(address(pool));
@@ -580,7 +580,7 @@ contract UniswapV3ProxyTest is Test {
         });
 
         vm.prank(user);
-        (uint256 amount0Second, uint256 amount1Second) = proxy.mint(params2);
+        (uint256 amount0Second, uint256 amount1Second) = proxy.mintUnchecked(params2);
 
         // Second mint amounts match expected
         assertApproxEqAbs(amount0Second, expectedAmt0_2, 1);
@@ -622,7 +622,7 @@ contract UniswapV3ProxyTest is Test {
 
         vm.prank(user);
         vm.expectRevert(IProxyErrors.TransactionTooOld.selector);
-        proxy.mint(params);
+        proxy.mintUnchecked(params);
     }
 
     /// @notice A mint depositing less than amount0Min / amount1Min reverts
@@ -643,7 +643,7 @@ contract UniswapV3ProxyTest is Test {
 
         vm.prank(user);
         vm.expectRevert(IProxyErrors.PriceSlippageCheck.selector);
-        proxy.mint(params);
+        proxy.mintUnchecked(params);
     }
 
     /// @notice A position minted to address(0) could never be withdrawn: the harness refuses it
@@ -664,7 +664,7 @@ contract UniswapV3ProxyTest is Test {
 
         vm.prank(user);
         vm.expectRevert(UniswapV3ProxyHarness.InvalidRecipient.selector);
-        proxy.mint(params);
+        proxy.mintUnchecked(params);
     }
 
     /// @notice The caller, whom the mint callback charges, has not approved the harness: the callback
@@ -690,7 +690,7 @@ contract UniswapV3ProxyTest is Test {
 
         vm.prank(noApproval);
         vm.expectRevert(_stringError("STF"));
-        proxy.mint(params);
+        proxy.mintUnchecked(params);
     }
 
     /// @notice The caller approved the harness but cannot cover the deposit
@@ -720,7 +720,7 @@ contract UniswapV3ProxyTest is Test {
 
         vm.prank(poor);
         vm.expectRevert(_stringError("STF"));
-        proxy.mint(params);
+        proxy.mintUnchecked(params);
     }
 
     /// @notice A mint on a pair no pool exists for reverts
@@ -743,7 +743,7 @@ contract UniswapV3ProxyTest is Test {
 
         vm.prank(user);
         vm.expectRevert();
-        proxy.mint(params);
+        proxy.mintUnchecked(params);
     }
 
     // ===========================================================================
@@ -1191,7 +1191,7 @@ contract UniswapV3ProxyTest is Test {
             address(token0) < address(evil) ? (address(token0), address(evil)) : (address(evil), address(token0));
         token0.approve(address(proxy), type(uint256).max);
         evil.approve(address(proxy), type(uint256).max);
-        proxy.mint(
+        proxy.mintUnchecked(
             MintParams({
                 token0: a,
                 token1: b,
@@ -1413,7 +1413,7 @@ contract UniswapV3ProxyTest is Test {
         });
 
         vm.prank(user);
-        (uint256 amount0, uint256 amount1) = proxy.mint(params);
+        (uint256 amount0, uint256 amount1) = proxy.mintUnchecked(params);
 
         assertApproxEqAbs(amount0, expectedAmt0, 1);
         assertApproxEqAbs(amount1, expectedAmt1, 1);
@@ -1672,7 +1672,7 @@ contract UniswapV3ProxyTest is Test {
 
         vm.prank(user);
         vm.expectRevert(UniswapV3ProxyHarness.InvalidRecipient.selector);
-        proxy.mint(
+        proxy.mintUnchecked(
             MintParams({
                 token0: address(token0),
                 token1: address(token1),
@@ -1697,7 +1697,7 @@ contract UniswapV3ProxyTest is Test {
     /// with two direct calls on the pool. Not even the account that paid for it can.
     function testOnlyTheRecipientCanExitAPositionDirectlyOnThePool() public {
         vm.prank(user);
-        (uint256 paid0, uint256 paid1) = proxy.mint(
+        (uint256 paid0, uint256 paid1) = proxy.mintUnchecked(
             MintParams({
                 token0: address(token0),
                 token1: address(token1),
@@ -1823,7 +1823,7 @@ contract UniswapV3ProxyTest is Test {
 
         vm.prank(vault, user);
         vm.expectRevert(_stringError("STF"));
-        proxy.mint(params);
+        proxy.mintUnchecked(params);
 
         vm.startPrank(vault);
         token0.approve(address(proxy), type(uint256).max);
@@ -1833,7 +1833,7 @@ contract UniswapV3ProxyTest is Test {
         uint256 poolT1Before = token1.balanceOf(address(pool));
 
         vm.prank(vault, user);
-        (uint256 amount0, uint256 amount1) = proxy.mint(params);
+        (uint256 amount0, uint256 amount1) = proxy.mintUnchecked(params);
 
         assertGt(amount0, 0, "nothing was deposited: the test proves nothing");
         assertGt(amount1, 0, "nothing was deposited: the test proves nothing");
@@ -2275,7 +2275,7 @@ contract UniswapV3ProxyTest is Test {
         vm.startPrank(lp);
         token0.approve(address(proxy), type(uint256).max);
         token1.approve(address(proxy), type(uint256).max);
-        proxy.mint(_thinMintParams(-6000, 6000, 20e18, 20e18, lp));
+        proxy.mintUnchecked(_thinMintParams(-6000, 6000, 20e18, 20e18, lp));
         vm.stopPrank();
 
         _allow(user, address(thin));
@@ -2383,7 +2383,7 @@ contract UniswapV3ProxyTest is Test {
         _swap(attacker, buyOut);
         // Front-run 2: a tiny token1-only position far below fair price
         vm.prank(attacker);
-        proxy.mint(_thinMintParams(-30000, -29400, 0, 0.1e18, attacker));
+        proxy.mintUnchecked(_thinMintParams(-30000, -29400, 0, 0.1e18, attacker));
 
         uint256 victimBefore = token0.balanceOf(user);
         uint256 victimT1Before = token1.balanceOf(user);

@@ -8,7 +8,7 @@ import {MintParams} from "../../src/interfaces/uniswapV3/IUniswapV3MintCallback.
 /// @title Deployable V3 mint, without the registry, for tests
 /// @notice {LobsterProxy} only mints on pools a vault registered, with a price band, to the vault itself.
 /// This harness exposes the same mint body ({UniswapV3MintProxy-_mint}) and callback without those
-/// checks, so the vault suites (via TestHelper) and the V3 mint tests can seed and inspect positions on
+/// checks, as `mintUnchecked` (the inherited, checked `mint` and `mintWithRecording` are still there), so the vault suites (via TestHelper) and the V3 mint tests can seed and inspect positions on
 /// any pool, for any recipient.
 /// @dev Test-only. Not part of the deployed system.
 contract UniswapV3ProxyHarness is UniswapV3MintProxy {
@@ -17,7 +17,7 @@ contract UniswapV3ProxyHarness is UniswapV3MintProxy {
 
     constructor(address _uniV3Factory) UniswapV3ProxyBase(_uniV3Factory) {}
 
-    function mint(MintParams calldata params)
+    function mintUnchecked(MintParams calldata params)
         external
         nonReentrant
         checkDeadline(params.deadline)
